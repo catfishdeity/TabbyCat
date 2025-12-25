@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<tabData>
+    <bass>
+        <t v="0">
+            <s n="5" v="1"/>
+        </t>
+        <t v="2">
+            <s n="5" v="1"/>
+        </t>
+        <t v="4">
+            <s n="4" v="1"/>
+        </t>
+    </bass>
+    <guitar>
+        <t v="15">
+            <s n="4" v="2"/>
+            <s n="5" v="2"/>
+        </t>
+        <t v="18">
+            <s n="4" v="2"/>
+        </t>
+        <t v="20">
+            <s n="3" v="2"/>
+        </t>
+        <t v="24">
+            <s n="0" v="22"/>
+        </t>
+    </guitar>
+    <drum>
+        <t v="19">
+            <s n="1" v="S"/>
+        </t>
+        <t v="9">
+            <s n="3" v="K"/>
+        </t>
+        <t v="12">
+            <s n="3" v="K"/>
+        </t>
+        <t v="15">
+            <s n="3" v="K"/>
+        </t>
+    </drum>
+    <events>
+        <t v="0">
+            <s n="2">
+                <tempo v="120"/>
+            </s>
+        </t>
+        <t v="3">
+            <s n="0">
+                <timeSignature d="4" n="5"/>
+            </s>
+        </t>
+        <t v="23">
+            <s n="2">
+                <tempo v="114"/>
+            </s>
+        </t>
+    </events>
+</tabData>

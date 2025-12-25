@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<tabData>
+    <bass/>
+    <guitar/>
+    <acoustic/>
+    <drum/>
+    <events>
+        <t v="16">
+            <s n="0">
+                <timeSignature d="16" n="5"/>
+            </s>
+        </t>
+        <t v="31">
+            <s n="0">
+                <timeSignature d="4" n="4"/>
+            </s>
+        </t>
+    </events>
+</tabData>
