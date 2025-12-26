@@ -22,6 +22,7 @@ import java.awt.event.MouseMotionListener;
 import java.awt.geom.Path2D;
 import java.awt.geom.Rectangle2D;
 import java.io.File;
+import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -44,6 +45,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import javax.sound.midi.Instrument;
@@ -67,6 +69,7 @@ import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JSpinner;
 import javax.swing.JTextField;
@@ -74,6 +77,7 @@ import javax.swing.KeyStroke;
 import javax.swing.SpinnerNumberModel;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerFactory;
@@ -83,6 +87,7 @@ import javax.xml.transform.stream.StreamResult;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 
 import kitesequencer.events.ControlEvent;
 import kitesequencer.events.ControlEventType;
@@ -109,7 +114,10 @@ public class KiteTabSequencer {
 	
 	public static int scrollTimeMargin = 8;
 	
-	private PlaylistInputMode inputMode = PlaylistInputMode.NOTE_EDIT;
+	
+	
+	final AtomicReference<File> activeFile = new AtomicReference<>(null);
+	final AtomicBoolean fileHasBeenModified = new AtomicBoolean(false);
 	
 	final AtomicBoolean isPlaying = new AtomicBoolean(false);
 	final AtomicInteger playT = new AtomicInteger(0);
@@ -171,7 +179,6 @@ public class KiteTabSequencer {
 				continue;
 			}
 			else {
-//				/int t = playT.getAndIncrement();
 				int t = playT.getAndUpdate(i->i+1==repeatT.get()?stopT0.get():i+1);
 				Arrays.asList(eventCanvas,bassCanvas,guitarCanvas,acousticCanvas,drumCanvas).forEach(a->a.repaint());
 				
@@ -189,7 +196,7 @@ public class KiteTabSequencer {
 					
 					}
 				}); 
-				//Map<Integer, InputVal> bassMap = bassCanvas.data.getOrDefault(t, Collections.emptyMap());
+				
 				for (TabCanvas canvas : new TabCanvas[] {bassCanvas,acousticCanvas,guitarCanvas}) {
 					for (int row = 0 ; row < canvas.getRowCount(); row++) {
 						InputVal inputVal = canvas.getValueAt(t,row).orElse(InputVal.NIL);
@@ -220,6 +227,100 @@ public class KiteTabSequencer {
 	void repaintCanvases() {
 		Arrays.asList(navigationBar,guitarCanvas,acousticCanvas,drumCanvas,bassCanvas,eventCanvas)
 		.forEach(a->a.repaint()); 
+	}
+	File defaultPath = new File("scores");
+	
+	void saveActiveFile() {
+		if (!defaultPath.exists()) {
+			defaultPath.mkdir();
+		}
+		if (activeFile.get() != null) {
+			if (fileHasBeenModified.get()) {
+				try {
+					saveXML(activeFile.get());
+					fileHasBeenModified.set(false);
+					updateWindowTitle();
+				} catch (Exception ex) {
+					ex.printStackTrace();
+				}
+			}
+		} else {
+			JFileChooser chooser = new JFileChooser(defaultPath);			
+			String date = LocalDateTime.now(ZoneId.of("Z")).format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmm"));
+			chooser.setSelectedFile(new File(date+".xml"));
+			if (chooser.showSaveDialog(frame) == JFileChooser.APPROVE_OPTION) {
+				
+				try {
+					saveXML(chooser.getSelectedFile());
+					activeFile.set(chooser.getSelectedFile());
+					fileHasBeenModified.set(false);
+					updateWindowTitle();
+				} catch (Exception ex) {
+					ex.printStackTrace();					
+				}
+			}
+			
+		}
+	}
+	
+	void openFileDialog() {
+		File defaultPath = new File("scores");
+		if (!defaultPath.exists()) {
+			defaultPath.mkdir();
+		}
+		JFileChooser fileChooser = new JFileChooser(defaultPath);
+
+		if (fileChooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
+			//back up in case load fails or whatever
+			/*
+			Map<Integer,Map<Integer,ControlEvent>> backupEventData = 
+					eventCanvas.cloneDataMap();
+			Map<Integer,Map<Integer,InputVal>> backupBassData = 
+					bassCanvas.cloneDataMap();
+			Map<Integer,Map<Integer,InputVal>> backupGuitarData = 
+					guitarCanvas.cloneDataMap();
+			Map<Integer,Map<Integer,InputVal>> backupAcousticData = 
+					acousticCanvas.cloneDataMap();
+			Map<Integer,Map<Integer,DrumVal>> backupDrumData = 
+					drumCanvas.cloneDataMap();
+					*/
+			try {
+				loadXML(fileChooser.getSelectedFile());
+				activeFile.set(fileChooser.getSelectedFile());
+				fileHasBeenModified.set(false);
+				updateWindowTitle();
+			} catch (Exception ex) {
+				ex.printStackTrace();
+				/*
+				Arrays.asList(eventCanvas,bassCanvas,guitarCanvas,acousticCanvas,drumCanvas)
+				.forEach(a->a.data.clear());
+				eventCanvas.data.putAll(backupEventData);
+				bassCanvas.data.putAll(backupBassData);
+				guitarCanvas.data.putAll(backupGuitarData);
+				acousticCanvas.data.putAll(backupAcousticData);
+				drumCanvas.data.putAll(backupDrumData);
+				*/
+			}
+		}
+	}
+	
+	void updateWindowTitle() {
+		StringBuilder sb = new StringBuilder();
+		sb.append("KiteTabSequencer2000");
+		if (activeFile.get() == null) {
+			if (fileHasBeenModified.get()) {
+				sb.append(" (unsaved)");
+			} 
+		} else {
+			sb.append(" (");
+			sb.append(activeFile.get().getName());
+			if (fileHasBeenModified.get()) {
+				sb.append(" * ");				
+			}
+			sb.append(")");
+		}
+		frame.setTitle(sb.toString());
+		
 	}
 	
 	void adjustRepeatT() {
@@ -326,7 +427,12 @@ public class KiteTabSequencer {
 	}
 	
 	public void backspace() {
-		System.out.println("backspace");		
+		selectedCanvas.get().removeSelectedValue();
+		if (!fileHasBeenModified.get()) {
+			fileHasBeenModified.set(true);
+			updateWindowTitle();
+		}
+		selectedCanvas.get().repaint();
 	}
 	
 	public void handleNumericInput(int i) {
@@ -339,10 +445,18 @@ public class KiteTabSequencer {
 				inputValO.flatMap(a->InputVal.lookup(a.getToken()+i))
 				.ifPresentOrElse(a->{
 					canvas.setSelectedValue(a);
+					if (!fileHasBeenModified.get()) {
+						fileHasBeenModified.set(true);
+						updateWindowTitle();
+					}
 					canvas.repaint();
 				},()->{
 					InputVal.lookup(""+i).ifPresent(a -> {
 						canvas.setSelectedValue(a);
+						if (!fileHasBeenModified.get()) {
+							fileHasBeenModified.set(true);
+							updateWindowTitle();
+						}
 						canvas.repaint();
 					});
 				});
@@ -350,6 +464,10 @@ public class KiteTabSequencer {
 			} else {
 				InputVal.lookup(""+i).ifPresent(a -> {
 					canvas.setSelectedValue(a);
+					if (!fileHasBeenModified.get()) {
+						fileHasBeenModified.set(true);
+						updateWindowTitle();
+					}
 					canvas.repaint();
 				});
 			}
@@ -361,12 +479,24 @@ public class KiteTabSequencer {
 			switch (c) {
 			case 'T':
 				addTimeSignature();
+				if (!fileHasBeenModified.get()) {
+					fileHasBeenModified.set(true);
+					updateWindowTitle();
+				}
 				return;
 			case 'S':
 				addTempo();
+				if (!fileHasBeenModified.get()) {
+					fileHasBeenModified.set(true);
+					updateWindowTitle();
+				}
 				return;
 			case 'N':
 				addStickyNote();
+				if (!fileHasBeenModified.get()) {
+					fileHasBeenModified.set(true);
+					updateWindowTitle();
+				}
 				return;
 			default:
 				
@@ -378,14 +508,26 @@ public class KiteTabSequencer {
 			switch (c) {
 			case 'B':
 				canvas.setSelectedValue(InputVal._b);
+				if (!fileHasBeenModified.get()) {
+					fileHasBeenModified.set(true);
+					updateWindowTitle();
+				}
 				canvas.repaint();
 				return;
 			case 'D':
 				canvas.setSelectedValue(InputVal._d);
+				if (!fileHasBeenModified.get()) {
+					fileHasBeenModified.set(true);
+					updateWindowTitle();
+				}
 				canvas.repaint();
 				return;
 			case 'E':
 				canvas.setSelectedValue(InputVal._e);
+				if (!fileHasBeenModified.get()) {
+					fileHasBeenModified.set(true);
+					updateWindowTitle();
+				}
 				canvas.repaint();
 				return;
 			}
@@ -394,9 +536,12 @@ public class KiteTabSequencer {
 			
 			DrumTabCanvas canvas = (DrumTabCanvas) selectedCanvas.get();
 			DrumVal.lookup(String.valueOf(c))
-			.ifPresent(val -> {
-				System.out.println("adding "+val+"  at time "+cursorT.get());
+			.ifPresent(val -> {				
 				canvas.setSelectedValue(cursorT.get(),val);				
+				if (!fileHasBeenModified.get()) {
+					fileHasBeenModified.set(true);
+					updateWindowTitle();
+				}
 				canvas.repaint();
 			});
 			
@@ -594,7 +739,7 @@ public class KiteTabSequencer {
 			synth2 = MidiSystem.getSynthesizer();
 			synth2.open();			
 			
-			File sfFile = new File("C:/Program Files (x86)/Image-Line/FL Studio 2024/Data/Patches/Soundfonts/SM64SF V2.sf2");
+			File sfFile = new File("sf2/SM64SF V2.sf2");
 			
 			Soundbank soundbank = MidiSystem.getSoundbank(sfFile);
 			synth.unloadAllInstruments(synth.getDefaultSoundbank());
@@ -751,6 +896,7 @@ public class KiteTabSequencer {
 		
 		protected final Map<Integer,Map<Integer,A>> data = new HashMap<>();
 		
+		
 				
 		public final Optional<A> getValueAt(int t, int row) {
 			return Optional.ofNullable(data.getOrDefault(t,Collections.emptyMap()).get(row));
@@ -768,6 +914,7 @@ public class KiteTabSequencer {
 				data.put(t, new HashMap<>());
 			}
 			data.get(cursorT.get()).put(getSelectedRow(), inputVal);
+			
 		}
 		
 		public final void setSelectedValue(A inputVal) {
@@ -1224,6 +1371,8 @@ public class KiteTabSequencer {
 			}			
 		};
 		
+		KeyStroke k_ctrlO = KeyStroke.getKeyStroke("control O");
+		KeyStroke k_ctrlS = KeyStroke.getKeyStroke("control S");
 		KeyStroke k_ctrlR = KeyStroke.getKeyStroke("control R");
 		KeyStroke k_Up = KeyStroke.getKeyStroke("UP");
 		KeyStroke k_Down = KeyStroke.getKeyStroke("DOWN");
@@ -1245,6 +1394,10 @@ public class KiteTabSequencer {
 		KeyStroke k_Backspace = KeyStroke.getKeyStroke("BACK_SPACE");
 		KeyStroke k_Period = KeyStroke.getKeyStroke("PERIOD");
 				
+		inputMap.put(k_ctrlO, "openFileDialog");
+		actionMap.put("openFileDialog", rToA.apply(()->this.openFileDialog()));
+		inputMap.put(k_ctrlS, "saveActiveFile");
+		actionMap.put("saveActiveFile", rToA.apply(()->this.saveActiveFile()));
 		inputMap.put(k_ctrlR, "adjustRepeatT");
 		actionMap.put("adjustRepeatT", rToA.apply(()->this.adjustRepeatT()));		
 		inputMap.put(k_ShiftSpace, "setPlayT");
@@ -1397,19 +1550,9 @@ public class KiteTabSequencer {
 		controlBar.setBounds(new Rectangle(0,y,Toolkit.getDefaultToolkit().getScreenSize().width,20));
 		y+=controlBar.getBounds().height;
 		y+=80;
+				
+		updateMeasureLinePositions();		
 		
-		JMenuBar menuBar = new JMenuBar();
-		JMenu menu = new JMenu("Menu");
-		JMenuItem save = new JMenuItem("Save");
-		JMenuItem load= new JMenuItem("Load");
-		menuBar.add(menu);
-		menu.add(save);
-		menu.add(load);
-		save.addActionListener(ae -> saveXML());
-		load.addActionListener(ae -> loadXML());
-		updateMeasureLinePositions();
-		
-		frame.setJMenuBar(menuBar);
 		frame.setSize(Toolkit.getDefaultToolkit().getScreenSize().width,y);		
 		frame.getContentPane().add(panel,BorderLayout.CENTER);
 		//frame.getContentPane().add(controlBar,BorderLayout.SOUTH);
@@ -1567,205 +1710,221 @@ public class KiteTabSequencer {
 
 	}
 	
-	void loadXML() {
-		JFileChooser chooser = new JFileChooser(".");
+	void loadXML(File file) throws Exception {
 		
-		if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
-			try {
-				
-				DocumentBuilderFactory dbf = DocumentBuilderFactory.newDefaultInstance();
-				DocumentBuilder db = dbf.newDocumentBuilder();
-				Document doc = db.parse(chooser.getSelectedFile());
-				Element root = doc.getDocumentElement();
-				guitarCanvas.data.clear();
-				acousticCanvas.data.clear();
-				bassCanvas.data.clear();
-				drumCanvas.data.clear();
-				eventCanvas.data.clear();
-				NodeList bassNodes = root.getElementsByTagName("bass");
-				
-				Element bassNode = (Element) bassNodes.item(0);
-				NodeList bassTNodes = bassNode.getElementsByTagName("t");
-				for (int i = 0; i < bassTNodes.getLength(); i++) {
-					Element tNode = (Element) bassTNodes.item(i);
-					int t = Integer.parseInt(tNode.getAttribute("v"));
-					setCursorT(t);
-					NodeList sNodes = tNode.getElementsByTagName("s");
-					for (int j = 0; j < sNodes.getLength(); j++) {
-						Element sNode = (Element) sNodes.item(j);
-						InputVal inputVal = InputVal.lookup(sNode.getAttribute("v")).orElse(InputVal.NIL);
-						int stringNum = Integer.parseInt(sNode.getAttribute("n"));
-						if (inputVal != InputVal.NIL) {
-							bassCanvas.setSelectedRow(stringNum);
-							bassCanvas.setSelectedValue(inputVal);
-						}
-					}
+		DocumentBuilderFactory dbf = DocumentBuilderFactory.newDefaultInstance();
+		DocumentBuilder db = dbf.newDocumentBuilder();
+		Document doc = db.parse(file);
+		Element root = doc.getDocumentElement();
+		if (root.hasAttribute("cursorT")) {
+			cursorT.set(Integer.parseInt(root.getAttribute("cursorT")));
+		}
+		if (root.hasAttribute("stopT")) {
+			stopT0.set(Integer.parseInt(root.getAttribute("stopT")));
+		}
+		if (root.hasAttribute("selectedCanvas")) {
+			selectedCanvas.set(
+					Arrays.asList(eventCanvas,bassCanvas,guitarCanvas,acousticCanvas,drumCanvas)
+					.get(Integer.parseInt(root.getAttribute("selectedCanvas"))));			
+		} else {
+			selectedCanvas.set(eventCanvas);
+		}
+		if (root.hasAttribute("selectedRow")) {
+			selectedCanvas.get().setSelectedRow(Integer.parseInt(root.getAttribute("selectedRow")));
+		}
+		if (root.hasAttribute("repeatT")) {
+			repeatT.set(Integer.parseInt(root.getAttribute("repeatT")));
+		}
+
+		
+		root.setAttribute("selectedRow",""+selectedCanvas.get().getSelectedRow());
+		root.setAttribute("selectedCanvas",""+
+		Arrays.asList(eventCanvas,bassCanvas,guitarCanvas,acousticCanvas,drumCanvas).indexOf(selectedCanvas.get()));
+		guitarCanvas.data.clear();
+		acousticCanvas.data.clear();
+		bassCanvas.data.clear();
+		drumCanvas.data.clear();
+		eventCanvas.data.clear();
+		NodeList bassNodes = root.getElementsByTagName("bass");
+		
+		Element bassNode = (Element) bassNodes.item(0);
+		NodeList bassTNodes = bassNode.getElementsByTagName("t");
+		for (int i = 0; i < bassTNodes.getLength(); i++) {
+			Element tNode = (Element) bassTNodes.item(i);
+			int t = Integer.parseInt(tNode.getAttribute("v"));
+			setCursorT(t);
+			NodeList sNodes = tNode.getElementsByTagName("s");
+			for (int j = 0; j < sNodes.getLength(); j++) {
+				Element sNode = (Element) sNodes.item(j);
+				InputVal inputVal = InputVal.lookup(sNode.getAttribute("v")).orElse(InputVal.NIL);
+				int stringNum = Integer.parseInt(sNode.getAttribute("n"));
+				if (inputVal != InputVal.NIL) {
+					bassCanvas.setSelectedRow(stringNum);
+					bassCanvas.setSelectedValue(inputVal);
 				}
-				
-				NodeList acousticNodes = root.getElementsByTagName("acoustic");
-				
-				Element acousticNode = (Element) acousticNodes.item(0);
-				NodeList acousticTNodes = acousticNode.getElementsByTagName("t");
-				for (int i = 0; i < acousticTNodes.getLength(); i++) {
-					Element tNode = (Element) acousticTNodes.item(i);
-					int t = Integer.parseInt(tNode.getAttribute("v"));
-					setCursorT(t);
-					NodeList sNodes = tNode.getElementsByTagName("s");
-					for (int j = 0; j < sNodes.getLength(); j++) {
-						Element sNode = (Element) sNodes.item(j);
-						InputVal inputVal = InputVal.lookup(sNode.getAttribute("v")).orElse(InputVal.NIL);
-						int stringNum = Integer.parseInt(sNode.getAttribute("n"));
-						if (inputVal != InputVal.NIL) {
-							acousticCanvas.setSelectedRow(stringNum);
-							acousticCanvas.setSelectedValue(inputVal);
-						}
-					}
-				}
-				
-				NodeList guitarNodes = root.getElementsByTagName("guitar");
-				Element guitarNode = (Element) guitarNodes.item(0);
-				NodeList guitarTNodes = guitarNode.getElementsByTagName("t");
-				for (int i = 0; i < guitarTNodes.getLength(); i++) {
-					Element tNode = (Element) guitarTNodes.item(i);
-					int t = Integer.parseInt(tNode.getAttribute("v"));
-					setCursorT(t);
-					NodeList sNodes = tNode.getElementsByTagName("s");
-					for (int j = 0; j < sNodes.getLength(); j++) {
-						Element sNode = (Element) sNodes.item(j);
-						InputVal inputVal = InputVal.lookup(sNode.getAttribute("v")).orElse(InputVal.NIL);
-						int stringNum = Integer.parseInt(sNode.getAttribute("n"));
-						if (inputVal != InputVal.NIL) {
-							guitarCanvas.setSelectedRow(stringNum);
-							guitarCanvas.setSelectedValue(inputVal);
-						}
-					} 
-				}
-				
-				NodeList drumNodes = root.getElementsByTagName("drum");
-				Element drumNode = (Element) drumNodes.item(0);
-				NodeList drumTNodes = drumNode.getElementsByTagName("t");
-				for (int i = 0; i < drumTNodes.getLength(); i++) {
-					Element tNode = (Element) drumTNodes.item(i);
-					int t = Integer.parseInt(tNode.getAttribute("v"));
-					setCursorT(t);
-					NodeList sNodes = tNode.getElementsByTagName("s");
-					for (int j = 0; j < sNodes.getLength(); j++) {
-						Element sNode = (Element) sNodes.item(j);
-						DrumVal.lookup(sNode.getAttribute("v")).ifPresent(inputVal -> {
-						//DrumVal inputVal = DrumVal.lookup(sNode.getAttribute("v"));
-							int stringNum = Integer.parseInt(sNode.getAttribute("n"));							
-							drumCanvas.setSelectedRow(stringNum);
-							drumCanvas.setSelectedValue(inputVal);
-											
-						} );
-					}
-				}
-				NodeList eventNodes = root.getElementsByTagName("events");
-				Element eventNode = (Element) eventNodes.item(0);
-				NodeList eventTNodes = eventNode.getElementsByTagName("t");
-				for (int i = 0; i < eventTNodes.getLength(); i++) {
-					Element tNode = (Element) eventTNodes.item(i);
-					int t = Integer.parseInt(tNode.getAttribute("v"));
-					setCursorT(t);
-					NodeList sNodes = tNode.getElementsByTagName("s");
-					for (int j = 0; j < sNodes.getLength(); j++) {
-						Element sNode = (Element) sNodes.item(j);
-						//DrumVal inputVal = DrumVal.lookup(sNode.getAttribute("v")).orElse(DrumVal.NIL);
-						int row= Integer.parseInt(sNode.getAttribute("n"));
-						eventCanvas.setSelectedRow(row);
-						NodeList timeSignatureNodes = sNode.getElementsByTagName("timeSignature");
-						IntStream.range(0, timeSignatureNodes.getLength()).mapToObj(k->(Element) timeSignatureNodes.item(k))
-						.map(TimeSignatureEvent::fromXMLElement).forEach(timeSignature -> {
-							eventCanvas.setSelectedValue(timeSignature);
-						});
-						NodeList tempoNodes = sNode.getElementsByTagName("tempo");
-						IntStream.range(0, tempoNodes.getLength()).mapToObj(k->(Element) tempoNodes.item(k))
-						.map(TempoEvent::fromXMLElement).forEach(tempo-> {
-							eventCanvas.setSelectedValue(tempo);
-						});
-						NodeList stickyNodes = sNode.getElementsByTagName("note");
-						IntStream.range(0, stickyNodes.getLength()).mapToObj(k->(Element) stickyNodes.item(k))
-						.map(StickyNote::fromXMLElement).forEach(stickyNote-> {
-							eventCanvas.setSelectedValue(stickyNote);
-						});
-					}
-				}
-				repaintCanvases();
-			} catch (Exception ex) {
-				ex.printStackTrace();
 			}
 		}
-	}
+		
+		NodeList acousticNodes = root.getElementsByTagName("acoustic");
+		
+		Element acousticNode = (Element) acousticNodes.item(0);
+		NodeList acousticTNodes = acousticNode.getElementsByTagName("t");
+		for (int i = 0; i < acousticTNodes.getLength(); i++) {
+			Element tNode = (Element) acousticTNodes.item(i);
+			int t = Integer.parseInt(tNode.getAttribute("v"));
+			setCursorT(t);
+			NodeList sNodes = tNode.getElementsByTagName("s");
+			for (int j = 0; j < sNodes.getLength(); j++) {
+				Element sNode = (Element) sNodes.item(j);
+				InputVal inputVal = InputVal.lookup(sNode.getAttribute("v")).orElse(InputVal.NIL);
+				int stringNum = Integer.parseInt(sNode.getAttribute("n"));
+				if (inputVal != InputVal.NIL) {
+					acousticCanvas.setSelectedRow(stringNum);
+					acousticCanvas.setSelectedValue(inputVal);
+				}
+			}
+		}
+		
+		NodeList guitarNodes = root.getElementsByTagName("guitar");
+		Element guitarNode = (Element) guitarNodes.item(0);
+		NodeList guitarTNodes = guitarNode.getElementsByTagName("t");
+		for (int i = 0; i < guitarTNodes.getLength(); i++) {
+			Element tNode = (Element) guitarTNodes.item(i);
+			int t = Integer.parseInt(tNode.getAttribute("v"));
+			setCursorT(t);
+			NodeList sNodes = tNode.getElementsByTagName("s");
+			for (int j = 0; j < sNodes.getLength(); j++) {
+				Element sNode = (Element) sNodes.item(j);
+				InputVal inputVal = InputVal.lookup(sNode.getAttribute("v")).orElse(InputVal.NIL);
+				int stringNum = Integer.parseInt(sNode.getAttribute("n"));
+				if (inputVal != InputVal.NIL) {
+					guitarCanvas.setSelectedRow(stringNum);
+					guitarCanvas.setSelectedValue(inputVal);
+				}
+			} 
+		}
+		
+		NodeList drumNodes = root.getElementsByTagName("drum");
+		Element drumNode = (Element) drumNodes.item(0);
+		NodeList drumTNodes = drumNode.getElementsByTagName("t");
+		for (int i = 0; i < drumTNodes.getLength(); i++) {
+			Element tNode = (Element) drumTNodes.item(i);
+			int t = Integer.parseInt(tNode.getAttribute("v"));
+			setCursorT(t);
+			NodeList sNodes = tNode.getElementsByTagName("s");
+			for (int j = 0; j < sNodes.getLength(); j++) {
+				Element sNode = (Element) sNodes.item(j);
+				DrumVal.lookup(sNode.getAttribute("v")).ifPresent(inputVal -> {
+					//DrumVal inputVal = DrumVal.lookup(sNode.getAttribute("v"));
+					int stringNum = Integer.parseInt(sNode.getAttribute("n"));							
+					drumCanvas.setSelectedRow(stringNum);
+					drumCanvas.setSelectedValue(inputVal);
+					
+				} );
+			}
+		}
+		NodeList eventNodes = root.getElementsByTagName("events");
+		Element eventNode = (Element) eventNodes.item(0);
+		NodeList eventTNodes = eventNode.getElementsByTagName("t");
+		for (int i = 0; i < eventTNodes.getLength(); i++) {
+			Element tNode = (Element) eventTNodes.item(i);
+			int t = Integer.parseInt(tNode.getAttribute("v"));
+			setCursorT(t);
+			NodeList sNodes = tNode.getElementsByTagName("s");
+			for (int j = 0; j < sNodes.getLength(); j++) {
+				Element sNode = (Element) sNodes.item(j);
+				//DrumVal inputVal = DrumVal.lookup(sNode.getAttribute("v")).orElse(DrumVal.NIL);
+				int row= Integer.parseInt(sNode.getAttribute("n"));
+				eventCanvas.setSelectedRow(row);
+				NodeList timeSignatureNodes = sNode.getElementsByTagName("timeSignature");
+				IntStream.range(0, timeSignatureNodes.getLength()).mapToObj(k->(Element) timeSignatureNodes.item(k))
+				.map(TimeSignatureEvent::fromXMLElement).forEach(timeSignature -> {
+					eventCanvas.setSelectedValue(timeSignature);
+				});
+				NodeList tempoNodes = sNode.getElementsByTagName("tempo");
+				IntStream.range(0, tempoNodes.getLength()).mapToObj(k->(Element) tempoNodes.item(k))
+				.map(TempoEvent::fromXMLElement).forEach(tempo-> {
+					eventCanvas.setSelectedValue(tempo);
+				});
+				NodeList stickyNodes = sNode.getElementsByTagName("note");
+				IntStream.range(0, stickyNodes.getLength()).mapToObj(k->(Element) stickyNodes.item(k))
+				.map(StickyNote::fromXMLElement).forEach(stickyNote-> {
+					eventCanvas.setSelectedValue(stickyNote);
+				});
+			}
+		}
+		repaintCanvases();
 	
-	void saveXML() {
-		JFileChooser chooser = new JFileChooser(".");
-		String date = LocalDateTime.now(ZoneId.of("Z")).format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmm"));
-		chooser.setSelectedFile(new File(date+".xml"));
-		if (chooser.showSaveDialog(frame) == JFileChooser.APPROVE_OPTION) {
-			
-			try {
-				DocumentBuilderFactory dbf = DocumentBuilderFactory.newDefaultInstance();
-				DocumentBuilder db = dbf.newDocumentBuilder();
-				Document doc = db.newDocument();
-				Element root = doc.createElement("tabData");
-				doc.appendChild(root);
-				for (Object[] a : Arrays.asList(
-						new Object[] {"bass",bassCanvas},
-						new Object[] {"guitar",guitarCanvas},
-						new Object[] {"acoustic",acousticCanvas},
-						new Object[] {"drum",drumCanvas},
-						new Object[] {"events",eventCanvas})) {
-					Element e = doc.createElement(a[0].toString());
-					root.appendChild(e);
-					if (a[1] == drumCanvas) {
-						for (Entry<Integer, Map<Integer, DrumVal>> entry : ((DrumTabCanvas) a[1]).data.entrySet()) {
-							Element tElement = doc.createElement("t");
-							e.appendChild(tElement);
-							tElement.setAttribute("v", ""+entry.getKey());
-							entry.getValue().entrySet().stream().forEach(entry2 -> {
-								Element sElement = doc.createElement("s");
-								sElement.setAttribute("n", ""+entry2.getKey());
-								sElement.setAttribute("v", ""+entry2.getValue().getToken());
-								tElement.appendChild(sElement);
-							});
-						}
-					} else if (a[1] == eventCanvas) {
-						for (Entry<Integer,Map<Integer,ControlEvent>> entry : ((EventCanvas) a[1]).data.entrySet()) {
-							Element tElement = doc.createElement("t");
-							e.appendChild(tElement);
-							tElement.setAttribute("v", ""+entry.getKey());
-							entry.getValue().entrySet().stream().forEach(entry2 -> {
-								Element sElement = doc.createElement("s");
-								sElement.setAttribute("n", ""+entry2.getKey());
-								sElement.appendChild(entry2.getValue().toXMLElement(doc));								
-								tElement.appendChild(sElement);
-							});
-						}
-					} else {
-						for (Entry<Integer, Map<Integer, InputVal>> entry : ((TabCanvas) a[1]).data.entrySet()) {
-							Element tElement = doc.createElement("t");
-							e.appendChild(tElement);
-							tElement.setAttribute("v", ""+entry.getKey());
-							entry.getValue().entrySet().stream().forEach(entry2 -> {
-								Element sElement = doc.createElement("s");
-								sElement.setAttribute("n", ""+entry2.getKey());
-								sElement.setAttribute("v", ""+entry2.getValue().getToken());
-								tElement.appendChild(sElement);
-							});
-						}
-					}
+	}
+
+	
+	void saveXML(File file) throws Exception {
+
+		DocumentBuilderFactory dbf = DocumentBuilderFactory.newDefaultInstance();
+		DocumentBuilder db = dbf.newDocumentBuilder();
+		Document doc = db.newDocument();
+		Element root = doc.createElement("tabData");
+		root.setAttribute("cursorT",""+cursorT.get());
+		root.setAttribute("repeatT",""+cursorT.get());
+		root.setAttribute("stopT",""+stopT0.get());
+		root.setAttribute("selectedRow",""+selectedCanvas.get().getSelectedRow());
+		root.setAttribute("selectedCanvas",""+
+		Arrays.asList(eventCanvas,bassCanvas,guitarCanvas,acousticCanvas,drumCanvas).indexOf(selectedCanvas.get()));
+		doc.appendChild(root);
+		for (Object[] a : Arrays.asList(
+				new Object[] {"bass",bassCanvas},
+				new Object[] {"guitar",guitarCanvas},
+				new Object[] {"acoustic",acousticCanvas},
+				new Object[] {"drum",drumCanvas},
+				new Object[] {"events",eventCanvas})) {
+			Element e = doc.createElement(a[0].toString());
+			root.appendChild(e);
+			if (a[1] == drumCanvas) {
+				for (Entry<Integer, Map<Integer, DrumVal>> entry : ((DrumTabCanvas) a[1]).data.entrySet()) {
+					Element tElement = doc.createElement("t");
+					e.appendChild(tElement);
+					tElement.setAttribute("v", ""+entry.getKey());
+					entry.getValue().entrySet().stream().forEach(entry2 -> {
+						Element sElement = doc.createElement("s");
+						sElement.setAttribute("n", ""+entry2.getKey());
+						sElement.setAttribute("v", ""+entry2.getValue().getToken());
+						tElement.appendChild(sElement);
+					});
 				}
-				TransformerFactory tf = TransformerFactory.newDefaultInstance();
-				Transformer t  = tf.newTransformer();
-				t.setOutputProperty(OutputKeys.INDENT,"yes");
-				t.setOutputProperty("{http://xml.apache.org/xslt}indent-amount","4");
-				t.transform(new DOMSource(doc), new StreamResult(chooser.getSelectedFile()));
-				t.transform(new DOMSource(doc), new StreamResult(System.out));
-			} catch (Exception ex) {
-				ex.printStackTrace();
+			} else if (a[1] == eventCanvas) {
+				for (Entry<Integer,Map<Integer,ControlEvent>> entry : ((EventCanvas) a[1]).data.entrySet()) {
+					Element tElement = doc.createElement("t");
+					e.appendChild(tElement);
+					tElement.setAttribute("v", ""+entry.getKey());
+					entry.getValue().entrySet().stream().forEach(entry2 -> {
+						Element sElement = doc.createElement("s");
+						sElement.setAttribute("n", ""+entry2.getKey());
+						sElement.appendChild(entry2.getValue().toXMLElement(doc));								
+						tElement.appendChild(sElement);
+					});
+				}
+			} else {
+				for (Entry<Integer, Map<Integer, InputVal>> entry : ((TabCanvas) a[1]).data.entrySet()) {
+					Element tElement = doc.createElement("t");
+					e.appendChild(tElement);
+					tElement.setAttribute("v", ""+entry.getKey());
+					entry.getValue().entrySet().stream().forEach(entry2 -> {
+						Element sElement = doc.createElement("s");
+						sElement.setAttribute("n", ""+entry2.getKey());
+						sElement.setAttribute("v", ""+entry2.getValue().getToken());
+						tElement.appendChild(sElement);
+					});
+				}
 			}
-			
 		}
+		TransformerFactory tf = TransformerFactory.newDefaultInstance();
+		Transformer t  = tf.newTransformer();
+		t.setOutputProperty(OutputKeys.INDENT,"yes");
+		t.setOutputProperty("{http://xml.apache.org/xslt}indent-amount","4");
+		t.transform(new DOMSource(doc), new StreamResult(file));
+		t.transform(new DOMSource(doc), new StreamResult(System.out));
+		
+	
 		
 	}
 }
