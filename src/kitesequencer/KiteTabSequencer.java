@@ -22,7 +22,7 @@ import java.awt.event.MouseMotionListener;
 import java.awt.geom.Path2D;
 import java.awt.geom.Rectangle2D;
 import java.io.File;
-import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -31,6 +31,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NavigableMap;
@@ -45,10 +46,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import javax.sound.midi.Instrument;
 import javax.sound.midi.MidiChannel;
 import javax.sound.midi.MidiSystem;
 import javax.sound.midi.ShortMessage;
@@ -66,18 +65,14 @@ import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
-import javax.swing.JMenu;
-import javax.swing.JMenuBar;
-import javax.swing.JMenuItem;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JSpinner;
 import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.SpinnerNumberModel;
+import javax.swing.SwingUtilities;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerFactory;
@@ -87,7 +82,6 @@ import javax.xml.transform.stream.StreamResult;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
-import org.xml.sax.SAXException;
 
 import kitesequencer.events.ControlEvent;
 import kitesequencer.events.ControlEventType;
@@ -115,8 +109,8 @@ public class KiteTabSequencer {
 	public static int scrollTimeMargin = 8;
 	
 	
-	
-	final AtomicReference<File> activeFile = new AtomicReference<>(null);
+	final static File defaultPath = new File("scores");
+	final AtomicReference<File> activeFile = new AtomicReference<>(null);	
 	final AtomicBoolean fileHasBeenModified = new AtomicBoolean(false);
 	
 	final AtomicBoolean isPlaying = new AtomicBoolean(false);
@@ -129,48 +123,47 @@ public class KiteTabSequencer {
 	final AtomicBoolean playbackDaemonIsStarted = new AtomicBoolean(false);
 		 
 	final TreeMap<Integer,Integer> cachedMeasurePositions = new TreeMap<>();
-	
-	Synthesizer synth = null;
-	Synthesizer synth2 = null;
-	
+
 	Map<KiteTabCanvas<?>,Map<Integer,SynthChannelCombo>> channelMappingMap =
 			new HashMap<>();
 	
 	final ScheduledExecutorService playbackDaemon = Executors.newSingleThreadScheduledExecutor();
-	
-	//Map<MidiChannel,Integer> activeBassNotes = new HashMap<>();
-	//Map<MidiChannel,Integer> activeAcousticNotes = new HashMap<>();
-	//Map<MidiChannel,Integer> activeGuitarNotes = new HashMap<>();
-	//final Map<Integer,InputVal> openBassNotes = new ConcurrentHashMap<>();
-	//final Map<Integer,InputVal> openAcousticNotes = new ConcurrentHashMap<>();
-	//final Map<Integer,InputVal> openGuitarNotes = new ConcurrentHashMap<>();
-	final Map<Integer,DrumVal> openDrumNotes = new ConcurrentHashMap<>();
-	
+	final ScheduledExecutorService midiDaemon = Executors.newSingleThreadScheduledExecutor();	
+		
 	final JFrame frame = new JFrame("Kite Tab Sequencer 2000");
+	
 	LeftClickablePanelButton playButton, stopButton;
 	PlayStatusPanel playStatusPanel = new PlayStatusPanel();
 	
 	EventCanvas eventCanvas = new EventCanvas();
 	
+	final static File defaultSoundfontFile = new File("sf2/SM64SF V2.sf2");
 	TabCanvas bassCanvas = new TabCanvas(6,"Bass",
 			IntStream.of(5,4,3,2,1,0).mapToDouble(i -> 
-			middleC * 0.25 * Math.pow(2,(i*13d)/41d)).toArray());
+			middleC * 0.25 * Math.pow(2,(i*13d)/41d)).toArray(),
+			defaultSoundfontFile);
 	TabCanvas acousticCanvas = new TabCanvas(6,"AcousticG",
 			IntStream.of(6,5,4,3,2,1).mapToDouble(i -> 
-			middleC * 0.5 *Math.pow(2,(i*13d)/41d)).toArray());
+			middleC * 0.5 *Math.pow(2,(i*13d)/41d)).toArray(),
+			defaultSoundfontFile);
 	
 	TabCanvas guitarCanvas = new TabCanvas(7,"ElectricG",
 			IntStream.of(6,5,4,3,2,1,0).mapToDouble(i -> 
-			middleC * 0.5 *Math.pow(2,(i*13d)/41d)).toArray());
+			middleC * 0.5 *Math.pow(2,(i*13d)/41d)).toArray(),
+			defaultSoundfontFile);
 	
 	DrumTabCanvas drumCanvas = new DrumTabCanvas();
 	NavigationCanvas navigationBar = new NavigationCanvas();
-	AtomicReference<KiteTabCanvas<?>> selectedCanvas = new AtomicReference<>();
-	{
-		Arrays.asList(eventCanvas,acousticCanvas,bassCanvas,guitarCanvas,drumCanvas).forEach(a->navigationBar.addComponentToRepaint(a));
-		selectedCanvas.set(eventCanvas);
-		
-	}
+	List<KiteTabCanvas<?>> allCanvases = Arrays.asList(
+			eventCanvas,
+			bassCanvas,
+			guitarCanvas,
+			acousticCanvas,
+			drumCanvas);
+	AtomicReference<KiteTabCanvas<?>> selectedCanvas = new AtomicReference<>(eventCanvas);
+	
+	
+	
 	
 	void playbackDaemonFunction() {
 		//DO NOT CALL THIS ON MASTER THREAD
@@ -180,39 +173,16 @@ public class KiteTabSequencer {
 			}
 			else {
 				int t = playT.getAndUpdate(i->i+1==repeatT.get()?stopT0.get():i+1);
-				Arrays.asList(eventCanvas,bassCanvas,guitarCanvas,acousticCanvas,drumCanvas).forEach(a->a.repaint());
-				
-				eventCanvas.data.getOrDefault(t,Collections.emptyMap()).entrySet().forEach(entry -> {
-					switch (entry.getValue().getType()) {
-					case NIL:
-						break;
-					case TEMPO:
-						tempo.set(((TempoEvent) entry.getValue()).getTempo());
-						break;
-					case TIME_SIGNATURE:
-						break;
-					default:
-						break;
-					
-					}
-				}); 
-				
-				for (TabCanvas canvas : new TabCanvas[] {bassCanvas,acousticCanvas,guitarCanvas}) {
-					for (int row = 0 ; row < canvas.getRowCount(); row++) {
-						InputVal inputVal = canvas.getValueAt(t,row).orElse(InputVal.NIL);
-						if (inputVal == InputVal.HOLD || inputVal == InputVal.VIB) {
-							//do nothing, midi event keeps going				 
-						} else if (inputVal == InputVal.NIL) {
-							canvas.noteOff(row);						
-						} else if (inputVal.getEdoSteps().isPresent()) {
-							canvas.noteOn(row,inputVal);							
-							}
-						}
+				try {
+					midiDaemon.execute(() -> {
+						allCanvases.forEach(a->a.handleEvents(t));	
+					});
+					SwingUtilities.invokeAndWait(() -> {
+						allCanvases.forEach(a->a.repaint());
+					});
+				} catch (Exception e) {					
+					e.printStackTrace();
 				}
-
-				
-				drumCanvas.handleEvents(t);
-				
 				
 				long bpm = tempo.get();
 				Duration sixteenth = Duration.ofMinutes(1).dividedBy(bpm).dividedBy(4);  
@@ -228,7 +198,21 @@ public class KiteTabSequencer {
 		Arrays.asList(navigationBar,guitarCanvas,acousticCanvas,drumCanvas,bassCanvas,eventCanvas)
 		.forEach(a->a.repaint()); 
 	}
-	File defaultPath = new File("scores");
+	
+	
+	void addStaccato() {
+		
+	}
+	
+	void addAccent() {
+		
+	}
+	
+	void configureCanvasInstrument() {
+		if (selectedCanvas.get() instanceof TabCanvas) {
+			
+		}
+	}
 	
 	void saveActiveFile() {
 		if (!defaultPath.exists()) {
@@ -734,19 +718,19 @@ public class KiteTabSequencer {
 	
 	void initializeMIDI() {
 		try {		
-			synth = MidiSystem.getSynthesizer();
-			synth.open();
-			synth2 = MidiSystem.getSynthesizer();
-			synth2.open();			
+			//synth = MidiSystem.getSynthesizer();
+			//synth.open();
+			//synth2 = MidiSystem.getSynthesizer();
+			//synth2.open();			
 			
-			File sfFile = new File("sf2/SM64SF V2.sf2");
+			//File sfFile = new File("sf2/SM64SF V2.sf2");
 			
-			Soundbank soundbank = MidiSystem.getSoundbank(sfFile);
-			synth.unloadAllInstruments(synth.getDefaultSoundbank());
-			synth2.unloadAllInstruments(synth2.getDefaultSoundbank());
-			synth.loadAllInstruments(soundbank);
-			synth2.loadAllInstruments(soundbank);
-			Instrument[] instruments = soundbank.getInstruments();
+			//Soundbank soundbank = MidiSystem.getSoundbank(sfFile);
+			//synth.unloadAllInstruments(synth.getDefaultSoundbank());
+			//synth2.unloadAllInstruments(synth2.getDefaultSoundbank());
+			//synth.loadAllInstruments(soundbank);
+//			/synth2.loadAllInstruments(soundbank);
+			/*
 			for (int i = 0; i < instruments.length; i++) {
 				System.out.printf("%d %s\n",i,instruments[i]);
 			}
@@ -800,7 +784,7 @@ public class KiteTabSequencer {
 			channelMappingMap.get(drumCanvas).get(9).getChannel().programChange(
 					drumInstrument.getPatch().getBank(),
 					drumInstrument.getPatch().getProgram());
-			
+			*/
 		} catch (Exception ex) {
 			ex.printStackTrace();
 			System.exit(1);
@@ -883,6 +867,7 @@ public class KiteTabSequencer {
 	
 	abstract class KiteTabCanvas<A> extends JPanel {
 				
+		abstract void handleEvents(int t);
 		final boolean isSelected() {
 			return this == selectedCanvas.get(); 
 		}
@@ -1042,18 +1027,13 @@ public class KiteTabSequencer {
 	class NavigationCanvas extends JPanel implements MouseMotionListener, MouseListener {
 					
 		private int dataLength = 16*256;
-		private final Set<JComponent> componentsToRepaint = new HashSet<>();
+		
 		public NavigationCanvas() {
 			this.addMouseMotionListener(this);
 			this.addMouseListener(this);
 		}
 		
-		public void addComponentToRepaint(JComponent component) {
-			componentsToRepaint.add(component);
-		}
-		public void removeComponentToRepaint(JComponent component) {
-			componentsToRepaint.remove(component);
-		}
+
 		
 		@Override
 		public Dimension getSize() {				 
@@ -1096,9 +1076,8 @@ public class KiteTabSequencer {
 			int deltaT= (int) (deltaX/navigationBar.getWidth()*dataLength);
 			double t0 = viewT0.get();				 				
 			double displayedt1 = t0+navigationBar.getWidth()/cellWidth;
-			viewT0.updateAndGet(a->Math.min(dataLength-(int)(displayedt1-t0), Math.max(0,a-deltaT)));
-			navigationBar.repaint();
-			componentsToRepaint.forEach(a->a.repaint()); 
+			viewT0.updateAndGet(a->Math.min(dataLength-(int)(displayedt1-t0), Math.max(0,a-deltaT)));			
+			repaintCanvases();			 
 		}
 			
 		@Override
@@ -1184,6 +1163,17 @@ public class KiteTabSequencer {
 				x+=cellWidth;
 			}
 		}
+
+		@Override
+		void handleEvents(int t) {
+			for (int row = 0; row < getRowCount(); row++) {
+				Optional<ControlEvent> controlEvent= this.getValueAt(t, row);
+				controlEvent.filter(a->a.getType()==ControlEventType.TEMPO)
+				.ifPresent(event -> {
+					tempo.set(((TempoEvent) event).getTempo());
+				});
+			}			
+		}
 	}
 	
 	class TabCanvas extends KiteTabCanvas<InputVal> {		
@@ -1191,8 +1181,34 @@ public class KiteTabSequencer {
 		private final String name;
 		private final double[] baseFrequencies;	
 		private final int rows;
+		
 		private final Map<Integer,InputVal> openNotes = new ConcurrentHashMap<>();
 		private final Map<MidiChannel,Integer> openMidiNums = new ConcurrentHashMap<>();
+		
+		Synthesizer synth = null;
+		private File soundfontFile;
+		
+		
+		public TabCanvas(int strings, String name, double[] baseFrequencies,File soundfontFile) {
+			this.rows = strings;
+			this.name = name;
+			this.baseFrequencies = baseFrequencies;
+			this.soundfontFile = soundfontFile;
+			try {
+				synth = MidiSystem.getSynthesizer();
+				synth.open();
+				//File sfFile = new File("sf2/SM64SF V2.sf2");				
+				Soundbank soundbank = MidiSystem.getSoundbank(soundfontFile);
+				synth.unloadAllInstruments(synth.getDefaultSoundbank());
+				synth.loadAllInstruments(soundbank);
+				
+				
+			} catch (Exception ex) {
+				ex.printStackTrace();
+			}
+		}
+		
+		
 		
 		public void noteOff(int row) {
 			openNotes.remove(row);
@@ -1205,7 +1221,8 @@ public class KiteTabSequencer {
 		}
 		
 		void processTabCanvasEvent(int row,InputVal inputVal) {
-			MidiChannel channel = channelMappingMap.get(this).get(row).getChannel();
+			MidiChannel channel = synth.getChannels()[row]; 
+			//MidiChannel channel = channelMappingMap.get(this).get(row).getChannel();
 			double[] stringTunings = this.getBaseFrequencies();
 			if (inputVal == null) {
 				if (openMidiNums.containsKey(channel)) {
@@ -1232,7 +1249,7 @@ public class KiteTabSequencer {
 					int msb = (pitchBend >> 7) & 0x7F;
 					try {
 						ShortMessage pb = new ShortMessage();					
-						pb.setMessage(ShortMessage.PITCH_BEND, channelMappingMap.get(this).get(row).channelNumber, lsb, msb);
+						pb.setMessage(ShortMessage.PITCH_BEND, row, lsb, msb);
 						synth.getReceiver().send(pb, -1);
 						channel.noteOn(midiNote, 100);
 						openMidiNums.put(channel,midiNote);
@@ -1241,12 +1258,6 @@ public class KiteTabSequencer {
 				 	}
 				}
 			}
-		}
-		
-		public TabCanvas(int strings, String name, double[] baseFrequencies) {
-			this.rows = strings;
-			this.name = name;
-			this.baseFrequencies = baseFrequencies;
 		}
 		
 		public double[] getBaseFrequencies() {
@@ -1290,27 +1301,53 @@ public class KiteTabSequencer {
 		public String getName() {
 			return name;
 		}
+
+		@Override
+		void handleEvents(int t) {
+			
+			IntStream.range(0, getRowCount()).forEach(row -> {	
+				this.getValueAt(t, row).ifPresentOrElse(inputVal -> {
+					inputVal.getEdoSteps().ifPresentOrElse(steps -> {
+						noteOn(row,inputVal);
+					},
+							() -> {
+								System.out.println(inputVal);
+							});							
+				}, () -> {
+					noteOff(row);
+				});
+			});
+			
+		}
 	}
 	
 	class DrumTabCanvas extends KiteTabCanvas<DrumVal> {
+		Synthesizer synth = null;
 		
 		public DrumTabCanvas() {
-			
+			try {
+				synth = MidiSystem.getSynthesizer();
+				synth.open();
+				File sfFile = new File("sf2/SM64SF V2.sf2");				
+				Soundbank soundbank = MidiSystem.getSoundbank(sfFile);
+				synth.unloadAllInstruments(synth.getDefaultSoundbank());
+				synth.loadAllInstruments(soundbank);
+			} catch (Exception ex) {
+				ex.printStackTrace();
+			}
 		}
-		private final Set<Integer> openNotes = new HashSet<>(); 
-		public void handleEvents(int t) {
+		private final Set<Integer> openNotes = new HashSet<>();
 		
-			MidiChannel drumChannel = channelMappingMap.get(this).get(9).getChannel();
-			openNotes.forEach(drumChannel::noteOff);
+		@Override
+		public void handleEvents(int t) {
+			MidiChannel channel = synth.getChannels()[9];
+			openNotes.forEach(channel::noteOff);
 			openNotes.clear();
 			drumCanvas.data.getOrDefault(t,Collections.emptyMap())
-			.values().stream().distinct().forEach(drumVal -> {
-				
-				drumChannel.noteOn(drumVal.midiNote, 100);
+			.values().stream().distinct().forEach(drumVal -> {				
+				channel.noteOn(drumVal.midiNote, 100);
 				openNotes.add(drumVal.midiNote);
-			});
-			//System.out.printf("%d %s\n", t, drumCanvas.data.get(t));
-			
+			});			
 			
 		}
 
@@ -1393,6 +1430,18 @@ public class KiteTabSequencer {
 		KeyStroke k_Space = KeyStroke.getKeyStroke("SPACE");
 		KeyStroke k_Backspace = KeyStroke.getKeyStroke("BACK_SPACE");
 		KeyStroke k_Period = KeyStroke.getKeyStroke("PERIOD");
+		KeyStroke k_Comma= KeyStroke.getKeyStroke("COMMA");
+		
+		KeyStroke k_CtrlI = KeyStroke.getKeyStroke("control I");
+		
+		inputMap.put(k_CtrlI, "configureCanvasInstrument");
+		actionMap.put("configureCanvasInstrument",rToA.apply(()->this.configureCanvasInstrument()));
+		
+		inputMap.put(k_Period, "addStaccato");
+		actionMap.put("addStaccato", rToA.apply(()->this.addStaccato()));
+		inputMap.put(k_Comma, "addAccent");
+		actionMap.put("addAccent", rToA.apply(()->this.addAccent()));
+
 				
 		inputMap.put(k_ctrlO, "openFileDialog");
 		actionMap.put("openFileDialog", rToA.apply(()->this.openFileDialog()));
@@ -1585,7 +1634,7 @@ public class KiteTabSequencer {
 		dialog.pack();
 		dialog.setVisible(true);
 	}
-	
+	/*
 	void processGeneralTabCanvasEvent(int row, InputVal inputVal, TabCanvas canvas,Map<MidiChannel,Integer> activeNoteMap) {
 		MidiChannel channel = channelMappingMap.get(canvas).get(row).getChannel();
 		double[] stringTunings = canvas.getBaseFrequencies();
@@ -1624,7 +1673,7 @@ public class KiteTabSequencer {
 			}
 		}
 	}
-	
+	*/
 	void addTimeSignature() {
 		if (selectedCanvas.get() != eventCanvas) {
 			return;
