@@ -171,7 +171,8 @@ public class KiteTabSequencer {
 				continue;
 			}
 			else {
-				int t = playT.getAndIncrement();
+//				/int t = playT.getAndIncrement();
+				int t = playT.getAndUpdate(i->i+1==repeatT.get()?stopT0.get():i+1);
 				Arrays.asList(eventCanvas,bassCanvas,guitarCanvas,acousticCanvas,drumCanvas).forEach(a->a.repaint());
 				
 				eventCanvas.data.getOrDefault(t,Collections.emptyMap()).entrySet().forEach(entry -> {
@@ -202,26 +203,15 @@ public class KiteTabSequencer {
 						}
 				}
 
-				Map<Integer, DrumVal> drumMap = drumCanvas.data.getOrDefault(playT.get(), Collections.emptyMap());
-				for (int row = 0; row < drumCanvas.getRowCount(); row++) {
-					DrumVal inputVal = drumMap.getOrDefault(row, DrumVal.NIL);
-					
-					if (openDrumNotes.containsKey(row)) {
-						//send close midi message
-						openDrumNotes.remove(row);
-						processDrumInput(null);
-					}
-					if (inputVal != DrumVal.NIL) {
-						openDrumNotes.put(row, inputVal);						
-						processDrumInput(inputVal);
-					}
-				}
+				
+				drumCanvas.handleEvents(t);
+				
 				
 				long bpm = tempo.get();
 				Duration sixteenth = Duration.ofMinutes(1).dividedBy(bpm).dividedBy(4);  
 				playbackDaemon.schedule(()->playbackDaemonFunction(),
 						sixteenth.toMillis(),TimeUnit.MILLISECONDS);
-				playT.updateAndGet(i->i+1==repeatT.get()?stopT0.get():i+1);
+				
 				return;
 			}
 		}
@@ -405,7 +395,8 @@ public class KiteTabSequencer {
 			DrumTabCanvas canvas = (DrumTabCanvas) selectedCanvas.get();
 			DrumVal.lookup(String.valueOf(c))
 			.ifPresent(val -> {
-				canvas.setSelectedValue(val);
+				System.out.println("adding "+val+"  at time "+cursorT.get());
+				canvas.setSelectedValue(cursorT.get(),val);				
 				canvas.repaint();
 			});
 			
@@ -686,7 +677,7 @@ public class KiteTabSequencer {
 	int ride = 51;
 	//https://musescore.org/sites/musescore.org/files/General%20MIDI%20Standard%20Percussion%20Set%20Key%20Map.pdf
 	void processDrumInput(DrumVal drumVal) {
-		
+/*		
 		MidiChannel drumChannel = channelMappingMap.get(drumCanvas).get(9).getChannel();
 		//if drumVal is null, treat as note off
 		
@@ -742,6 +733,7 @@ public class KiteTabSequencer {
 		default:
 			break;		
 		}
+		*/
 	}
 	
 	abstract class KiteTabCanvas<A> extends JPanel {
@@ -771,11 +763,15 @@ public class KiteTabSequencer {
 			return getValueAt(cursorT.get(), getSelectedRow());			
 		}
 
-		public final void setSelectedValue(A inputVal) {
-			if (!data.containsKey(cursorT.get())) {
-				data.put(cursorT.get(), new HashMap<>());
+		public final void setSelectedValue(int t, A inputVal) {
+			if (!data.containsKey(t)) {
+				data.put(t, new HashMap<>());
 			}
 			data.get(cursorT.get()).put(getSelectedRow(), inputVal);
+		}
+		
+		public final void setSelectedValue(A inputVal) {
+			setSelectedValue(cursorT.get(),inputVal);		
 		}					
 		
 		public final void removeSelectedValue() {
@@ -1154,7 +1150,23 @@ public class KiteTabSequencer {
 		public DrumTabCanvas() {
 			
 		}
+		private final Set<Integer> openNotes = new HashSet<>(); 
+		public void handleEvents(int t) {
+		
+			MidiChannel drumChannel = channelMappingMap.get(this).get(9).getChannel();
+			openNotes.forEach(drumChannel::noteOff);
+			openNotes.clear();
+			drumCanvas.data.getOrDefault(t,Collections.emptyMap())
+			.values().stream().distinct().forEach(drumVal -> {
 				
+				drumChannel.noteOn(drumVal.midiNote, 100);
+				openNotes.add(drumVal.midiNote);
+			});
+			//System.out.printf("%d %s\n", t, drumCanvas.data.get(t));
+			
+			
+		}
+
 		@Override
 		public void paint(Graphics g_) {
 			
@@ -1166,21 +1178,18 @@ public class KiteTabSequencer {
 			int t1 = t0+tDelta;
 			int x = 0;			
 			for (int t_ = t0; t_<t1; t_+=1) {
-				int y = rowHeight+infoPanelHeight; 
-								
-				
+				int y = rowHeight+infoPanelHeight; 												
 				g.setFont(font);
-				for (int stringNumber = 0; stringNumber < getRowCount(); stringNumber++) {
-																
-									
+				for (int stringNumber = 0; stringNumber < getRowCount(); stringNumber++) {																								
 					g.setPaint(Color.black);
-										
-					String s = data.getOrDefault(t_,new HashMap<>()).getOrDefault(stringNumber,DrumVal.NIL).getToken();
-					
-					g.drawString(s,(int) (x+(cellWidth-fontMetrics.stringWidth(s))*0.5),y-3);					
+					int y_ = y;
+					int x_ = x;
+					this.getValueAt(t_, stringNumber).map(a->a.getToken()).ifPresent(s->{
+						g.drawString(s,(int) (x_+(cellWidth-fontMetrics.stringWidth(s))*0.5),y_-3);	
+					});
+
 					y+=rowHeight;
-				}
-				
+				}				
 				x+=cellWidth;
 			}			
 		}
@@ -1642,13 +1651,14 @@ public class KiteTabSequencer {
 					NodeList sNodes = tNode.getElementsByTagName("s");
 					for (int j = 0; j < sNodes.getLength(); j++) {
 						Element sNode = (Element) sNodes.item(j);
-						DrumVal inputVal = DrumVal.lookup(sNode.getAttribute("v")).orElse(DrumVal.NIL);
-						int stringNum = Integer.parseInt(sNode.getAttribute("n"));
-						if (inputVal != DrumVal.NIL) {
+						DrumVal.lookup(sNode.getAttribute("v")).ifPresent(inputVal -> {
+						//DrumVal inputVal = DrumVal.lookup(sNode.getAttribute("v"));
+							int stringNum = Integer.parseInt(sNode.getAttribute("n"));							
 							drumCanvas.setSelectedRow(stringNum);
 							drumCanvas.setSelectedValue(inputVal);
-						}
-					} 
+											
+						} );
+					}
 				}
 				NodeList eventNodes = root.getElementsByTagName("events");
 				Element eventNode = (Element) eventNodes.item(0);

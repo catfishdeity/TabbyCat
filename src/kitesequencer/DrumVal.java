@@ -4,21 +4,21 @@ import java.util.Optional;
 
 enum DrumVal {
 	
-	KICK ("K",DrumScorePosition.FEET),
-	PEDAL_HAT ("F",DrumScorePosition.FEET),
-	SNARE ("S",DrumScorePosition.HANDS),
-	CLOSED_HAT ("X",DrumScorePosition.HANDS),
-	OPEN_HAT ("O",DrumScorePosition.HANDS),
-	CRASH ("C",DrumScorePosition.HANDS),
-	RIDE ("R",DrumScorePosition.HANDS),
-	HI_TOM ("H",DrumScorePosition.HANDS),
-	MID_TOM ("M",DrumScorePosition.HANDS),
-	LOW_TOM ("L",DrumScorePosition.HANDS),	
-	NIL(" ",DrumScorePosition.NIL);
+	KICK ("K",36,DrumScorePosition.FEET),
+	PEDAL_HAT ("F",44,DrumScorePosition.FEET),
+	SNARE ("S",38,DrumScorePosition.HANDS),
+	CLOSED_HAT ("X",42,DrumScorePosition.HANDS),
+	OPEN_HAT ("O",46,DrumScorePosition.HANDS),
+	CRASH ("C",49,DrumScorePosition.HANDS),
+	RIDE ("R",51,DrumScorePosition.HANDS),
+	HI_TOM ("H",48,DrumScorePosition.HANDS),
+	MID_TOM ("M",47,DrumScorePosition.HANDS),
+	LOW_TOM ("L",45,DrumScorePosition.HANDS)	
+	;
 	
 	String token;
 	DrumScorePosition scorePosition;
-	
+	int midiNote;
 	public DrumScorePosition getScorePosition() {
 		return scorePosition;
 	}
@@ -36,8 +36,12 @@ enum DrumVal {
 		return Optional.empty();
 	}
 	
-	DrumVal(String token, DrumScorePosition position) {
+	public int getMidiNote() {
+		return midiNote;
+	}
+	DrumVal(String token, int midiNote, DrumScorePosition position) {
 		this.token = token;
+		this.midiNote = midiNote;
 		this.scorePosition = position;
 	}
 	
