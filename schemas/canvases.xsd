@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<xsd:schema xmlns="tab" xmlns:xsd="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified" targetNamespace="tab">
+	<xsd:element name="canvases" type="CanvasesComplexType"/>
+	<xsd:complexType name="CanvasesComplexType">
+		<xsd:sequence>
+			<xsd:choice minOccurs="1" maxOccurs="unbounded">				 
+				<xsd:element name="stringCanvas" type="StringCanvas"/>
+				<xsd:element name="drumCanvas" type="PercussionCanvas"/>	
+			</xsd:choice>
+		</xsd:sequence>
+	</xsd:complexType>
+	
+	<xsd:complexType name="PercussionCanvas">
+		<xsd:sequence>
+			<xsd:element name="row" type="PercRow" minOccurs="1" maxOccurs="unbounded"/>
+			<xsd:element name="token" type="PercRowToken" minOccurs="1" maxOccurs="unbounded"/>
+		</xsd:sequence>
+		<xsd:attribute name="name" type="NonEmptyString" default="unnamed"/>
+		<xsd:attribute name="soundfontFile" type="xsd:string" use="optional"/>
+		<xsd:attribute name="bank" type="xsd:nonNegativeInteger" default="0"/>
+		<xsd:attribute name="program" type="xsd:nonNegativeInteger" default="0"/>
+	</xsd:complexType>
+	
+	<xsd:complexType name="PercRow">		
+		<xsd:attribute name="type" type="PercRowType" default="HAND"/>
+	</xsd:complexType>
+	
+	<xsd:complexType name="PercRowToken">
+		<xsd:attribute name="token" type="NonEmptyString" use="required"/>
+		<xsd:attribute name="position" type="PercRowType" use="required"/>
+		<xsd:attribute name="midiNumber" type="xsd:nonNegativeInteger" use="required"/>		
+	</xsd:complexType>
+	
+	<xsd:simpleType name="PercRowType">
+		<xsd:restriction base="xsd:string">
+			<xsd:enumeration value="FOOT"/>
+			<xsd:enumeration value="HAND"/>
+		</xsd:restriction>
+		</xsd:simpleType>
+	
+	<xsd:complexType name="StringCanvas">
+		<xsd:sequence>			
+			<xsd:element name="string" type="PitchedString" minOccurs="1" maxOccurs="15"/>
+			<xsd:element name="additionalPitch" type="AdditionalPitch" minOccurs="0" maxOccurs="unbounded"/>
+		</xsd:sequence>
+		<xsd:attribute name="name" type="NonEmptyString" default="unnamed"/>
+		<xsd:attribute name="maxFrets" type="xsd:positiveInteger" default="24"/>
+		<xsd:attribute name="maxHarmonic" type="xsd:positiveInteger" default="16"/>
+		<xsd:attribute name="ed2" type="xsd:double" default="12"/>
+		<xsd:attribute name="soundfontFile" type="xsd:string" use="optional"/>
+		<xsd:attribute name="bank" type="xsd:nonNegativeInteger" default="0"/>
+		<xsd:attribute name="program" type="xsd:nonNegativeInteger" default="0"/>
+	</xsd:complexType>
+	
+	<xsd:complexType name="PitchedString">
+		<xsd:attribute name="frequency" type="xsd:double" use="required"/>
+	</xsd:complexType>
+			 
+	<xsd:complexType name="AdditionalPitch">
+		<xsd:attribute name="token" type="NonEmptyString"/>
+		<xsd:attribute name="edoSteps" type="xsd:double"/>
+	</xsd:complexType>
+	
+	<xsd:simpleType name="NonEmptyString">
+		<xsd:restriction base="xsd:string">
+			<xsd:minLength value="1"/>
+		</xsd:restriction>
+	</xsd:simpleType>
+</xsd:schema>

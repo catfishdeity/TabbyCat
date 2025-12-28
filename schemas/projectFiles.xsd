@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<xsd:schema xmlns="tab" xmlns:xsd="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified" targetNamespace="tab">
+	<xsd:element name="tabProject" type="TabProjectComplexType"/>
+	
+	<xsd:complexType name="TabProjectComplexType">
+		<xsd:sequence>
+			<xsd:element name="eventCanvas" type="EventTabData" minOccurs="1"/>
+			<xsd:element name="instrumentCanvas" type="TabData" minOccurs="0" maxOccurs="unbounded"/>			
+		</xsd:sequence>		
+		<xsd:attribute name="cursorT" type="xsd:nonNegativeInteger" default="0"/>
+		<xsd:attribute name="repeatT" type="xsd:integer" default="-1"/>
+		<xsd:attribute name="stopT" type="xsd:nonNegativeInteger" default="0"/>
+		<xsd:attribute name="selectedRow" type="xsd:nonNegativeInteger" default="0"/>
+		<xsd:attribute name="selectedCanvas" type="xsd:nonNegativeInteger" default="0"/>
+ 	</xsd:complexType>
+	
+	<xsd:complexType name="TabData">
+		<xsd:sequence> 
+			<xsd:element name="event" type="InputEvent" minOccurs="0" maxOccurs="unbounded"/>
+		</xsd:sequence>
+		<xsd:attribute name="name" type="xsd:string"/>
+	</xsd:complexType>
+	
+	<xsd:complexType name="EventTabData">
+		<xsd:sequence> 
+			<xsd:element name="event" type="ControlEvent" minOccurs="0" maxOccurs="unbounded"/>
+		</xsd:sequence>
+	</xsd:complexType>
+	
+	<xsd:complexType name="ControlEvent">
+		<xsd:sequence>
+			<xsd:choice>
+				<xsd:element name="timeSignature" type="TimeSignatureComplexType"/>
+				<xsd:element name="note" type="xsd:string"/>
+				<xsd:element name="tempo" type="TempoEvent"/>
+			</xsd:choice>
+		</xsd:sequence>
+		<xsd:attribute name="r" type="xsd:nonNegativeInteger" use="required"/>
+		<xsd:attribute name="t" type="xsd:nonNegativeInteger" use="required"/>
+	</xsd:complexType>
+	
+	<xsd:complexType name="TempoEvent">
+		<xsd:attribute name="v" type="xsd:positiveInteger" default="120"/>			
+	</xsd:complexType>
+	
+	<xsd:complexType name="TimeSignatureComplexType">
+		<xsd:attribute name="n" type="xsd:positiveInteger" default="4"/>
+		<xsd:attribute name="d" type="xsd:positiveInteger" default="4"/>	
+	</xsd:complexType>
+	<xsd:complexType name="InputEvent">
+		<xsd:attribute name="v" type="xsd:string" use="required"/>
+		<xsd:attribute name="r" type="xsd:nonNegativeInteger" use="required"/>
+		<xsd:attribute name="t" type="xsd:nonNegativeInteger" use="required"/>		
+	</xsd:complexType>
+	
+	
+</xsd:schema>

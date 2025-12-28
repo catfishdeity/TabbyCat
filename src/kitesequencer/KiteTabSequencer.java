@@ -13,7 +13,6 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridLayout;
 import java.awt.MouseInfo;
-import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
@@ -29,7 +28,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -48,6 +47,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
+import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
@@ -59,6 +62,7 @@ import javax.sound.midi.Soundbank;
 import javax.sound.midi.Synthesizer;
 import javax.swing.AbstractAction;
 import javax.swing.ActionMap;
+import javax.swing.Box;
 import javax.swing.DefaultListModel;
 import javax.swing.InputMap;
 import javax.swing.JButton;
@@ -78,6 +82,7 @@ import javax.swing.KeyStroke;
 import javax.swing.ListCellRenderer;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
+import javax.swing.filechooser.FileFilter;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -86,11 +91,18 @@ import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
+import javax.xml.validation.Schema;
+import javax.xml.validation.SchemaFactory;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
+import kitesequencer.config.CanvasConfig;
+import kitesequencer.config.CanvasesConfig;
+import kitesequencer.config.DrumCanvasConfig;
+import kitesequencer.config.PercRowToken;
+import kitesequencer.config.StringCanvasConfig;
 import kitesequencer.events.ControlEvent;
 import kitesequencer.events.ControlEventType;
 import kitesequencer.events.NilControlEvent;
@@ -109,13 +121,13 @@ public class KiteTabSequencer {
 	
 	private Font font = new Font("Monospaced",Font.BOLD,11);
 	private FontMetrics fontMetrics = new Canvas().getFontMetrics(font);
-	
+	int infoPanelHeight = fontMetrics.getMaxAscent()+10;
 	int cellWidth = fontMetrics.stringWidth("88")+3;
 	int rowHeight = fontMetrics.getMaxAscent()+2;
 	final int scrollTimeMargin = 4;	
 	final double middleC = 220.0 * Math.pow(2d, 3.0/12.0);	
 	
-	
+	FileFilter fileFilter = new FileNameExtensionFilter(".tab files (.tab)","tab");
 	final File defaultPath = new File("scores");			
 	final AtomicReference<File> activeFile = new AtomicReference<>(null);	
 	final AtomicBoolean fileHasBeenModified = new AtomicBoolean(false);
@@ -142,26 +154,10 @@ public class KiteTabSequencer {
 	
 	final EventCanvas eventCanvas = new EventCanvas();
 	
-	File defaultSoundfontFile = null;//new File("sf2/SM64SF V2.sf2");
-	
-	final TabCanvas bassCanvas = new TabCanvas(6,"Bass",
-			IntStream.of(5,4,3,2,1,0).mapToDouble(i -> 
-			middleC * 0.25 * Math.pow(2,(i*13d)/41d)).toArray());
-	
-	final TabCanvas acousticCanvas = new TabCanvas(6,"AcousticG",
-			IntStream.of(6,5,4,3,2,1).mapToDouble(i -> 
-			middleC * 0.5 *Math.pow(2,(i*13d)/41d)).toArray());
-			
-	
-	final TabCanvas guitarCanvas = new TabCanvas(7,"ElectricG",
-			IntStream.of(6,5,4,3,2,1,0).mapToDouble(i -> 
-			middleC * 0.5 *Math.pow(2,(i*13d)/41d)).toArray());
-			
-	
-	final DrumTabCanvas drumCanvas = new DrumTabCanvas();
+	File defaultSoundfontFile = null;
 	final NavigationCanvas navigationBar = new NavigationCanvas();
-	final List<KiteTabCanvas<?>> allCanvases = Arrays.asList(
-			eventCanvas,bassCanvas,guitarCanvas,acousticCanvas,drumCanvas);
+	final List<KiteTabCanvas<?>> allCanvases = new ArrayList<>(Arrays.asList(eventCanvas));
+	final List<SoundfontPlayer> allSoundPlayers = new ArrayList<>();
 	final AtomicReference<KiteTabCanvas<?>> selectedCanvas = new AtomicReference<>(eventCanvas);
 	
 	void playbackDaemonFunction() {
@@ -172,12 +168,14 @@ public class KiteTabSequencer {
 			}
 			else {
 				int t = playT.get();
+				
 				try {
+					
 					midiDaemon.execute(() -> {
 						allCanvases.forEach(a->a.handleEvents(t));	
 					});
 					
-					SwingUtilities.invokeLater(() -> {						
+					SwingUtilities.invokeAndWait(() -> {						
 						frame.repaint();							
 					});
 						
@@ -197,10 +195,8 @@ public class KiteTabSequencer {
 	}
 	
 	void repaintCanvases() {
-		Arrays.asList(navigationBar,guitarCanvas,acousticCanvas,drumCanvas,bassCanvas,eventCanvas)
-		.forEach(a->a.repaint()); 
+		allCanvases.forEach(a->a.repaint());		
 	}
-	
 	
 	void addStaccato() {
 		
@@ -213,7 +209,9 @@ public class KiteTabSequencer {
 	void configureCanvasInstrument() {
 		if (selectedCanvas.get() instanceof TabCanvas) {
 			((TabCanvas)selectedCanvas.get()).displayInstrumentDialog();
-		}
+		}// else if (selectedCanvas.get() instanceof DrumTabCanvas) {
+			//((DrumTabCanvas)selectedCanvas.get()).displayInstrumentDialog();
+		//}
 	}
 	
 	void saveActiveFile() {
@@ -231,12 +229,17 @@ public class KiteTabSequencer {
 				}
 			}
 		} else {
-			JFileChooser chooser = new JFileChooser(defaultPath);			
+			JFileChooser chooser = new JFileChooser(defaultPath);
+			chooser.setFileFilter(fileFilter);
+			
 			String date = LocalDateTime.now(ZoneId.of("Z")).format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmm"));
-			chooser.setSelectedFile(new File(date+".xml"));
+			chooser.setSelectedFile(new File(date+".tab"));
 			if (chooser.showSaveDialog(frame) == JFileChooser.APPROVE_OPTION) {
-				
 				try {
+					File f = chooser.getSelectedFile();
+					if (!f.getAbsolutePath().endsWith(".tab")) {
+						f = new File(f.getAbsoluteFile()+".tab");
+					}
 					saveXML(chooser.getSelectedFile());
 					activeFile.set(chooser.getSelectedFile());
 					fileHasBeenModified.set(false);
@@ -255,37 +258,16 @@ public class KiteTabSequencer {
 			defaultPath.mkdir();
 		}
 		JFileChooser fileChooser = new JFileChooser(defaultPath);
-
-		if (fileChooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
-			//back up in case load fails or whatever
-			/*
-			Map<Integer,Map<Integer,ControlEvent>> backupEventData = 
-					eventCanvas.cloneDataMap();
-			Map<Integer,Map<Integer,InputVal>> backupBassData = 
-					bassCanvas.cloneDataMap();
-			Map<Integer,Map<Integer,InputVal>> backupGuitarData = 
-					guitarCanvas.cloneDataMap();
-			Map<Integer,Map<Integer,InputVal>> backupAcousticData = 
-					acousticCanvas.cloneDataMap();
-			Map<Integer,Map<Integer,DrumVal>> backupDrumData = 
-					drumCanvas.cloneDataMap();
-					*/
+		fileChooser.setFileFilter(fileFilter);
+		if (fileChooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {			
 			try {
+				
 				loadXML(fileChooser.getSelectedFile());
 				activeFile.set(fileChooser.getSelectedFile());
 				fileHasBeenModified.set(false);
 				updateWindowTitle();
 			} catch (Exception ex) {
-				ex.printStackTrace();
-				/*
-				Arrays.asList(eventCanvas,bassCanvas,guitarCanvas,acousticCanvas,drumCanvas)
-				.forEach(a->a.data.clear());
-				eventCanvas.data.putAll(backupEventData);
-				bassCanvas.data.putAll(backupBassData);
-				guitarCanvas.data.putAll(backupGuitarData);
-				acousticCanvas.data.putAll(backupAcousticData);
-				drumCanvas.data.putAll(backupDrumData);
-				*/
+				ex.printStackTrace();			
 			}
 		}
 	}
@@ -328,7 +310,7 @@ public class KiteTabSequencer {
 	}
 	
 	void returnToStopT0() {
-		
+		//TODO am i going to rewrite this
 	}
 	
 	void startPlayback() {
@@ -344,25 +326,21 @@ public class KiteTabSequencer {
 	
 	void stopPlayback() {		
 		isPlaying.set(false);
-		Arrays.asList(acousticCanvas,guitarCanvas,bassCanvas).forEach(canvas ->  
-			Arrays.asList(canvas.synth.getChannels())
-			.forEach(a->a.allSoundOff()));
 		
+		allSoundPlayers.forEach(soundfontPlayer -> {
+			soundfontPlayer.silence();
+		});
+
 		repaintCanvases();
 		playStatusPanel.setPlayStatus(PlayStatus.STOP);
 		playStatusPanel.repaint();	
 	}
 	
-	
 	void setStopT0() {
 		stopT0.set(cursorT.get());
 		repaintCanvases();
 	}
-	
-	void toggleNoteSelectionMode() {
-		System.out.println("toggle note selection mode");
-	}
-	
+		
 	public int getCursorT() {
 		return cursorT.get();
 	}
@@ -370,8 +348,8 @@ public class KiteTabSequencer {
 	public void setCursorT(int t) {
 		cursorT.set(t);
 	}
-	public void incrementCursorT() {
-		
+	
+	public void incrementCursorT() {		
 		cursorT.getAndIncrement();
 		if (cursorT.get() > eventCanvas.getMaxVisibleTime()-scrollTimeMargin) {
 			viewT0.getAndIncrement();
@@ -387,8 +365,7 @@ public class KiteTabSequencer {
 		repaintCanvases();
 	}
 	
-	public void updateMeasureLinePositions() {
-		
+	public void updateMeasureLinePositions() {		
 		AtomicReference<TimeSignatureEvent> timeSignature = new AtomicReference<>(new TimeSignatureEvent(4,TimeSignatureDenominator._4));
 		AtomicInteger counter = new AtomicInteger(0);
 		AtomicInteger measure = new AtomicInteger(1);
@@ -419,7 +396,6 @@ public class KiteTabSequencer {
 		cachedBeatMarkerPositions.clear();
 		cachedMeasurePositions.putAll(measures);
 		cachedBeatMarkerPositions.addAll(markers);
-		//return toReturn.stream().sorted().toList();
 	}
 	
 	public void backspace() {
@@ -437,117 +413,9 @@ public class KiteTabSequencer {
 		selectedCanvas.get().repaint();
 	}
 	
-	public void handleNumericInput(int i) {
-		if (selectedCanvas.get() == eventCanvas) {
-			
-		} else if (selectedCanvas.get() instanceof TabCanvas) {
-			TabCanvas canvas = (TabCanvas) selectedCanvas.get();
-			Optional<InputVal> inputValO = canvas.getSelectedValue();
-			if (inputValO.isPresent()) {
-				inputValO.flatMap(a->InputVal.lookup(a.getToken()+i))
-				.ifPresentOrElse(a->{
-					canvas.setSelectedValue(a);
-					if (!fileHasBeenModified.get()) {
-						fileHasBeenModified.set(true);
-						updateWindowTitle();
-					}
-					canvas.repaint();
-				},()->{
-					InputVal.lookup(""+i).ifPresent(a -> {
-						canvas.setSelectedValue(a);
-						if (!fileHasBeenModified.get()) {
-							fileHasBeenModified.set(true);
-							updateWindowTitle();
-						}
-						canvas.repaint();
-					});
-				});
-						
-			} else {
-				InputVal.lookup(""+i).ifPresent(a -> {
-					canvas.setSelectedValue(a);
-					if (!fileHasBeenModified.get()) {
-						fileHasBeenModified.set(true);
-						updateWindowTitle();
-					}
-					canvas.repaint();
-				});
-			}
-		}
-	}
-	
 	public void handleABCInput(char c) {
-		if (selectedCanvas.get() == eventCanvas) {
-			switch (c) {
-			case 'T':
-				addTimeSignature();
-				if (!fileHasBeenModified.get()) {
-					fileHasBeenModified.set(true);
-					updateWindowTitle();
-				}
-				return;
-			case 'S':
-				addTempo();
-				if (!fileHasBeenModified.get()) {
-					fileHasBeenModified.set(true);
-					updateWindowTitle();
-				}
-				return;
-			case 'N':
-				addStickyNote();
-				if (!fileHasBeenModified.get()) {
-					fileHasBeenModified.set(true);
-					updateWindowTitle();
-				}
-				return;
-			default:
-				
-				break;
-			}
-
-		} else if (selectedCanvas.get() instanceof TabCanvas) {
-			TabCanvas canvas = (TabCanvas) selectedCanvas.get();
-			switch (c) {
-			case 'B':
-				canvas.setSelectedValue(InputVal._b);
-				if (!fileHasBeenModified.get()) {
-					fileHasBeenModified.set(true);
-					updateWindowTitle();
-				}
-				canvas.repaint();
-				return;
-			case 'D':
-				canvas.setSelectedValue(InputVal._d);
-				if (!fileHasBeenModified.get()) {
-					fileHasBeenModified.set(true);
-					updateWindowTitle();
-				}
-				canvas.repaint();
-				return;
-			case 'E':
-				canvas.setSelectedValue(InputVal._e);
-				if (!fileHasBeenModified.get()) {
-					fileHasBeenModified.set(true);
-					updateWindowTitle();
-				}
-				canvas.repaint();
-				return;
-			}
-			
-		} else if (selectedCanvas.get() instanceof DrumTabCanvas) {
-			
-			DrumTabCanvas canvas = (DrumTabCanvas) selectedCanvas.get();
-			DrumVal.lookup(String.valueOf(c))
-			.ifPresent(val -> {				
-				canvas.setSelectedValue(cursorT.get(),val);				
-				if (!fileHasBeenModified.get()) {
-					fileHasBeenModified.set(true);
-					updateWindowTitle();
-				}
-				canvas.repaint();
-			});
-			
-		}
+		selectedCanvas.get().handleCharInput(c);
+		
 	}
 	
 	public void cursorToStart() {
@@ -606,19 +474,16 @@ public class KiteTabSequencer {
 	
 	public void shiftArrowUp() {
 		if (selectedCanvas.get() == null) {
-			selectedCanvas.set(drumCanvas);
-			drumCanvas.setSelectedRow(drumCanvas.getRowCount()-1);
-			drumCanvas.repaint();
-		} else {			
-			
-			Map<KiteTabCanvas<?>,KiteTabCanvas<?>> prevMaps = new HashMap<>();
-			prevMaps.put(drumCanvas, acousticCanvas);
-			prevMaps.put(acousticCanvas, guitarCanvas);
-			prevMaps.put(guitarCanvas, bassCanvas);
-			prevMaps.put(bassCanvas, eventCanvas);
-			prevMaps.put(eventCanvas, drumCanvas);
+			selectedCanvas.set(allCanvases.get(0));
+			allCanvases.get(0).setSelectedRow(allCanvases.get(0).getRowCount()-1);
 			selectedCanvas.get().repaint();
-			selectedCanvas.updateAndGet(prevMaps::get);
+		} else {			
+			int index = allCanvases.indexOf(selectedCanvas.get())-1;
+			if (index == -1) {
+				index+=allCanvases.size();
+			}
+			selectedCanvas.get().repaint();
+			selectedCanvas.set(allCanvases.get(index));							
 			selectedCanvas.get().setSelectedRow(selectedCanvas.get().getRowCount()-1);
 			selectedCanvas.get().repaint();							
 		}
@@ -627,18 +492,16 @@ public class KiteTabSequencer {
 	
 	public void shiftArrowDown() {
 		if (selectedCanvas.get() == null) {
-			selectedCanvas.set(eventCanvas);
+			selectedCanvas.set(allCanvases.get(allCanvases.size()-1));
 			eventCanvas.setSelectedRow(0);
 			eventCanvas.repaint();
 		} else {			
-			Map<KiteTabCanvas<?>,KiteTabCanvas<?>> nextMaps = new HashMap<>();
-			nextMaps.put(acousticCanvas,drumCanvas);
-			nextMaps.put(guitarCanvas,acousticCanvas);
-			nextMaps.put(bassCanvas,guitarCanvas);
-			nextMaps.put(eventCanvas,bassCanvas);
-			nextMaps.put(drumCanvas,eventCanvas);				
+			int index = allCanvases.indexOf(selectedCanvas.get())+1;
+			if (index == allCanvases.size()) {
+				index = 0;
+			}
 			selectedCanvas.get().repaint();
-			selectedCanvas.updateAndGet(nextMaps::get);				
+			selectedCanvas.set(allCanvases.get(index));				
 			selectedCanvas.get().setSelectedRow(0);
 			selectedCanvas.get().repaint();					
 		}	
@@ -646,21 +509,13 @@ public class KiteTabSequencer {
 	
 	public void arrowUp() {
 		if (selectedCanvas.get() == null) {
-			selectedCanvas.set(drumCanvas);
-			drumCanvas.setSelectedRow(3);
-			drumCanvas.repaint();
-		} else {			
+			selectedCanvas.set(allCanvases.get(0));
+			allCanvases.get(0).setSelectedRow(allCanvases.get(0).getRowCount()-1);
+			selectedCanvas.get().repaint();
+		}
+		else {			
 			if (selectedCanvas.get().getSelectedRow() == 0) {
-				Map<KiteTabCanvas<?>,KiteTabCanvas<?>> prevMaps = new HashMap<>();
-				prevMaps.put(drumCanvas, acousticCanvas);
-				prevMaps.put(acousticCanvas, guitarCanvas);
-				prevMaps.put(guitarCanvas, bassCanvas);
-				prevMaps.put(bassCanvas, eventCanvas);
-				prevMaps.put(eventCanvas, drumCanvas);
-				selectedCanvas.get().repaint();
-				selectedCanvas.updateAndGet(prevMaps::get);
-				selectedCanvas.get().setSelectedRow(selectedCanvas.get().getRowCount()-1);
-				selectedCanvas.get().repaint();				
+				shiftArrowUp();				
 			} else {
 				selectedCanvas.get().setSelectedRow(selectedCanvas.get().getSelectedRow()-1);
 				selectedCanvas.get().repaint();
@@ -671,21 +526,12 @@ public class KiteTabSequencer {
 	
 	public void arrowDown() {
 		if (selectedCanvas.get() == null) {
-			selectedCanvas.set(eventCanvas);
+			selectedCanvas.set(allCanvases.get(allCanvases.size()-1));
 			eventCanvas.setSelectedRow(0);
-			eventCanvas.repaint();
+			eventCanvas.repaint();		
 		} else {
 			if (selectedCanvas.get().getSelectedRow() == selectedCanvas.get().getRowCount()-1) {
-				Map<KiteTabCanvas<?>,KiteTabCanvas<?>> nextMaps = new HashMap<>();
-				nextMaps.put(acousticCanvas,drumCanvas);
-				nextMaps.put(guitarCanvas,acousticCanvas);
-				nextMaps.put(bassCanvas,guitarCanvas);
-				nextMaps.put(eventCanvas,bassCanvas);
-				nextMaps.put(drumCanvas,eventCanvas);				
-				selectedCanvas.get().repaint();
-				selectedCanvas.updateAndGet(nextMaps::get);				
-				selectedCanvas.get().setSelectedRow(0);
-				selectedCanvas.get().repaint();
+				shiftArrowDown();				
 			} else {
 				selectedCanvas.get().setSelectedRow(selectedCanvas.get().getSelectedRow()+1);
 				selectedCanvas.get().repaint();
@@ -728,8 +574,7 @@ public class KiteTabSequencer {
 		return instance;
 	}
 	
-	private KiteTabSequencer() {
-		loadSoundfonts();
+	private KiteTabSequencer() {		
 		createGui();		
 	}
 
@@ -741,15 +586,15 @@ public class KiteTabSequencer {
 		
 		public abstract int getRowCount();
 		public abstract void handleEvents(int t);
-		public abstract String getName();
+		public abstract boolean handleCharInput(char c);
+		public abstract String getName();			
 		
 		KiteTabCanvas() {
 			this.addMouseListener(new MouseAdapter() {
 				@Override
 				public void mouseClicked(MouseEvent me) {
 									
-					int t_ = (int) Math.floor(me.getPoint().getX()/cellWidth)+viewT0.get();					
-					final int infoPanelHeight = fontMetrics.getMaxAscent()+10;
+					int t_ = (int) Math.floor(me.getPoint().getX()/cellWidth)+viewT0.get();										
 					int row = (int) Math.floor((me.getPoint().y-infoPanelHeight)/rowHeight);
 					if (selectedCanvas.get() != null) {						
 						selectedCanvas.get().repaint();
@@ -773,6 +618,8 @@ public class KiteTabSequencer {
 				
 			});
 		}
+		
+		 
 		
 		public final boolean isSelected() {
 			return this == selectedCanvas.get(); 
@@ -798,20 +645,17 @@ public class KiteTabSequencer {
 			g.fillRect(0,0,getWidth(),getHeight());			  
 			g.setStroke(new BasicStroke(1));			
 			g.setPaint(isSelected()?selectedLabelTextColor:unselectedLabelTextColor);
-			g.drawString(getName(),2,fontMetrics.getMaxAscent());
-			final int infoPanelHeight = fontMetrics.getMaxAscent()+10;
+			g.drawString(getName(),2,fontMetrics.getMaxAscent());			
 			int t0 = viewT0.get();
 			int tDelta = getWidth()/cellWidth;
 			int t1 = t0+tDelta;
 			
-			//AtomicInteger timeSignatureT0 = new AtomicInteger(0);
-			//AtomicReference<TimeSignatureEvent> timeSignature = new AtomicReference<>(new TimeSignatureEvent(4,TimeSignatureDenominator._4));
 													
 			{
 				int y = infoPanelHeight;
 			
-				for (int stringNumber = 0; stringNumber < getRowCount(); stringNumber++) {
-					g.setPaint(stringNumber%2==0?evenGridBackground:oddGridBackground);
+				for (int row= 0; row < getRowCount(); row++) {
+					g.setPaint(row%2==0?evenGridBackground:oddGridBackground);
 					g.fillRect(0, y, getWidth(), rowHeight);						
 					y+=rowHeight;
 				}
@@ -883,47 +727,6 @@ public class KiteTabSequencer {
 				}
 				x+=cellWidth;
 			}
-			/*
-			IntStream.range(t0, t1).forEach(t_ -> {
-
-				
-				
-				for (int rowNumber = 0; rowNumber < getRowCount(); rowNumber++) {
-
-					g.setPaint(gridColor);
-					if (cachedMeasurePositions.containsKey(t_)) {
-						g.setStroke(new BasicStroke(2));
-					} else {
-						g.setStroke(new BasicStroke(1));
-					}
-					//g.drawLine(x.get(), y-rowHeight, x.get(), y);
-					if (isSelected() && rowNumber == getSelectedRow() && 
-							t_ == cursorT.get()) {
-						g.setPaint(selectedCellColor);
-						g.setStroke(new BasicStroke(1));
-						g.drawRect(x.get(), y-rowHeight, cellWidth-1,rowHeight-1);
-					} 
-					y+=rowHeight;
-				}
-				if (stopT0.get() == t_) {
-					g.setStroke(new BasicStroke(2));
-					g.setPaint(repeatColor);
-					g.drawLine(x.get(), infoPanelHeight, x.get(), infoPanelHeight+getRowCount()*rowHeight);
-					g.setStroke(new BasicStroke(1));
-					g.drawLine(x.get()-2, infoPanelHeight, x.get()+2, infoPanelHeight+getRowCount()*rowHeight);
-				}
-				
-				if (repeatT.get() == t_ && t_>=0) {
-					g.setStroke(new BasicStroke(2));
-					g.setPaint(repeatColor);					
-					g.drawLine(x.get(), infoPanelHeight, x.get(), infoPanelHeight+getRowCount()*rowHeight);
-					g.setStroke(new BasicStroke(1));
-					g.drawLine(x.get()-2, infoPanelHeight, x.get()-2, infoPanelHeight+getRowCount()*rowHeight);
-				}
-				x.addAndGet(cellWidth);
-			})
-			*/;
-			
 		}
 		
 		public final int getMaxVisibleTime() {
@@ -1067,8 +870,7 @@ public class KiteTabSequencer {
 		@Override
 		public void paint(Graphics g_) {
 			Graphics2D g = (Graphics2D) g_;
-			drawGrid(g);
-			final int infoPanelHeight = fontMetrics.getMaxAscent()+10;
+			drawGrid(g);			
 			int t0 = viewT0.get();
 			int tDelta = getWidth()/cellWidth;
 			int t1 = t0+tDelta;
@@ -1099,7 +901,7 @@ public class KiteTabSequencer {
 						break;
 					case STICKY_NOTE:
 						g.setFont(font.deriveFont(Font.ITALIC));						
-						g.setPaint(((StickyNote) event).getColor());
+						
 						g.drawString(((StickyNote) event).getText(),x+1,y-3);
 						
 					default:
@@ -1121,29 +923,62 @@ public class KiteTabSequencer {
 				});
 			}			
 		}
+
+		@Override
+		public boolean handleCharInput(char c) {
+			
+			switch (c) {
+			case 'T':
+				addTimeSignature();
+				if (!fileHasBeenModified.get()) {
+					fileHasBeenModified.set(true);
+					updateWindowTitle();
+				}
+				return true;
+			case 'S':
+				addTempo();
+				if (!fileHasBeenModified.get()) {
+					fileHasBeenModified.set(true);
+					updateWindowTitle();
+				}
+				return true;
+			case 'N':
+				addStickyNote();
+				if (!fileHasBeenModified.get()) {
+					fileHasBeenModified.set(true);
+					updateWindowTitle();
+				}
+				return true;
+			default:
+				return false;				
+			}
+			
+		}
 	}
 	
-	class TabCanvas extends KiteTabCanvas<InputVal> implements SoundfontPlayer {		
+	class TabCanvas extends KiteTabCanvas<String> implements SoundfontPlayer {		
 		
 		private final String name;
 		private final double[] baseFrequencies;	
 		private final int rows;
-		
-		private final Map<Integer,InputVal> openNotes = new ConcurrentHashMap<>();
+
+		private final Map<Integer,String> openNotes = new ConcurrentHashMap<>();
 		private final Map<MidiChannel,Integer> openMidiNums = new ConcurrentHashMap<>();
 		
 		Synthesizer synth = null;
 		private File soundfontFile = defaultSoundfontFile;
 		private final AtomicReference<Instrument> loadedInstrument = new AtomicReference<>(null);
-		
-		public TabCanvas(int strings, String name, double[] baseFrequencies) {
-			
-			this.rows = strings;
-			this.name = name;
-			this.baseFrequencies = baseFrequencies;
-			
+		private final StringCanvasConfig canvasConfig;
+				
+		public TabCanvas(StringCanvasConfig config) {
+			this.canvasConfig = config;
+			this.rows = config.getFrequencies().length;
+			this.name = config.getName();
+			this.baseFrequencies = config.getFrequencies();
+			initializeMidi(config.getSoundfontFile().orElse(defaultSoundfontFile),
+					config.getBank(),config.getProgram());
 		}
-		
+
 		public Synthesizer getSynth() {
 			return synth;
 		}
@@ -1190,9 +1025,6 @@ public class KiteTabSequencer {
 					}				
 				}
 			});
-				
-			
-			//loadSoundfontButton.doClick();
 			
 			if (soundfontFile != null) {
 				soundbankTextField.setText(soundfontFile.getName());
@@ -1233,16 +1065,10 @@ public class KiteTabSequencer {
 			});
 			
 			JButton loadInstrumentButton = new JButton("Load instrument");
-			loadInstrumentButton.addActionListener(ae ->{
-				
+			loadInstrumentButton.addActionListener(ae ->{				
 				Instrument instrument = instrumentList.getSelectedValue();
 				loadedInstrument.set(instrument);
 				initializeMidi(soundfontFile,instrument.getPatch().getBank(),instrument.getPatch().getProgram());
-				
-				
-				//IntStream.range(0,getRowCount()).forEach(row -> {
-//					synth.getChannels()[row].programChange(instrument.getPatch().getBank(),instrument.getPatch().getProgram());
-				//});
 				repaint();
 			});
 			
@@ -1266,49 +1092,20 @@ public class KiteTabSequencer {
 			processTabCanvasEvent(row,null);
 		}
 		
-		public void noteOn(int row,InputVal inputVal) {
+		public void noteOn(int row,String inputVal) {
 			openNotes.put(row, inputVal);
 			processTabCanvasEvent(row,inputVal);
 		}
 		
-		void processTabCanvasEvent(int row,InputVal inputVal) {
-			MidiChannel channel = synth.getChannels()[row]; 
-			//MidiChannel channel = channelMappingMap.get(this).get(row).getChannel();
-			double[] stringTunings = this.getBaseFrequencies();
+		void processTabCanvasEvent(int row,String inputVal) {
+			MidiChannel channel = synth.getChannels()[row<9?row:row+1]; 			
 			if (inputVal == null) {
 				if (openMidiNums.containsKey(channel)) {
 					channel.noteOff(openMidiNums.get(channel));
 					openMidiNums.remove(channel);
 				}			
 			}
-			else {
-				if (inputVal.getEdoSteps().isPresent()) {
-					
-					double baseFreq = stringTunings[row];
-					double edoSteps = inputVal.getEdoSteps().getAsInt();
-					
-					double freq = baseFreq*Math.pow(2.0, edoSteps/41.0);
-					
-					double n = (12 * Math.log(freq/440)/Math.log(2) + 69);
-					int midiNote = (int) Math.round(n);
-					double semitoneOffset = n - midiNote;
-					final double semitoneRange = 2.0;
-					double bendRatio = semitoneOffset/ semitoneRange;
-					int pitchBend = 8192 + (int) (bendRatio*8192);
-					pitchBend = Math.max(0, Math.min(16383, pitchBend));
-					int lsb = pitchBend & 0x7F;
-					int msb = (pitchBend >> 7) & 0x7F;
-					try {
-						ShortMessage pb = new ShortMessage();					
-						pb.setMessage(ShortMessage.PITCH_BEND, row, lsb, msb);
-						synth.getReceiver().send(pb, -1);
-						channel.noteOn(midiNote, 100);
-						openMidiNums.put(channel,midiNote);
-				 	} catch (Exception ex) {
-				 		ex.printStackTrace();
-				 	}
-				}
-			}
+			
 		}
 		
 		public double[] getBaseFrequencies() {
@@ -1316,8 +1113,8 @@ public class KiteTabSequencer {
 		}
 				
 		@Override
-		public Dimension getSize() {				 
-			return new Dimension(super.getWidth(),rowHeight * rows);
+		public Dimension getSize() {				 			
+			return new Dimension(super.getWidth(),infoPanelHeight + rowHeight * rows);
 		}		
 		 
 		@Override
@@ -1331,7 +1128,7 @@ public class KiteTabSequencer {
 			g.drawString(String.format("(loaded instrument: '%s')",
 					loadedInstrument.get() == null ? "<null>" : loadedInstrument.get().getName()),					
 					12+fontMetrics.stringWidth(getName()),fontMetrics.getMaxAscent());
-			final int infoPanelHeight = fontMetrics.getMaxAscent()+10;
+			
 			g.setPaint(Color.BLACK);
 			int t0 = viewT0.get();
 			int tDelta = getWidth()/cellWidth;
@@ -1340,9 +1137,9 @@ public class KiteTabSequencer {
 			for (int t_ = t0; t_<t1; t_+=1) {
 				int y = rowHeight+infoPanelHeight; 
 				g.setFont(font);
-				for (int stringNumber = 0; stringNumber < rows; stringNumber++) {
+				for (int row = 0; row< rows; row++) {
 					g.setPaint(Color.WHITE);									
-					String s = data.getOrDefault(t_,new HashMap<>()).getOrDefault(stringNumber,InputVal.NIL).getToken();					
+					String s = data.getOrDefault(t_,new HashMap<>()).getOrDefault(row,"");					
 					g.drawString(s,(int) (x+(cellWidth-fontMetrics.stringWidth(s))*0.5),y-3);
 					y+=rowHeight;
 				}
@@ -1363,18 +1160,60 @@ public class KiteTabSequencer {
 		@Override
 		public void handleEvents(int t) {
 			
-			IntStream.range(0, getRowCount()).forEach(row -> {	
+			BiConsumer<Integer,Double> f = (row, freq) -> {
+				MidiChannel channel = synth.getChannels()[row<9?row:row+1];
+				double n = (12 * Math.log(freq/440)/Math.log(2) + 69);
+				int midiNote = (int) Math.round(n);
+				double semitoneOffset = n - midiNote;
+				final double semitoneRange = 2.0;
+				double bendRatio = semitoneOffset/ semitoneRange;
+				int pitchBend = 8192 + (int) (bendRatio*8192);
+				pitchBend = Math.max(0, Math.min(16383, pitchBend));
+				int lsb = pitchBend & 0x7F;
+				int msb = (pitchBend >> 7) & 0x7F;
+				try {
+					ShortMessage pb = new ShortMessage();					
+					pb.setMessage(ShortMessage.PITCH_BEND, row, lsb, msb);
+					synth.getReceiver().send(pb, -1);
+					channel.noteOn(midiNote, 100);
+					openMidiNums.put(channel,midiNote);
+			 	} catch (Exception ex) {
+			 		ex.printStackTrace();
+			 	}
+			};
+			IntStream.range(0, getRowCount()).forEach(row -> {
+				MidiChannel channel = synth.getChannels()[row<9?row:row+1];
+				double baseFreq = canvasConfig.getFrequencies()[row];
+				 
 				this.getValueAt(t, row).ifPresentOrElse(inputVal -> {
-					inputVal.getEdoSteps().ifPresentOrElse(steps -> {
-						noteOn(row,inputVal);
-					},
-							() -> {
-								System.out.println(inputVal);
-							});							
+					if (inputVal.charAt(0) != '-') {
+						//
+						if (openMidiNums.containsKey(channel)) {
+							channel.noteOff(openMidiNums.get(channel));
+							openMidiNums.remove(channel);
+						}
+						
+						if (inputVal.charAt(0) == 'H') {
+							double freq = baseFreq;
+							freq*=Integer.parseInt(inputVal.substring(1));
+							f.accept(row, freq);
+							
+						} else if (canvasConfig.getAdditionalPitchMap().containsKey(inputVal)){
+							
+							double edoSteps = canvasConfig.getAdditionalPitchMap().get(inputVal);
+							double freq = baseFreq*Math.pow(2, edoSteps/canvasConfig.getEd2());
+							f.accept(row, freq);
+						} else {
+							double edoSteps = Double.parseDouble(inputVal);
+							double freq = baseFreq*Math.pow(2, edoSteps/canvasConfig.getEd2());
+							f.accept(row, freq);
+						}					
+					}
 				}, () -> {
 					noteOff(row);
 				});
 			});
+			
 			
 		}
 
@@ -1402,7 +1241,7 @@ public class KiteTabSequencer {
 				}
 				
 				for (int row = 0; row < getRowCount(); row++) {				
-					synth.getChannels()[row].programChange(bank,program);
+					synth.getChannels()[row<9?row:row+1].programChange(bank,program);
 				}
 				
 			} catch (Exception ex) {
@@ -1411,26 +1250,117 @@ public class KiteTabSequencer {
 		
 			
 		}
+
+		@Override
+		public void silence() {
+			for (int row = 0; row < getRowCount(); row++) {
+				MidiChannel channel = synth.getChannels()[row<9?row:row+1];
+				channel.allSoundOff();
+			}
+			
+		}
+
+		Pattern harmonicPattern = Pattern.compile("^H(\\d*)$");
+		Pattern integerPattern = Pattern.compile("^(\\d+)$");
+		
+		@Override
+		public boolean handleCharInput(char c) {
+			if (c == '-') {
+				{
+					int t = cursorT.get()+1;
+					
+					while (getValueAt(t,getSelectedRow()).orElse("").equals("-")) {
+						System.out.println(t+" "+getValueAt(t,getSelectedRow()).orElse("").contentEquals("-"));
+						data.getOrDefault(t,Collections.emptyMap()).remove(getSelectedRow());
+						t++;
+					}
+					
+				}
+
+				for (int t = cursorT.get()-1; t>=0; t--) {
+					
+					if (getValueAt(t,getSelectedRow()).isPresent()) {
+						for (int t2 = t+1; t2<cursorT.get(); t2++) {
+							data.putIfAbsent(t2, new HashMap<>());
+							data.get(t2).put(getSelectedRow(),"-");
+						}						
+						
+					}
+				}
+				setSelectedValue(String.valueOf(c));
+				if (!fileHasBeenModified.get()) {
+					fileHasBeenModified.set(true);
+					updateWindowTitle();
+				}
+				repaint();
+				return true;
+			}
+			
+			String token0 = getValueAt(cursorT.get(),getSelectedRow()).orElse("");
+			String token1 = token0+String.valueOf(c);
+			
+			Predicate<String> isValid = token -> {
+				Matcher harmonicMatcher = harmonicPattern.matcher(token);
+				if (harmonicMatcher.find() && (harmonicMatcher.group(1).isBlank() || 
+						Integer.parseInt(harmonicMatcher.group(1)) <= canvasConfig.getMaxHarmonic())) {
+					
+					return true;
+				}
+				Matcher integerMatcher = integerPattern.matcher(token);
+				if (integerMatcher.find() && Integer.parseInt(token) <= canvasConfig.getMaxFrets()) {
+					return true;
+				}
+				if (canvasConfig.getAdditionalPitchMap().keySet().contains(token)) {
+					return true;
+				}
+				return false;				
+			};
+			
+			if (isValid.test(token1)) {
+				setSelectedValue(token1);
+				if (!fileHasBeenModified.get()) {
+					fileHasBeenModified.set(true);
+					updateWindowTitle();
+				}
+				repaint();
+				return true;
+			} 
+			if (isValid.test(String.valueOf(c))) {
+				setSelectedValue(String.valueOf(c));
+				if (!fileHasBeenModified.get()) {
+					fileHasBeenModified.set(true);
+					updateWindowTitle();
+				}
+				repaint();
+				return true;
+			}
+			
+			return false;
+		}
 	}
 	
 	interface SoundfontPlayer {
 		public void initializeMidi(File file, int bank, int program);
+		public void silence();
 		public Synthesizer getSynth();
 		
 	}
 	
-	class DrumTabCanvas extends KiteTabCanvas<DrumVal> implements SoundfontPlayer {
+	class DrumTabCanvas extends KiteTabCanvas<PercRowToken> implements SoundfontPlayer {
 
 		Synthesizer synth = null;
-		
-		private File soundfontFile = null;
+				
 		private final AtomicReference<Instrument> loadedInstrument = new AtomicReference<>(null);
-		
+		private final DrumCanvasConfig canvasConfig;
 		public Synthesizer getSynth() {
 			return synth;
 		}
-		public DrumTabCanvas() {
-			initializeMidi(defaultSoundfontFile,0,0);
+		
+		public DrumTabCanvas(DrumCanvasConfig canvasConfig) {
+			this.canvasConfig = canvasConfig;
+			initializeMidi(canvasConfig.getSoundfontFile().orElse(defaultSoundfontFile),
+					canvasConfig.getBank(),canvasConfig.getProgram());
+			//initializeMidi(defaultSoundfontFile,0,0);
 		}
 		
 		@Override
@@ -1438,17 +1368,27 @@ public class KiteTabSequencer {
 			try {
 				synth = MidiSystem.getSynthesizer();
 				synth.open();
-				if (file != null) {				
-					Soundbank soundbank = MidiSystem.getSoundbank(file);
-					synth.unloadAllInstruments(synth.getDefaultSoundbank());
-					synth.loadAllInstruments(soundbank);
-					Stream.of(soundbank.getInstruments()).filter(a->
-					a.getPatch().getBank() == bank && a.getPatch().getProgram() == program)
-					.findFirst().ifPresent(instrument -> {
-						synth.loadInstrument(instrument);
-						synth.getChannels()[9].programChange(bank, program);
-					});
-				}
+				
+				Soundbank soundbank = file == null ? synth.getDefaultSoundbank() : MidiSystem.getSoundbank(file);
+				
+				List<Instrument> percussionInstruments = new ArrayList<>();
+				
+				for (Instrument instrument : soundbank.getInstruments()) {
+					boolean bank128 = instrument.getPatch().getBank() == 128;
+					boolean matchesRegex = instrument.getName().toLowerCase().contains("drum") ||
+							instrument.getName().toLowerCase().contains("perc");
+					if (bank128 || matchesRegex) {
+						percussionInstruments.add(instrument);
+					}
+				}	
+				
+				percussionInstruments.stream().filter(a->
+				a.getPatch().getBank() == bank && a.getPatch().getProgram() == program)
+				.findFirst().ifPresent(instrument -> {					
+					loadedInstrument.set(instrument);					
+					synth.loadInstrument(instrument);
+					synth.getChannels()[9].programChange(bank, program);
+				});				
 					
 			} catch (Exception ex) {
 				ex.printStackTrace();
@@ -1462,11 +1402,13 @@ public class KiteTabSequencer {
 			MidiChannel channel = synth.getChannels()[9];
 			openNotes.forEach(channel::noteOff);
 			openNotes.clear();
-			drumCanvas.data.getOrDefault(t,Collections.emptyMap())
+			
+			this.data.getOrDefault(t,Collections.emptyMap())
 			.values().stream().distinct().forEach(drumVal -> {				
-				channel.noteOn(drumVal.midiNote, 100);
-				openNotes.add(drumVal.midiNote);
+				channel.noteOn(drumVal.getMidiNumber(), 100);
+				openNotes.add(drumVal.getMidiNumber());
 			});			
+			
 			
 		}
 
@@ -1475,7 +1417,13 @@ public class KiteTabSequencer {
 			
 			Graphics2D g = (Graphics2D) g_;
 			drawGrid(g);
-			final int infoPanelHeight = fontMetrics.getMaxAscent()+10;
+			
+			g.setFont(font.deriveFont(Font.ITALIC));
+			g.setPaint(Color.WHITE);
+			g.drawString(String.format("(loaded instrument: '%s')",
+					loadedInstrument.get() == null ? "<null>" : loadedInstrument.get().getName()),					
+					12+fontMetrics.stringWidth(getName()),fontMetrics.getMaxAscent());
+						
 			int t0 = viewT0.get();
 			int tDelta = getWidth()/cellWidth;
 			int t1 = t0+tDelta;
@@ -1483,11 +1431,11 @@ public class KiteTabSequencer {
 			for (int t_ = t0; t_<t1; t_+=1) {
 				int y = rowHeight+infoPanelHeight; 												
 				g.setFont(font);
-				for (int stringNumber = 0; stringNumber < getRowCount(); stringNumber++) {																								
+				for (int row= 0; row < getRowCount(); row++) {																								
 					g.setPaint(Color.WHITE);
 					int y_ = y;
 					int x_ = x;
-					this.getValueAt(t_, stringNumber).map(a->a.getToken()).ifPresent(s->{
+					this.getValueAt(t_, row).map(a->a.getToken()).ifPresent(s->{
 						g.drawString(s,(int) (x_+(cellWidth-fontMetrics.stringWidth(s))*0.5),y_-3);	
 					});
 
@@ -1499,21 +1447,87 @@ public class KiteTabSequencer {
 
 		@Override
 		public int getRowCount() {
-			return 4;
+			return canvasConfig.getRowTypes().size();
 		}
 
 		@Override
 		public String getName() {
-			return "Drums";
+			return canvasConfig.getName();
+		}
+		@Override
+		public void silence() {
+			MidiChannel channel = synth.getChannels()[9];
+			channel.allSoundOff();
+			
+			
+		}
+
+		@Override
+		public boolean handleCharInput(char c) {
+			
+			Optional<PercRowToken> tokenO = getValueAt(cursorT.get(),getSelectedRow());			
+			Predicate<PercRowToken> permitted = a->a.getPosition() == canvasConfig.getRowTypes().get(getSelectedRow());
+			if (tokenO.isPresent()) {
+				Optional<PercRowToken> newTokenO = 
+						canvasConfig.getTokens().stream()
+						.filter(a->a.getToken().equals(tokenO.get().getToken()+String.valueOf(c).toUpperCase()))
+						.filter(permitted).findFirst();
+				if (newTokenO.isPresent()) {					
+					setSelectedValue(cursorT.get(),newTokenO.get());
+					repaint();
+					return true;
+				}				
+			}	
+			
+			Optional<PercRowToken> newTokenO = 
+					canvasConfig.getTokens().stream().filter(a->a.getToken().equals(String.valueOf(c).toUpperCase()))
+					.filter(permitted).findFirst();
+			
+			if (newTokenO.isPresent()) {					
+				setSelectedValue(cursorT.get(),newTokenO.get());
+				repaint();
+				return true;
+			}			
+			return false;
 		}
 	}
 	
 	
+	void initializeCanvases() {
+		try {
+			CanvasesConfig config = CanvasesConfig.getXMLInstance();
+			for (CanvasConfig canvasConfig : config.getCanvases()) {
+				switch (canvasConfig.getType()) {
+				case DRUM: {
+					DrumCanvasConfig drumConfig = (DrumCanvasConfig) canvasConfig;					
+					DrumTabCanvas canvas = new DrumTabCanvas(drumConfig);
+					allCanvases.add(canvas);
+					allSoundPlayers.add(canvas);
+					break;
+				}
+				case STRING:{
+					StringCanvasConfig stringConfig = (StringCanvasConfig) canvasConfig;
+					TabCanvas canvas = new TabCanvas(stringConfig);
+					allCanvases.add(canvas);
+					allSoundPlayers.add(canvas);
+					break;
+				}
+				default:
+					break;
+				
+				}
+			}
+		} catch (Exception ex) {
+			ex.printStackTrace();
+		}
+		
+	}
+	
 	void createGui() {
-
-		JPanel panel = new JPanel();
-		InputMap inputMap = panel.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-		ActionMap actionMap = panel.getActionMap();
+		initializeCanvases();
+		Box mainPanel = Box.createVerticalBox();
+		InputMap inputMap = mainPanel.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+		ActionMap actionMap = mainPanel.getActionMap();
 		
 		KeyStroke k_CtrlI = KeyStroke.getKeyStroke("control I");
 		KeyStroke k_ctrlO = KeyStroke.getKeyStroke("control O");
@@ -1540,8 +1554,11 @@ public class KiteTabSequencer {
 		KeyStroke k_Delete= KeyStroke.getKeyStroke("DELETE");
 		KeyStroke k_Period = KeyStroke.getKeyStroke("PERIOD");
 		KeyStroke k_Comma= KeyStroke.getKeyStroke("COMMA");
+		KeyStroke k_Hyphen= KeyStroke.getKeyStroke("MINUS");
 		
 		
+		inputMap.put(k_Hyphen, "hyphen");
+		actionMap.put("hyphen",rToA(()->this.handleABCInput('-')));
 		inputMap.put(k_CtrlI, "configureCanvasInstrument");
 		actionMap.put("configureCanvasInstrument",rToA(this::configureCanvasInstrument));
 		
@@ -1608,11 +1625,11 @@ public class KiteTabSequencer {
 			final int i_ = i;
 			KeyStroke k = KeyStroke.getKeyStroke(""+i);
 			inputMap.put(k, ""+i_);
-			actionMap.put(""+i_,rToA(()->this.handleNumericInput(i_)));
+			actionMap.put(""+i_,rToA(()->this.handleABCInput((""+i_).charAt(0))));
 		}
 		
-		JPanel controlBar = new JPanel();
-		controlBar.setLayout(null);
+		Box controlBar = Box.createHorizontalBox();
+		//controlBar.setLayout(null);
 		
 		playButton = new LeftClickablePanelButton(this::startPlayback) {
 			@Override
@@ -1652,29 +1669,38 @@ public class KiteTabSequencer {
 			}
 		};
 		
-		
-		{
-			int x = 0;
-			
-			for (Component c : Arrays.asList(playStatusPanel,playButton,stopButton)) {
-				controlBar.add(c);
-			}
-			playButton.setBounds(new Rectangle(0,0,20,20));
-			x+=25;
-			stopButton.setBounds(new Rectangle(x,0,20,20));
-			x+=25;
-			playStatusPanel.setBounds(new Rectangle(x,0,fontMetrics.stringWidth("STOP  "),20));
-		
+		stopButton.setMaximumSize(new Dimension(30,230));
+		stopButton.setMinimumSize(new Dimension(30,30));
+		playButton.setMaximumSize(new Dimension(30,30));
+		playButton.setMinimumSize(new Dimension(30,30));
+		for (Component c : Arrays.asList(playButton,stopButton,playStatusPanel)) {
+			controlBar.add(c);
 		}
-		controlBar.setSize(new Dimension(Toolkit.getDefaultToolkit().getScreenSize().width,20));
-		panel.setLayout(null);
+		controlBar.add(Box.createHorizontalGlue());
+		
+		navigationBar.setMaximumSize(new Dimension(Integer.MAX_VALUE,20));
+		navigationBar.setMinimumSize(new Dimension(0,20));
+		navigationBar.setPreferredSize(new Dimension(Toolkit.getDefaultToolkit().getScreenSize().width,20));
+		
+		mainPanel.add(navigationBar);
+		for (KiteTabCanvas<?> canvas : allCanvases) {
+			int h = (int) canvas.getRowCount()*rowHeight+50;
+			canvas.setMaximumSize(new Dimension(Integer.MAX_VALUE,h));
+			canvas.setMinimumSize(new Dimension(0,h));
+			canvas.setPreferredSize(new Dimension(Toolkit.getDefaultToolkit().getScreenSize().width,h));
+			mainPanel.add(canvas);
+		}
+		mainPanel.add(Box.createVerticalGlue());
+		//panel.setLayout(null);
+		/*
 		int y = 0;		
-		panel.add(navigationBar);
+		mainPanel.add(navigationBar);
 		navigationBar.setBounds(new Rectangle(0,y,Toolkit.getDefaultToolkit().getScreenSize().width,20));
 		y+=navigationBar.getBounds().height;
-		panel.add(eventCanvas);
+		mainPanel.add(eventCanvas);
 		eventCanvas.setBounds(new Rectangle(0,y,Toolkit.getDefaultToolkit().getScreenSize().width,80));
 		y+=eventCanvas.getBounds().height;
+		
 		panel.add(bassCanvas);						
 		bassCanvas.setBounds(new Rectangle(0,y,Toolkit.getDefaultToolkit().getScreenSize().width,130));
 		y+=bassCanvas.getBounds().height;		
@@ -1687,17 +1713,20 @@ public class KiteTabSequencer {
 		panel.add(drumCanvas);						
 		drumCanvas.setBounds(new Rectangle(0,y,Toolkit.getDefaultToolkit().getScreenSize().width,100));
 		y+=drumCanvas.getBounds().height;
-		panel.add(controlBar);
-		controlBar.setBounds(new Rectangle(0,y,Toolkit.getDefaultToolkit().getScreenSize().width,20));
-		y+=controlBar.getBounds().height;
-		y+=80;
+		*/
+		//panel.add(controlBar);
+		//controlBar.setBounds(new Rectangle(0,y,Toolkit.getDefaultToolkit().getScreenSize().width,20));
+		//y+=controlBar.getBounds().height;
+		//y+=80;
 				
 		updateMeasureLinePositions();		
-		panel.setPreferredSize(new Dimension(
-				(int) controlBar.getBounds().getMaxX(),
-				(int)controlBar.getBounds().getMaxY()));
+		//mainPanel.setPreferredSize(new Dimension(
+			//	(int) drumCanvas.getBounds().getMaxX(),
+				//(int) drumCanvas.getBounds().getMaxY()));
 		
-		frame.getContentPane().add(panel,BorderLayout.CENTER);
+		JScrollPane scrollPane = new JScrollPane(mainPanel,JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+		frame.getContentPane().add(scrollPane,BorderLayout.CENTER);
+		frame.getContentPane().add(controlBar,BorderLayout.SOUTH);
 		frame.pack();
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		frame.setVisible(true);
@@ -1818,13 +1847,13 @@ public class KiteTabSequencer {
 		
 		topPanel.add(textLabel,BorderLayout.WEST);
 		topPanel.add(textField,BorderLayout.CENTER);
-		topPanel.add(colorButton,BorderLayout.EAST);
+		//topPanel.add(colorButton,BorderLayout.EAST);
 				
 		dialog.getContentPane().add(topPanel,BorderLayout.CENTER);
 		
 		Runnable r = () -> {
 		
-			StickyNote event = new StickyNote(textField.getText().trim(),color.get());
+			StickyNote event = new StickyNote(textField.getText().trim());
 			eventCanvas.setSelectedValue(event);
 			eventCanvas.repaint();
 			dialog.dispose();
@@ -1840,8 +1869,12 @@ public class KiteTabSequencer {
 	}
 	
 	void loadXML(File file) throws Exception {
+		SchemaFactory schemaF = SchemaFactory.newInstance("http://www.w3.org/2001/XMLSchema");
+		Schema schema = schemaF.newSchema(new File("schemas/projectFiles.xsd"));
 		
 		DocumentBuilderFactory dbf = DocumentBuilderFactory.newDefaultInstance();
+		dbf.setNamespaceAware(true);
+		dbf.setSchema(schema);
 		DocumentBuilder db = dbf.newDocumentBuilder();
 		Document doc = db.parse(file);
 		Element root = doc.getDocumentElement();
@@ -1852,11 +1885,13 @@ public class KiteTabSequencer {
 			stopT0.set(Integer.parseInt(root.getAttribute("stopT")));
 		}
 		if (root.hasAttribute("selectedCanvas")) {
-			selectedCanvas.set(
-					Arrays.asList(eventCanvas,bassCanvas,guitarCanvas,acousticCanvas,drumCanvas)
-					.get(Integer.parseInt(root.getAttribute("selectedCanvas"))));			
-		} else {
-			selectedCanvas.set(eventCanvas);
+			try {
+				selectedCanvas.set(
+						allCanvases.get(Integer.parseInt(root.getAttribute("selectedCanvas"))));
+			} catch (Exception ex) {
+				selectedCanvas.set(eventCanvas);				
+			}
+			
 		}
 		if (root.hasAttribute("selectedRow")) {
 			selectedCanvas.get().setSelectedRow(Integer.parseInt(root.getAttribute("selectedRow")));
@@ -1864,198 +1899,142 @@ public class KiteTabSequencer {
 		if (root.hasAttribute("repeatT")) {
 			repeatT.set(Integer.parseInt(root.getAttribute("repeatT")));
 		}
-
 		
-		root.setAttribute("selectedRow",""+selectedCanvas.get().getSelectedRow());
-		root.setAttribute("selectedCanvas",""+
-		Arrays.asList(eventCanvas,bassCanvas,guitarCanvas,acousticCanvas,drumCanvas).indexOf(selectedCanvas.get()));
-		guitarCanvas.data.clear();
-		acousticCanvas.data.clear();
-		bassCanvas.data.clear();
-		drumCanvas.data.clear();
-		eventCanvas.data.clear();
-		NodeList bassNodes = root.getElementsByTagName("bass");
+		NodeList eventCanvasNodes = root.getElementsByTagName("eventCanvas") ;
+		Element eventCanvasNode = (Element) eventCanvasNodes.item(0);
+		NodeList eventCanvasEventNodes = eventCanvasNode.getElementsByTagName("event");
+		for (int i = 0; i < eventCanvasEventNodes.getLength(); i++) {
+			Element eventNode = (Element) eventCanvasEventNodes.item(i);	
 		
-		Element bassNode = (Element) bassNodes.item(0);
-		NodeList bassTNodes = bassNode.getElementsByTagName("t");
-		for (int i = 0; i < bassTNodes.getLength(); i++) {
-			Element tNode = (Element) bassTNodes.item(i);
-			int t = Integer.parseInt(tNode.getAttribute("v"));
-			setCursorT(t);
-			NodeList sNodes = tNode.getElementsByTagName("s");
-			for (int j = 0; j < sNodes.getLength(); j++) {
-				Element sNode = (Element) sNodes.item(j);
-				InputVal inputVal = InputVal.lookup(sNode.getAttribute("v")).orElse(InputVal.NIL);
-				int stringNum = Integer.parseInt(sNode.getAttribute("n"));
-				if (inputVal != InputVal.NIL) {
-					bassCanvas.setSelectedRow(stringNum);
-					bassCanvas.setSelectedValue(inputVal);
-				}
-			}
-		}
-		
-		NodeList acousticNodes = root.getElementsByTagName("acoustic");
-		
-		Element acousticNode = (Element) acousticNodes.item(0);
-		NodeList acousticTNodes = acousticNode.getElementsByTagName("t");
-		for (int i = 0; i < acousticTNodes.getLength(); i++) {
-			Element tNode = (Element) acousticTNodes.item(i);
-			int t = Integer.parseInt(tNode.getAttribute("v"));
-			setCursorT(t);
-			NodeList sNodes = tNode.getElementsByTagName("s");
-			for (int j = 0; j < sNodes.getLength(); j++) {
-				Element sNode = (Element) sNodes.item(j);
-				InputVal inputVal = InputVal.lookup(sNode.getAttribute("v")).orElse(InputVal.NIL);
-				int stringNum = Integer.parseInt(sNode.getAttribute("n"));
-				if (inputVal != InputVal.NIL) {
-					acousticCanvas.setSelectedRow(stringNum);
-					acousticCanvas.setSelectedValue(inputVal);
-				}
-			}
-		}
-		
-		NodeList guitarNodes = root.getElementsByTagName("guitar");
-		Element guitarNode = (Element) guitarNodes.item(0);
-		NodeList guitarTNodes = guitarNode.getElementsByTagName("t");
-		for (int i = 0; i < guitarTNodes.getLength(); i++) {
-			Element tNode = (Element) guitarTNodes.item(i);
-			int t = Integer.parseInt(tNode.getAttribute("v"));
-			setCursorT(t);
-			NodeList sNodes = tNode.getElementsByTagName("s");
-			for (int j = 0; j < sNodes.getLength(); j++) {
-				Element sNode = (Element) sNodes.item(j);
-				InputVal inputVal = InputVal.lookup(sNode.getAttribute("v")).orElse(InputVal.NIL);
-				int stringNum = Integer.parseInt(sNode.getAttribute("n"));
-				if (inputVal != InputVal.NIL) {
-					guitarCanvas.setSelectedRow(stringNum);
-					guitarCanvas.setSelectedValue(inputVal);
-				}
-			} 
-		}
-		
-		NodeList drumNodes = root.getElementsByTagName("drum");
-		Element drumNode = (Element) drumNodes.item(0);
-		NodeList drumTNodes = drumNode.getElementsByTagName("t");
-		for (int i = 0; i < drumTNodes.getLength(); i++) {
-			Element tNode = (Element) drumTNodes.item(i);
-			int t = Integer.parseInt(tNode.getAttribute("v"));
-			setCursorT(t);
-			NodeList sNodes = tNode.getElementsByTagName("s");
-			for (int j = 0; j < sNodes.getLength(); j++) {
-				Element sNode = (Element) sNodes.item(j);
-				DrumVal.lookup(sNode.getAttribute("v")).ifPresent(inputVal -> {
-					//DrumVal inputVal = DrumVal.lookup(sNode.getAttribute("v"));
-					int stringNum = Integer.parseInt(sNode.getAttribute("n"));							
-					drumCanvas.setSelectedRow(stringNum);
-					drumCanvas.setSelectedValue(inputVal);
-					
-				} );
-			}
-		}
-		NodeList eventNodes = root.getElementsByTagName("events");
-		Element eventNode = (Element) eventNodes.item(0);
-		NodeList eventTNodes = eventNode.getElementsByTagName("t");
-		for (int i = 0; i < eventTNodes.getLength(); i++) {
-			Element tNode = (Element) eventTNodes.item(i);
-			int t = Integer.parseInt(tNode.getAttribute("v"));
-			setCursorT(t);
-			NodeList sNodes = tNode.getElementsByTagName("s");
-			for (int j = 0; j < sNodes.getLength(); j++) {
-				Element sNode = (Element) sNodes.item(j);
-				//DrumVal inputVal = DrumVal.lookup(sNode.getAttribute("v")).orElse(DrumVal.NIL);
-				int row= Integer.parseInt(sNode.getAttribute("n"));
+			
+			NodeList eventTNodes = eventNode.getElementsByTagName("t");
+			for (int j = 0; j < eventTNodes.getLength(); j++) {
+				Element tNode = (Element) eventTNodes.item(j);
+				int t = Integer.parseInt(tNode.getAttribute("v"));
+				int row = Integer.parseInt(tNode.getAttribute("r"));
+				setCursorT(t);
 				eventCanvas.setSelectedRow(row);
-				NodeList timeSignatureNodes = sNode.getElementsByTagName("timeSignature");
+				NodeList timeSignatureNodes = tNode.getElementsByTagName("timeSignature");
 				IntStream.range(0, timeSignatureNodes.getLength()).mapToObj(k->(Element) timeSignatureNodes.item(k))
 				.map(TimeSignatureEvent::fromXMLElement).forEach(timeSignature -> {
 					eventCanvas.setSelectedValue(timeSignature);
 				});
-				NodeList tempoNodes = sNode.getElementsByTagName("tempo");
+				NodeList tempoNodes = tNode.getElementsByTagName("tempo");
 				IntStream.range(0, tempoNodes.getLength()).mapToObj(k->(Element) tempoNodes.item(k))
 				.map(TempoEvent::fromXMLElement).forEach(tempo-> {
 					eventCanvas.setSelectedValue(tempo);
 				});
-				NodeList stickyNodes = sNode.getElementsByTagName("note");
+				NodeList stickyNodes = tNode.getElementsByTagName("note");
 				IntStream.range(0, stickyNodes.getLength()).mapToObj(k->(Element) stickyNodes.item(k))
 				.map(StickyNote::fromXMLElement).forEach(stickyNote-> {
 					eventCanvas.setSelectedValue(stickyNote);
 				});
+			}		
+		}
+		
+		NodeList instrumentNodes = root.getElementsByTagName("instrumentCanvas");
+		for (int i = 0; i < instrumentNodes.getLength(); i++) {
+			Element iNode = (Element) instrumentNodes.item(i);
+			
+			for (KiteTabCanvas<?> canvas : allCanvases) {
+				if (canvas == eventCanvas) {
+					continue;
+				}
+				
+				if (canvas.getName().contentEquals(iNode.getAttribute("name"))) {
+					
+					NodeList eventNodes = iNode.getElementsByTagName("event");
+					for (int j = 0; j < eventNodes.getLength(); j++) {
+						Element e = (Element) eventNodes.item(j);
+						int r = Integer.parseInt(e.getAttribute("r"));
+						int t = Integer.parseInt(e.getAttribute("t"));
+						String v = e.getAttribute("v");
+						canvas.setSelectedRow(r);
+						setCursorT(t);
+						for (char c : v.toCharArray()) {							
+							canvas.handleCharInput(c);
+						}	
+					}
+				}
 			}
+			
 		}
 		updateMeasureLinePositions();
-		
 		repaintCanvases();
-	
+		
 	}
 
 	
 	void saveXML(File file) throws Exception {
-
+		
 		DocumentBuilderFactory dbf = DocumentBuilderFactory.newDefaultInstance();
 		DocumentBuilder db = dbf.newDocumentBuilder();
+		
 		Document doc = db.newDocument();
-		Element root = doc.createElement("tabData");
+		Element root = doc.createElement("tabProject");
+		root.setAttribute("xmlns","tab");		
 		root.setAttribute("cursorT",""+cursorT.get());
 		root.setAttribute("repeatT",""+cursorT.get());
 		root.setAttribute("stopT",""+stopT0.get());
 		root.setAttribute("selectedRow",""+selectedCanvas.get().getSelectedRow());
-		root.setAttribute("selectedCanvas",""+
-		Arrays.asList(eventCanvas,bassCanvas,guitarCanvas,acousticCanvas,drumCanvas).indexOf(selectedCanvas.get()));
+		root.setAttribute("selectedCanvas",""+allCanvases.indexOf(selectedCanvas.get()));
+		root.setAttribute("xmlns:xsi","http://www.w3.org/2001/XMLSchema-instance");
+		root.setAttribute("xsi:schemaLocation","tab ../schemas/projectFiles.xsd");
+		
 		doc.appendChild(root);
-		for (Object[] a : Arrays.asList(
-				new Object[] {"bass",bassCanvas},
-				new Object[] {"guitar",guitarCanvas},
-				new Object[] {"acoustic",acousticCanvas},
-				new Object[] {"drum",drumCanvas},
-				new Object[] {"events",eventCanvas})) {
-			Element e = doc.createElement(a[0].toString());
-			root.appendChild(e);
-			if (a[1] == drumCanvas) {
-				for (Entry<Integer, Map<Integer, DrumVal>> entry : ((DrumTabCanvas) a[1]).data.entrySet()) {
-					Element tElement = doc.createElement("t");
-					e.appendChild(tElement);
-					tElement.setAttribute("v", ""+entry.getKey());
-					entry.getValue().entrySet().stream().forEach(entry2 -> {
-						Element sElement = doc.createElement("s");
-						sElement.setAttribute("n", ""+entry2.getKey());
-						sElement.setAttribute("v", ""+entry2.getValue().getToken());
-						tElement.appendChild(sElement);
-					});
+		Element eventElement = doc.createElement("eventCanvas");
+		root.appendChild(eventElement);
+		eventCanvas.data.keySet().forEach(t -> {
+			eventCanvas.data.get(t).forEach((r,controlEvent) -> {
+				Element e = doc.createElement("event");
+				eventElement.appendChild(e);
+				e.setAttribute("t",""+t);
+				e.setAttribute("r",""+r);
+				switch (controlEvent.getType()) {
+				case NIL:
+					break;
+				case STICKY_NOTE:
+					e.appendChild(((StickyNote) controlEvent).toXMLElement(doc));
+					break;
+				case TEMPO:
+					e.appendChild(((TempoEvent) controlEvent).toXMLElement(doc));
+					break;
+				case TIME_SIGNATURE:
+					e.appendChild(((TimeSignatureEvent) controlEvent).toXMLElement(doc));
+					break;
+				default:
+					break;
+				
 				}
-			} else if (a[1] == eventCanvas) {
-				for (Entry<Integer,Map<Integer,ControlEvent>> entry : ((EventCanvas) a[1]).data.entrySet()) {
-					Element tElement = doc.createElement("t");
-					e.appendChild(tElement);
-					tElement.setAttribute("v", ""+entry.getKey());
-					entry.getValue().entrySet().stream().forEach(entry2 -> {
-						Element sElement = doc.createElement("s");
-						sElement.setAttribute("n", ""+entry2.getKey());
-						sElement.appendChild(entry2.getValue().toXMLElement(doc));								
-						tElement.appendChild(sElement);
-					});
-				}
-			} else {
-				for (Entry<Integer, Map<Integer, InputVal>> entry : ((TabCanvas) a[1]).data.entrySet()) {
-					Element tElement = doc.createElement("t");
-					e.appendChild(tElement);
-					tElement.setAttribute("v", ""+entry.getKey());
-					entry.getValue().entrySet().stream().forEach(entry2 -> {
-						Element sElement = doc.createElement("s");
-						sElement.setAttribute("n", ""+entry2.getKey());
-						sElement.setAttribute("v", ""+entry2.getValue().getToken());
-						tElement.appendChild(sElement);
-					});
-				}
-			}
-		}
+			});
+		});
+		
+		allCanvases.stream().filter(a->a!=eventCanvas).forEach(canvas -> {
+			Element instrumentElement = doc.createElement("instrumentCanvas");
+			root.appendChild(instrumentElement);
+			instrumentElement.setAttribute("name", canvas.getName());
+			canvas.data.keySet().forEach(t -> {
+				canvas.data.get(t).forEach((r,inputEvent) -> {
+					Element e = doc.createElement("event");
+					instrumentElement.appendChild(e);
+					e.setAttribute("t",""+t);
+					e.setAttribute("r",""+r);
+					if (canvas instanceof DrumTabCanvas) {
+						e.setAttribute("v",((PercRowToken) inputEvent).getToken());
+					} else {
+						e.setAttribute("v",(String) inputEvent);	
+					}
+				});
+			});
+			 
+		});
+		
 		TransformerFactory tf = TransformerFactory.newDefaultInstance();
 		Transformer t  = tf.newTransformer();
 		t.setOutputProperty(OutputKeys.INDENT,"yes");
 		t.setOutputProperty("{http://xml.apache.org/xslt}indent-amount","4");
 		t.transform(new DOMSource(doc), new StreamResult(file));
 		t.transform(new DOMSource(doc), new StreamResult(System.out));
-		
-	
 		
 	}
 	AbstractAction rToA(Runnable r) {
@@ -2065,43 +2044,6 @@ public class KiteTabSequencer {
 				r.run();
 			}			
 		};
-	}
-	
-	void loadSoundfonts() {
-		
-		File file = Stream.of("etc/","config/")
-				.map(a->new File(a+"defaultSoundfonts.xml"))
-				.filter(a->a.exists()).findFirst().get();
-		try {
-			DocumentBuilderFactory dbf = DocumentBuilderFactory.newDefaultInstance();
-			DocumentBuilder db = dbf.newDocumentBuilder();
-			Document doc = db.parse(file);
-			Element root = doc.getDocumentElement();
-			if (root.hasAttribute("defaultSoundfont")) {
-				this.defaultSoundfontFile = new File(root.getAttribute("defaultSoundfont"));
-			}
-			for (Object[] arr: Arrays.asList(
-					new Object[] {bassCanvas,"bass"},
-					new Object[] {guitarCanvas,"electric"},
-					new Object[] {acousticCanvas,"acoustic"},
-					new Object[] {drumCanvas,"drums"})) {
-				NodeList kids = root.getElementsByTagName(arr[1].toString());
-				IntStream.range(0, kids.getLength()).mapToObj(i->(Element) kids.item(i))
-				.findFirst().ifPresent(element -> {
-					File soundfontFile = defaultSoundfontFile;
-					if (element.hasAttribute("soundfontFile")) {
-						soundfontFile = new File(element.getAttribute("soundfontFile"));						
-					}
-					int bank = Integer.parseInt(element.getAttribute("bank"));
-					int program = Integer.parseInt(element.getAttribute("program"));
-					((SoundfontPlayer) arr[0]).initializeMidi(soundfontFile, bank, program);
-				});
-			}
-					
-			
-		} catch (Exception ex) {
-			ex.printStackTrace();
-		}
-	}
+	}	
 	
 }

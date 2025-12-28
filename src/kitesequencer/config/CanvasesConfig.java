@@ -1,0 +1,64 @@
+package kitesequencer.config;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.stream.Stream;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.validation.Schema;
+import javax.xml.validation.SchemaFactory;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+
+public class CanvasesConfig {
+	
+	public static void main(String[] args) throws Exception {
+		System.out.println(getXMLInstance());
+	}
+	public static CanvasesConfig getXMLInstance() throws Exception {
+		File f = Stream.of("etc","config").map(d->new File(d+"/canvases.xml"))
+				.filter(a->a.exists()).findFirst().get();
+		SchemaFactory schemaF = SchemaFactory.newInstance("http://www.w3.org/2001/XMLSchema");
+		Schema schema = schemaF.newSchema(new File("schemas/canvases.xsd"));
+		
+		DocumentBuilderFactory dbf = DocumentBuilderFactory.newDefaultInstance();
+		dbf.setNamespaceAware(true);
+		dbf.setSchema(schema);
+		DocumentBuilder db = dbf.newDocumentBuilder();
+		Document doc = db.parse(f);
+		Element root = doc.getDocumentElement();
+
+		List<CanvasConfig> canvases= new ArrayList<>();
+		//List<DrumCanvasConfig> drumCanvases = new ArrayList<>();
+		
+		NodeList kids = root.getChildNodes();
+		for (int i = 0; i < kids.getLength(); i++) {
+			if (kids.item(i).getNodeType() != Node.ELEMENT_NODE) {
+				continue;
+			}
+			Element kid = (Element) kids.item(i);
+			if (kid.getTagName().contentEquals("stringCanvas")) {
+				canvases.add(StringCanvasConfig.fromXMLElement(kid));
+			} else if (kid.getTagName().contentEquals("drumCanvas")) {
+				canvases.add(DrumCanvasConfig.fromXMLElement(kid));
+			}
+		}
+		
+		
+		return new CanvasesConfig(canvases);
+	}
+	
+	private final List<CanvasConfig> canvases;
+	CanvasesConfig(List<CanvasConfig> canvases) {
+		this.canvases = Collections.unmodifiableList(canvases);
+	}
+	public List<CanvasConfig> getCanvases() {
+		return canvases;
+	}
+}

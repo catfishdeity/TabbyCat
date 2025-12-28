@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<canvases
+  xmlns="tab"    
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="tab ../schemas/canvases.xsd">
+    <stringCanvas name="Bass" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="33" maxFrets="41" ed2="41">		
+		<string frequency="392.548"/>
+		<string frequency="315.097"/>
+		<string frequency="252.927"/>
+		<string frequency="203.024"/>
+		<string frequency="162.967"/>
+		<string frequency="130.813"/>
+		<additionalPitch token="B" edoSteps="1.5"/>
+		<additionalPitch token="D" edoSteps="3.5"/>
+		<additionalPitch token="E" edoSteps="4.5"/>
+	</stringCanvas>    
+    <stringCanvas name="ElectricG" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="30" maxFrets="41" ed2="20.5">
+    	<string frequency="978.073"/>	
+		<string frequency="785.096"/>
+		<string frequency="630.194"/>
+    	<string frequency="505.855"/>	
+		<string frequency="406.048"/>
+		<string frequency="325.933"/>
+		<string frequency="261.626"/>
+		<additionalPitch token="B" edoSteps="1.5"/>
+		<additionalPitch token="D" edoSteps="3.5"/>
+		<additionalPitch token="E" edoSteps="4.5"/>
+	</stringCanvas>
+	<stringCanvas name="AcousticG" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="25" ed2="20.5">
+		<string frequency="978.073"/>
+		<string frequency="785.096"/>
+		<string frequency="630.194"/>
+		<string frequency="505.855"/>
+		<string frequency="406.048"/>
+		<string frequency="325.933"/>
+		<additionalPitch token="B" edoSteps="1.5"/>
+		<additionalPitch token="D" edoSteps="3.5"/>
+		<additionalPitch token="E" edoSteps="4.5"/>
+	</stringCanvas>    
+    <drumCanvas name="Drums" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="16">
+		<row type="HAND"/>
+		<row type="HAND"/>
+		<row type="FOOT"/>
+		<row type="FOOT"/>
+		<token token="K2" position="FOOT" midiNumber="35"/>
+		<token token="K" position="FOOT" midiNumber="36" />
+		<token token="P" position="FOOT" midiNumber="44"/>
+		<token token="X" position="HAND" midiNumber="42" />
+		<token token="O" position="HAND" midiNumber="46" />
+		<token token="C" position="HAND" midiNumber="49" />
+		<token token="C2" position="HAND" midiNumber="57" />
+		<token token="R" position="HAND" midiNumber="51" />
+		<token token="R2" position="HAND" midiNumber="59" />
+		<token token="B" position="HAND" midiNumber="53" />
+		<token token="S" position="HAND" midiNumber="38" />
+		<token token="S2" position="HAND" midiNumber="40" />
+		<token token="L" position="HAND" midiNumber="43" />
+		<token token="L2" position="HAND" midiNumber="41" />
+		<token token="M" position="HAND" midiNumber="47" />
+		<token token="M2" position="HAND" midiNumber="45" />
+		<token token="H" position="HAND" midiNumber="50" />
+		<token token="H2" position="HAND" midiNumber="48" />		
+	</drumCanvas>
+    </canvases>
