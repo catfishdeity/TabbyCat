@@ -1,4 +1,4 @@
-package kitesequencer.config;
+package tabsequencer.config;
 
 import java.util.Objects;
 

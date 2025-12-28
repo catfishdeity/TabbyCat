@@ -1,4 +1,4 @@
-package kitesequencer;
+package tabsequencer;
 
 import java.util.Optional;
 import java.util.OptionalInt;

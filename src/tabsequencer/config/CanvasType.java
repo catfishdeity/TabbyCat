@@ -1,4 +1,4 @@
-package kitesequencer.config;
+package tabsequencer.config;
 
 public enum CanvasType {
 	STRING, DRUM;

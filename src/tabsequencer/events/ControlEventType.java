@@ -1,4 +1,4 @@
-package kitesequencer.events;
+package tabsequencer.events;
 
 public enum ControlEventType {
 	NIL (" ",NilControlEvent.class),
