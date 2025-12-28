@@ -1,4 +1,4 @@
-package kitesequencer.config;
+package tabsequencer.config;
 
 enum PercRowType {
 	HAND, FOOT;

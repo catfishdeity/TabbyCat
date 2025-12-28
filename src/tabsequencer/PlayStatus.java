@@ -1,4 +1,4 @@
-package kitesequencer;
+package tabsequencer;
 
 import java.awt.Color;
 

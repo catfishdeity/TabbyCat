@@ -1,4 +1,4 @@
-package kitesequencer.events;
+package tabsequencer.events;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -32,8 +32,6 @@ public class TimeSignatureEvent extends ControlEvent {
 	public String toString() {
 		return String.format("%d/%d",numerator,denominator.getValue());
 	}
-	
-	 
 
 	@Override
 	public ControlEventType getType() {		
@@ -51,7 +49,8 @@ public class TimeSignatureEvent extends ControlEvent {
 	public static TimeSignatureEvent fromXMLElement(Element e) {
 		return new TimeSignatureEvent(
 				Integer.parseInt(e.getAttribute("n")),
-				TimeSignatureDenominator.lookup(e.getAttribute("d")));
+				TimeSignatureDenominator.fromInt(Integer.parseInt(e.getAttribute("d")))
+				.orElse(TimeSignatureDenominator._4));
 	}
 
 

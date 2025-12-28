@@ -1,4 +1,4 @@
-package kitesequencer;
+package tabsequencer;
 
 import javax.sound.midi.MidiChannel;
 import javax.sound.midi.Synthesizer;

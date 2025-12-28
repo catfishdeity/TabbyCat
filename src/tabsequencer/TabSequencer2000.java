@@ -1,4 +1,4 @@
-package kitesequencer;
+package tabsequencer;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Canvas;
@@ -98,26 +98,26 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
-import kitesequencer.config.CanvasConfig;
-import kitesequencer.config.CanvasesConfig;
-import kitesequencer.config.DrumCanvasConfig;
-import kitesequencer.config.PercRowToken;
-import kitesequencer.config.StringCanvasConfig;
-import kitesequencer.events.ControlEvent;
-import kitesequencer.events.ControlEventType;
-import kitesequencer.events.NilControlEvent;
-import kitesequencer.events.StickyNote;
-import kitesequencer.events.TempoEvent;
-import kitesequencer.events.TimeSignatureDenominator;
-import kitesequencer.events.TimeSignatureEvent;
+import tabsequencer.config.CanvasConfig;
+import tabsequencer.config.CanvasesConfig;
+import tabsequencer.config.DrumCanvasConfig;
+import tabsequencer.config.PercRowToken;
+import tabsequencer.config.StringCanvasConfig;
+import tabsequencer.events.ControlEvent;
+import tabsequencer.events.ControlEventType;
+import tabsequencer.events.NilControlEvent;
+import tabsequencer.events.StickyNote;
+import tabsequencer.events.TempoEvent;
+import tabsequencer.events.TimeSignatureDenominator;
+import tabsequencer.events.TimeSignatureEvent;
 
 
-public class KiteTabSequencer {
+public class TabSequencer2000 {
 	
 	public static void main(String[] args) {
-		KiteTabSequencer.getInstance(); 
+		TabSequencer2000.getInstance(); 
 	}
-	private static KiteTabSequencer instance;
+	private static TabSequencer2000 instance;
 	
 	private Font font = new Font("Monospaced",Font.BOLD,11);
 	private FontMetrics fontMetrics = new Canvas().getFontMetrics(font);
@@ -147,7 +147,7 @@ public class KiteTabSequencer {
 	final ScheduledExecutorService playbackDaemon = Executors.newSingleThreadScheduledExecutor();
 	final ScheduledExecutorService midiDaemon = Executors.newSingleThreadScheduledExecutor();	
 		
-	final JFrame frame = new JFrame("Kite Tab Sequencer 2000");
+	final JFrame frame = new JFrame("TabSequencer 2000");
 	
 	LeftClickablePanelButton playButton, stopButton;
 	final PlayStatusPanel playStatusPanel = new PlayStatusPanel();
@@ -240,8 +240,8 @@ public class KiteTabSequencer {
 					if (!f.getAbsolutePath().endsWith(".tab")) {
 						f = new File(f.getAbsoluteFile()+".tab");
 					}
-					saveXML(chooser.getSelectedFile());
-					activeFile.set(chooser.getSelectedFile());
+					saveXML(f);
+					activeFile.set(f);
 					fileHasBeenModified.set(false);
 					updateWindowTitle();
 				} catch (Exception ex) {
@@ -567,14 +567,14 @@ public class KiteTabSequencer {
 	}
 		
 	
-	public static KiteTabSequencer getInstance() {
+	public static TabSequencer2000 getInstance() {
 		if (instance == null) {
-			instance = new KiteTabSequencer();
+			instance = new TabSequencer2000();
 		}
 		return instance;
 	}
 	
-	private KiteTabSequencer() {		
+	private TabSequencer2000() {		
 		createGui();		
 	}
 
@@ -1896,8 +1896,9 @@ public class KiteTabSequencer {
 		if (root.hasAttribute("selectedRow")) {
 			selectedCanvas.get().setSelectedRow(Integer.parseInt(root.getAttribute("selectedRow")));
 		}
-		if (root.hasAttribute("repeatT")) {
+		if (root.hasAttribute("repeatT")) {			
 			repeatT.set(Integer.parseInt(root.getAttribute("repeatT")));
+			
 		}
 		
 		NodeList eventCanvasNodes = root.getElementsByTagName("eventCanvas") ;
@@ -1905,31 +1906,28 @@ public class KiteTabSequencer {
 		NodeList eventCanvasEventNodes = eventCanvasNode.getElementsByTagName("event");
 		for (int i = 0; i < eventCanvasEventNodes.getLength(); i++) {
 			Element eventNode = (Element) eventCanvasEventNodes.item(i);	
-		
-			
-			NodeList eventTNodes = eventNode.getElementsByTagName("t");
-			for (int j = 0; j < eventTNodes.getLength(); j++) {
-				Element tNode = (Element) eventTNodes.item(j);
-				int t = Integer.parseInt(tNode.getAttribute("v"));
-				int row = Integer.parseInt(tNode.getAttribute("r"));
-				setCursorT(t);
-				eventCanvas.setSelectedRow(row);
-				NodeList timeSignatureNodes = tNode.getElementsByTagName("timeSignature");
-				IntStream.range(0, timeSignatureNodes.getLength()).mapToObj(k->(Element) timeSignatureNodes.item(k))
-				.map(TimeSignatureEvent::fromXMLElement).forEach(timeSignature -> {
-					eventCanvas.setSelectedValue(timeSignature);
-				});
-				NodeList tempoNodes = tNode.getElementsByTagName("tempo");
-				IntStream.range(0, tempoNodes.getLength()).mapToObj(k->(Element) tempoNodes.item(k))
-				.map(TempoEvent::fromXMLElement).forEach(tempo-> {
-					eventCanvas.setSelectedValue(tempo);
-				});
-				NodeList stickyNodes = tNode.getElementsByTagName("note");
-				IntStream.range(0, stickyNodes.getLength()).mapToObj(k->(Element) stickyNodes.item(k))
-				.map(StickyNote::fromXMLElement).forEach(stickyNote-> {
-					eventCanvas.setSelectedValue(stickyNote);
-				});
-			}		
+			int t = Integer.parseInt(eventNode.getAttribute("t"));
+			int row = Integer.parseInt(eventNode.getAttribute("r"));
+			setCursorT(t);
+			eventCanvas.setSelectedRow(row);
+			NodeList timeSignatureNodes = eventNode.getElementsByTagName("timeSignature");
+			IntStream.range(0, timeSignatureNodes.getLength()).mapToObj(k->(Element) timeSignatureNodes.item(k))
+			.map(TimeSignatureEvent::fromXMLElement).forEach(timeSignature -> {
+				System.out.println(timeSignature);
+				eventCanvas.setSelectedValue(timeSignature);
+				updateMeasureLinePositions();
+			});
+			NodeList tempoNodes = eventNode.getElementsByTagName("tempo");
+			IntStream.range(0, tempoNodes.getLength()).mapToObj(k->(Element) tempoNodes.item(k))
+			.map(TempoEvent::fromXMLElement).forEach(tempo-> {
+				eventCanvas.setSelectedValue(tempo);
+			});
+			NodeList stickyNodes = eventNode.getElementsByTagName("note");
+			IntStream.range(0, stickyNodes.getLength()).mapToObj(k->(Element) stickyNodes.item(k))
+			.map(StickyNote::fromXMLElement).forEach(stickyNote-> {
+				eventCanvas.setSelectedValue(stickyNote);
+			});
+				
 		}
 		
 		NodeList instrumentNodes = root.getElementsByTagName("instrumentCanvas");
@@ -1974,7 +1972,7 @@ public class KiteTabSequencer {
 		Element root = doc.createElement("tabProject");
 		root.setAttribute("xmlns","tab");		
 		root.setAttribute("cursorT",""+cursorT.get());
-		root.setAttribute("repeatT",""+cursorT.get());
+		root.setAttribute("repeatT",""+repeatT.get());
 		root.setAttribute("stopT",""+stopT0.get());
 		root.setAttribute("selectedRow",""+selectedCanvas.get().getSelectedRow());
 		root.setAttribute("selectedCanvas",""+allCanvases.indexOf(selectedCanvas.get()));
