@@ -3,36 +3,39 @@
   xmlns="tab"    
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:schemaLocation="tab ../schemas/canvases.xsd">
-    <stringCanvas name="Bass" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="33" maxFrets="41" ed2="41">		
-		<string frequency="392.548"/>
-		<string frequency="315.097"/>
-		<string frequency="252.927"/>
-		<string frequency="203.024"/>
-		<string frequency="162.967"/>
-		<string frequency="130.813"/>
+    <stringCanvas name="Bass" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="33" maxFrets="41" ed2="20.5">		
+		<string frequency="196.274"/>
+		<string frequency="157.549"/>
+		<string frequency="126.463"/>
+		<string frequency="101.512"/>
+		<string frequency="81.483"/>
+		<string frequency="65.406"/>
 		<additionalPitch token="B" edoSteps="1.5"/>
 		<additionalPitch token="D" edoSteps="3.5"/>
 		<additionalPitch token="E" edoSteps="4.5"/>
 	</stringCanvas>    
     <stringCanvas name="ElectricG" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="30" maxFrets="41" ed2="20.5">
-    	<string frequency="978.073"/>	
-		<string frequency="785.096"/>
-		<string frequency="630.194"/>
-    	<string frequency="505.855"/>	
-		<string frequency="406.048"/>
-		<string frequency="325.933"/>
-		<string frequency="261.626"/>
+  
+  		<string frequency = "489.0366359813304"/>
+		<string frequency = "392.54808236164797"/>
+		<string frequency = "315.09704105622444"/>
+		<string frequency = "252.92734761322137"/>
+		<string frequency = "203.02394131097032"/>
+		<string frequency = "162.96664292891072"/>
+		<string frequency = "130.8127826502993"/>
+    
 		<additionalPitch token="B" edoSteps="1.5"/>
 		<additionalPitch token="D" edoSteps="3.5"/>
 		<additionalPitch token="E" edoSteps="4.5"/>
 	</stringCanvas>
 	<stringCanvas name="AcousticG" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="25" ed2="20.5">
-		<string frequency="978.073"/>
-		<string frequency="785.096"/>
-		<string frequency="630.194"/>
-		<string frequency="505.855"/>
-		<string frequency="406.048"/>
-		<string frequency="325.933"/>
+		<string frequency = "489.0366359813304"/>	
+		<string frequency = "392.54808236164797"/>
+		<string frequency = "315.09704105622444"/>
+		<string frequency = "252.92734761322137"/>
+		<string frequency = "203.02394131097032"/>
+		<string frequency = "162.96664292891072"/>
+		
 		<additionalPitch token="B" edoSteps="1.5"/>
 		<additionalPitch token="D" edoSteps="3.5"/>
 		<additionalPitch token="E" edoSteps="4.5"/>
