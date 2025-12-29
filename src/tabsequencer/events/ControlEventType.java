@@ -1,10 +1,11 @@
 package tabsequencer.events;
 
 public enum ControlEventType {
-	NIL (" ",NilControlEvent.class),
+	
 	TIME_SIGNATURE ("T",TimeSignatureEvent.class),
 	STICKY_NOTE ("I",StickyNote.class),
-	TEMPO ("S",TempoEvent.class);
+	TEMPO ("S",TempoEvent.class),
+	PROGRAM_CHANGE ("B",ProgramChange.class);
 	
 	String token;
 	Class<? extends ControlEvent> clazz;

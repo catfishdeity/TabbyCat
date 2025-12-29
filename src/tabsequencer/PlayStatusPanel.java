@@ -27,7 +27,6 @@ class PlayStatusPanel extends JPanel {
 		g.setFont(new Font("Monospaced",Font.BOLD,getHeight()-1));
 		g.fillRect(0,0,getWidth(),getHeight());
 		g.setPaint(this.playStatus.color);
-		g.drawString(playStatus.toString(), 2, getHeight()-2);
-		//g.fillRoundRect(1,1,getWidth()-2,getHeight()-2,10,10);		
+		g.drawString(playStatus.toString(), 2, getHeight()-2);		
 	}
 }

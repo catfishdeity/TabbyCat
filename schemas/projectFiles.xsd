@@ -33,10 +33,17 @@
 				<xsd:element name="timeSignature" type="TimeSignatureComplexType"/>
 				<xsd:element name="note" type="xsd:string"/>
 				<xsd:element name="tempo" type="TempoEvent"/>
+				<xsd:element name="programChange" type="ProgramChangeEvent"/>
 			</xsd:choice>
 		</xsd:sequence>
 		<xsd:attribute name="r" type="xsd:nonNegativeInteger" use="required"/>
 		<xsd:attribute name="t" type="xsd:nonNegativeInteger" use="required"/>
+	</xsd:complexType>
+	
+	<xsd:complexType name="ProgramChangeEvent">
+		<xsd:attribute name="canvasName" type="xsd:string"/>
+		<xsd:attribute name="bank" type="xsd:nonNegativeInteger" use="required"/>
+		<xsd:attribute name="program" type="xsd:nonNegativeInteger" use="required"/>
 	</xsd:complexType>
 	
 	<xsd:complexType name="TempoEvent">

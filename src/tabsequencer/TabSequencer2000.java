@@ -13,6 +13,7 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridLayout;
 import java.awt.MouseInfo;
+import java.awt.Point;
 import java.awt.RenderingHints;
 import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
@@ -63,6 +64,7 @@ import javax.sound.midi.Synthesizer;
 import javax.swing.AbstractAction;
 import javax.swing.ActionMap;
 import javax.swing.Box;
+import javax.swing.DefaultComboBoxModel;
 import javax.swing.DefaultListModel;
 import javax.swing.InputMap;
 import javax.swing.JButton;
@@ -105,7 +107,7 @@ import tabsequencer.config.PercRowToken;
 import tabsequencer.config.StringCanvasConfig;
 import tabsequencer.events.ControlEvent;
 import tabsequencer.events.ControlEventType;
-import tabsequencer.events.NilControlEvent;
+import tabsequencer.events.ProgramChange;
 import tabsequencer.events.StickyNote;
 import tabsequencer.events.TempoEvent;
 import tabsequencer.events.TimeSignatureDenominator;
@@ -128,10 +130,15 @@ public class TabSequencer2000 {
 	final double middleC = 220.0 * Math.pow(2d, 3.0/12.0);	
 	
 	FileFilter fileFilter = new FileNameExtensionFilter(".tab files (.tab)","tab");
-	final File defaultPath = new File("scores");			
+	final File defaultPath = new File("scores");
+	
+	final Map<Point,String> guitarClipboard = new HashMap<>();
+	final Map<Point,PercRowToken> drumClipboard = new HashMap<>();
+	final Map<Point,ControlEvent> eventClipboard = new HashMap<>();
+	
 	final AtomicReference<File> activeFile = new AtomicReference<>(null);	
 	final AtomicBoolean fileHasBeenModified = new AtomicBoolean(false);
-	
+	final AtomicBoolean isSelectionMode = new AtomicBoolean(false);
 	final AtomicBoolean isPlaying = new AtomicBoolean(false);
 	final AtomicInteger playT = new AtomicInteger(0);
 	final AtomicInteger viewT0 = new AtomicInteger(-scrollTimeMargin);
@@ -195,7 +202,93 @@ public class TabSequencer2000 {
 	}
 	
 	void repaintCanvases() {
-		allCanvases.forEach(a->a.repaint());		
+		allCanvases.forEach(a->a.repaint());			
+	}
+	
+	
+	void pasteSelectedNotes() {
+		
+		if (selectedCanvas.get()== eventCanvas) {
+			int timeOffset = eventClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
+			int rowOffset = eventClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();	
+			eventClipboard.forEach((point,controlEvent) -> {
+				int t = cursorT.get()+point.y-timeOffset;
+				int row = eventCanvas.getSelectedRow()+point.x-rowOffset;
+				eventCanvas.setSelectedValue(row,t,controlEvent);
+			});
+			updateMeasureLinePositions();		
+		} else if (selectedCanvas.get() instanceof TabCanvas) {
+			int timeOffset = guitarClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
+			int rowOffset = guitarClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
+			guitarClipboard.forEach((point,s) -> {
+				int t = cursorT.get()+point.y-timeOffset;
+				int row = selectedCanvas.get().getSelectedRow()+point.x-rowOffset;
+				System.out.println(t+" "+row+" "+s);
+				((TabCanvas) selectedCanvas.get()).setSelectedValue(row,t,s);
+			});
+			
+		} else if (selectedCanvas.get() instanceof DrumTabCanvas) {
+			int timeOffset = drumClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
+			int rowOffset = drumClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
+			drumClipboard.forEach((point,drumEvent) -> {
+				int t = cursorT.get()+point.y-timeOffset;
+				int row = selectedCanvas.get().getSelectedRow()+point.x-rowOffset;
+				((DrumTabCanvas) selectedCanvas.get()).setSelectedValue(row,t,drumEvent);
+			});			
+		}
+		repaintCanvases();
+	}
+	
+	void cutSelectedNotes() {
+		guitarClipboard.clear();
+		drumClipboard.clear();
+		eventClipboard.clear();
+		if (isSelectionMode.get()) {
+			Stream.of(selectedCanvas.get().innerSelectionCells,selectedCanvas.get().outerSelectionCells)
+			.flatMap(a->a.stream()).forEach(point -> {
+				
+				Optional<?> opt = selectedCanvas.get().getValueAt(point.y,point.x);				
+				if (opt.isPresent()) {
+					if (selectedCanvas.get() instanceof EventCanvas) {						
+						eventClipboard.put(point, (ControlEvent) opt.get());						
+					} else if (selectedCanvas.get() instanceof TabCanvas) {
+						guitarClipboard.put(point, (String) opt.get());
+					}else if (selectedCanvas.get() instanceof DrumTabCanvas) {
+						drumClipboard.put(point, (PercRowToken) opt.get());
+					}
+				}
+				selectedCanvas.get().removeValueAt(point.y,point.x);
+			});
+			selectedCanvas.get().clearSelectionT0AndRow();		
+		} 
+		isSelectionMode.set(false);
+		repaintCanvases();
+	}
+	
+	void copySelectedNotes() {
+		guitarClipboard.clear();
+		drumClipboard.clear();
+		eventClipboard.clear();
+		if (isSelectionMode.get()) {
+			Stream.of(selectedCanvas.get().innerSelectionCells,selectedCanvas.get().outerSelectionCells)
+			.flatMap(a->a.stream()).forEach(point -> {
+				
+				Optional<?> opt = selectedCanvas.get().getValueAt(point.y,point.x);				
+				if (opt.isPresent()) {
+					if (selectedCanvas.get() instanceof EventCanvas) {
+						
+						eventClipboard.put(point, (ControlEvent) opt.get());
+					} else if (selectedCanvas.get() instanceof TabCanvas) {
+						guitarClipboard.put(point, (String) opt.get());
+					}else if (selectedCanvas.get() instanceof DrumTabCanvas) {
+						drumClipboard.put(point, (PercRowToken) opt.get());
+					}
+				}
+			});
+			selectedCanvas.get().clearSelectionT0AndRow();		
+		} 
+		isSelectionMode.set(false);
+		repaintCanvases();
 	}
 	
 	void addStaccato() {
@@ -309,9 +402,24 @@ public class TabSequencer2000 {
 		}		
 	}
 	
-	void returnToStopT0() {
-		//TODO am i going to rewrite this
+	void returnCursorToStopT0() {
+		cursorT.set(stopT0.get());
+		while (cursorT.get() < viewT0.get()+scrollTimeMargin) {
+			viewT0.getAndDecrement();
+		}
+		repaintCanvases();
 	}
+	
+	void returnPlayToStopT0() {
+		playT.set(stopT0.get());
+		while (playT.get() < viewT0.get()+scrollTimeMargin) {
+			viewT0.getAndDecrement();
+		}
+		repaintCanvases();
+		
+	}
+	
+	
 	
 	void startPlayback() {
 		if (!playbackDaemonIsStarted.get()) {
@@ -365,6 +473,30 @@ public class TabSequencer2000 {
 		repaintCanvases();
 	}
 	
+	
+	public void toggleSelectionMode() {
+		
+		isSelectionMode.set(!isSelectionMode.get());
+		if (isSelectionMode.get()) {
+			setSelectedT0();
+		} else {
+			allCanvases.forEach(canvas -> canvas.clearSelectionT0AndRow());
+		}
+		repaintCanvases();
+	}
+	
+	void setSelectedT0() {
+		allCanvases.forEach(canvas -> {
+			if (canvas.isSelected()) {
+				canvas.setSelectionT0AndRow();
+				
+			} else {
+				canvas.clearSelectionT0AndRow();
+			}
+			canvas.repaint();
+		});
+	}
+	
 	public void updateMeasureLinePositions() {		
 		AtomicReference<TimeSignatureEvent> timeSignature = new AtomicReference<>(new TimeSignatureEvent(4,TimeSignatureDenominator._4));
 		AtomicInteger counter = new AtomicInteger(0);
@@ -381,12 +513,17 @@ public class TabSequencer2000 {
 			if (tsO.isPresent()) {				
 				timeSignature.set(tsO.get());				
 				counter.set(0);
-				measures.put(t,measure.getAndIncrement());	
+				measures.put(t,measure.get());
+				if (t > 0) {
+					measure.getAndIncrement();
+					
+				}
+			} else {
+				if (counter.get() == timeSignature.get().get16ths()) {
+					counter.set(0);
+					measures.put(t,measure.getAndIncrement());								
+				}
 			}
-			if (counter.get() == timeSignature.get().get16ths()) {
-				counter.set(0);
-				measures.put(t,measure.getAndIncrement());								
-			}			
 			if (counter.get() > 0 && counter.get()%(16/timeSignature.get().denominator.getValue()) == 0) {
 				markers.add(t);
 			}
@@ -426,10 +563,38 @@ public class TabSequencer2000 {
 		repaintCanvases();
 	}
 	
+	void updateDataLength() {
+		int maxT= allCanvases.stream().flatMapToInt(c->c.data.keySet().stream().mapToInt(i->i)).max().orElseGet(()->0)+16;
+
+		navigationBar.dataLength = maxT;
+		navigationBar.repaint();
+		System.out.println(maxT);
+		
+	}
 	
-	public void cursorToEnd() {
-		//TODO finish this...will move the cursor to
-		//the last input note
+	public void advanceCursorToFinalEvent() {
+
+		int maxT= 0;
+		KiteTabCanvas<?> canvasToSelect = eventCanvas;
+		int row = 0;
+		for (KiteTabCanvas<?> canvas : allCanvases)  {
+			for (int t : canvas.data.keySet()) {
+				if (t>maxT) {
+					canvasToSelect = canvas;
+					maxT = t;
+					row = canvas.data.get(t).keySet().stream().mapToInt(i->i).min().orElse(0);  
+				}
+			}
+		}
+		canvasToSelect.setSelectedRow(row);
+		setCursorT(maxT);
+		while (cursorT.get() > eventCanvas.getMaxVisibleTime()-scrollTimeMargin) {
+			viewT0.getAndIncrement();
+		}
+		
+		selectedCanvas.set(canvasToSelect);
+		repaintCanvases();
+		
 	}
 	
 	public void playTToPreviousMeasure() {
@@ -473,6 +638,9 @@ public class TabSequencer2000 {
 	}
 	
 	public void shiftArrowUp() {
+		if (isSelectionMode.get()) {
+			return;
+		}
 		if (selectedCanvas.get() == null) {
 			selectedCanvas.set(allCanvases.get(0));
 			allCanvases.get(0).setSelectedRow(allCanvases.get(0).getRowCount()-1);
@@ -491,6 +659,9 @@ public class TabSequencer2000 {
 	}
 	
 	public void shiftArrowDown() {
+		if (isSelectionMode.get()) {
+			return;
+		}
 		if (selectedCanvas.get() == null) {
 			selectedCanvas.set(allCanvases.get(allCanvases.size()-1));
 			eventCanvas.setSelectedRow(0);
@@ -513,7 +684,8 @@ public class TabSequencer2000 {
 			allCanvases.get(0).setSelectedRow(allCanvases.get(0).getRowCount()-1);
 			selectedCanvas.get().repaint();
 		}
-		else {			
+		else {
+			
 			if (selectedCanvas.get().getSelectedRow() == 0) {
 				shiftArrowUp();				
 			} else {
@@ -581,9 +753,10 @@ public class TabSequencer2000 {
 
 	abstract class KiteTabCanvas<A> extends JPanel {
 		
-		protected final Map<Integer,Map<Integer,A>> data = new HashMap<>();
+		protected final TreeMap<Integer,Map<Integer,A>> data = new TreeMap<>();
 		AtomicInteger selectedRow = new AtomicInteger(0);		
-		
+		AtomicInteger selectionT0= new AtomicInteger(-1);
+		AtomicInteger selectionRow0= new AtomicInteger(-1);
 		public abstract int getRowCount();
 		public abstract void handleEvents(int t);
 		public abstract boolean handleCharInput(char c);
@@ -619,7 +792,17 @@ public class TabSequencer2000 {
 			});
 		}
 		
-		 
+		
+		public final void setSelectionT0AndRow() {
+			
+			selectionT0.set(cursorT.get());
+			selectionRow0.set(getSelectedRow());			
+		}
+		
+		public final void clearSelectionT0AndRow() {
+			selectionT0.set(-1);
+			selectionRow0.set(-1);
+		}
 		
 		public final boolean isSelected() {
 			return this == selectedCanvas.get(); 
@@ -637,9 +820,14 @@ public class TabSequencer2000 {
 		private Color unselectedMeasureColor = Color.LIGHT_GRAY;
 		private Color selectedCellColor = Color.red;
 		private Color repeatColor = Color.orange.darker();
-							
+		private Color selectionOuterColor = new Color(0,150,100);
+		private Color selectionInnerColor = new Color(0,75,50);
+		protected final Set<Point> outerSelectionCells = new HashSet<>();
+		protected final Set<Point> innerSelectionCells = new HashSet<>();				
 		public final void drawGrid(Graphics2D g) {
 			g.setFont(font);
+			outerSelectionCells.clear();
+			innerSelectionCells.clear();
 			g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 			g.setPaint(isSelected()?selectedHeaderBackgroundColor:unselectedHeaderBackgroundColor);			
 			g.fillRect(0,0,getWidth(),getHeight());			  
@@ -649,8 +837,7 @@ public class TabSequencer2000 {
 			int t0 = viewT0.get();
 			int tDelta = getWidth()/cellWidth;
 			int t1 = t0+tDelta;
-			
-													
+						
 			{
 				int y = infoPanelHeight;
 			
@@ -689,6 +876,37 @@ public class TabSequencer2000 {
 				}
 				x+=cellWidth;
 			}
+			
+			if (isSelected() && selectionT0.get() != -1 && selectionRow0.get() != -1) {
+				//means we're selecting things				
+				int sT0 = Math.min(cursorT.get(), selectionT0.get());
+				int sT1 = Math.max(cursorT.get(), selectionT0.get());
+				int row0 = Math.min(getSelectedRow(),selectionRow0.get());
+				int row1 = Math.max(getSelectedRow(),selectionRow0.get());
+				IntStream.rangeClosed(row0, row1).forEach(row -> {
+					outerSelectionCells.add(new Point(row,sT0));
+					outerSelectionCells.add(new Point(row,sT1));
+				});
+				IntStream.rangeClosed(sT0, sT1).forEach(t-> {
+					outerSelectionCells.add(new Point(row0,t));
+					outerSelectionCells.add(new Point(row1,t));
+				});
+				
+				for (int row= 0; row < getRowCount(); row++) {
+					for (int t = t0; t < t1; t++) {
+						Point p = new Point(row,t);
+						if ((row == row0 || row == row1) && (t >= sT0 && t <= sT1)) {
+							outerSelectionCells.add(p);
+						} else if ((t == sT0 || t == sT1) && (row >= row0 && row  <= row1)) {
+							outerSelectionCells.add(p);
+						} else if (row > row0 && row < row1 && t > sT0 && t < sT1) {
+							innerSelectionCells.add(p);
+						}
+					}
+				}				
+			}
+			
+			
 			g.setPaint(gridColor);
 			g.draw(p2d);
 			x=0;
@@ -703,6 +921,14 @@ public class TabSequencer2000 {
 				}
 				int y = rowHeight+infoPanelHeight;
 				for (int row= 0; row < getRowCount(); row++) {
+					if (outerSelectionCells.contains(new Point(row,t))) {
+						g.setPaint(selectionOuterColor);
+						g.fillRect(x+1, y-rowHeight+1, cellWidth-2,rowHeight-2);
+					}
+					if (innerSelectionCells.contains(new Point(row,t))) {
+						g.setPaint(selectionInnerColor);
+						g.fillRect(x+1, y-rowHeight+1, cellWidth-2,rowHeight-2);
+					}
 					if (isSelected() && row == getSelectedRow() && 
 							t == cursorT.get()) {
 						g.setPaint(selectedCellColor);
@@ -734,8 +960,7 @@ public class TabSequencer2000 {
 			int tDelta = getWidth()/cellWidth;
 			int t1 = t0+tDelta;
 			return t1;
-		}		
-		
+		}
 				
 		public final Optional<A> getValueAt(int t, int row) {
 			return Optional.ofNullable(data.getOrDefault(t,Collections.emptyMap()).get(row));
@@ -748,24 +973,33 @@ public class TabSequencer2000 {
 		public final Optional<A> getSelectedValue() {
 			return getValueAt(cursorT.get(), getSelectedRow());			
 		}
-
-		public final void setSelectedValue(int t, A inputVal) {
-			if (!data.containsKey(t)) {
+		
+		public final void setSelectedValue(int row, int t, A inputVal) {
+			if (!data.containsKey(t)) {			
 				data.put(t, new HashMap<>());
 			}
-			data.get(cursorT.get()).put(getSelectedRow(), inputVal);
-			
+			data.get(t).put(row, inputVal);
 		}
 		
-		public final void setSelectedValue(A inputVal) {
-			setSelectedValue(cursorT.get(),inputVal);		
+		public final void setSelectedValue(int t, A inputVal) {
+			setSelectedValue(getSelectedRow(),t,inputVal);
+		}
+		
+		public final void setSelectedValue(A inputVal) {			
+			setSelectedValue(cursorT.get(),inputVal);
+			updateDataLength();
 		}					
 		
 		public final Optional<A> removeSelectedValue() {
-			Optional<A> toReturn = Optional.ofNullable(data.getOrDefault(cursorT.get(), new HashMap<>()).get(selectedRow.get()));
-			data.getOrDefault(cursorT.get(),new HashMap<>()).remove(selectedRow.get());
+			return removeValueAt(cursorT.get(),selectedRow.get());
+			
+		}
+		
+		public final Optional<A> removeValueAt(int t, int row) {
+			Optional<A> toReturn = Optional.ofNullable(data.getOrDefault(t, new HashMap<>()).get(row));
+			data.getOrDefault(t,new HashMap<>()).remove(row);
 			return toReturn;
-		}							
+		}
 		
 		public final int getSelectedRow() {
 			return selectedRow.get();
@@ -791,9 +1025,12 @@ public class TabSequencer2000 {
 		public Dimension getSize() {				 
 			return new Dimension(super.getWidth(),20);
 		}
+		
+		
 		@Override
 		public void paint(Graphics g_) {
 			Graphics2D g = (Graphics2D) g_;
+			
 			g.setPaint(Color.BLACK);
 			g.fill(getBounds());				
 			double t0 = viewT0.get();
@@ -822,9 +1059,11 @@ public class TabSequencer2000 {
 				return;
 			}
 			
+			
 			JPanel navigationBar = (JPanel) me.getSource();
 			double deltaX = pressedX - me.getPoint().x;
 			pressedX = me.getPoint().x;
+			
 			int deltaT= (int) (deltaX/navigationBar.getWidth()*dataLength);
 			double t0 = viewT0.get();				 				
 			double displayedt1 = t0+navigationBar.getWidth()/cellWidth;
@@ -879,37 +1118,57 @@ public class TabSequencer2000 {
 				int y = rowHeight+infoPanelHeight; 					
 				g.setFont(font);
 				
-				for (int rowNumber = 0; rowNumber < getRowCount(); rowNumber++) {
-					
+				for (int rowNumber = 0; rowNumber < getRowCount(); rowNumber++) {					
 					g.setPaint(Color.black);
-					
-					ControlEvent event = data.getOrDefault(t_,new HashMap<>()).getOrDefault(rowNumber,NilControlEvent.get());
-					switch (event.getType()) {
-					case NIL:						
-						break;
-					case TIME_SIGNATURE:
-						g.setFont(font.deriveFont(Font.ITALIC));
-						g.setPaint(Color.YELLOW);
-						g.drawString(event.toString(),x+1,y-3);
-						g.setFont(font);
-						break;
-					case TEMPO:
-						g.setFont(font.deriveFont(Font.ITALIC));
-						g.setPaint(Color.pink);
-						g.drawString(event.toString(),x+1,y-3);
-						g.setFont(font);
-						break;
-					case STICKY_NOTE:
-						g.setFont(font.deriveFont(Font.ITALIC));						
+					ControlEvent event = data.getOrDefault(t_,new HashMap<>()).getOrDefault(rowNumber,null);
+					if (event != null) {
+						switch (event.getType()) {
 						
-						g.drawString(((StickyNote) event).getText(),x+1,y-3);
-						
-					default:
-						break;					
+						case TIME_SIGNATURE:
+							g.setFont(font.deriveFont(Font.ITALIC));
+							g.setPaint(Color.YELLOW);
+							g.drawString(event.toString(),x+1,y-3);
+							g.setFont(font);
+							break;
+						case PROGRAM_CHANGE:
+							g.setFont(font.deriveFont(Font.ITALIC));
+							g.setPaint(new Color(100,200,255));
+							g.drawString(event.toString(),x+1,y-3);
+							g.setFont(font);
+							break;
+						case TEMPO:
+							g.setFont(font.deriveFont(Font.ITALIC));
+							g.setPaint(new Color(255,200,100));
+							g.drawString(event.toString(),x+1,y-3);
+							g.setFont(font);
+							break;
+						case STICKY_NOTE:
+							g.setFont(font.deriveFont(Font.ITALIC));
+							g.setPaint(Color.WHITE);
+							g.drawString(((StickyNote) event).getText(),x+1,y-3);
+						default:
+							break;					
+						}					
 					}					
 					y+=rowHeight;
 				}				
 				x+=cellWidth;
+			}
+			
+			if (!eventClipboard.isEmpty()) {
+				g.setPaint(Color.pink);
+				int timeOffset = eventClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
+				int rowOffset = eventClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
+				eventClipboard.forEach((point,controlEvent) -> {
+					int t = cursorT.get()+point.y-timeOffset;
+					int row = getSelectedRow()+point.x-rowOffset;
+					int x_ = (t-t0)*cellWidth;
+					int y = rowHeight+infoPanelHeight+(rowHeight*row);
+					if (row >= 0) {
+						g.drawString(controlEvent.toString(),x_+1,y-3);
+					}
+				});
+				
 			}
 		}
 
@@ -920,6 +1179,21 @@ public class TabSequencer2000 {
 				controlEvent.filter(a->a.getType()==ControlEventType.TEMPO)
 				.ifPresent(event -> {
 					tempo.set(((TempoEvent) event).getTempo());
+				});
+				
+				controlEvent.filter(a->a.getType()==ControlEventType.PROGRAM_CHANGE)
+				.ifPresent(event -> {
+					allCanvases.stream().filter(a->a.getName().equals(((ProgramChange) event).getInstrument()))
+					.findFirst()
+					.ifPresent(canvas -> {
+						try {
+							((SoundfontPlayer) canvas).programChange((ProgramChange) event);
+
+						} catch (Exception ex) {
+							ex.printStackTrace();
+						}
+					});
+					//tempo.set(((TempoEvent) event).getTempo());
 				});
 			}			
 		}
@@ -934,6 +1208,15 @@ public class TabSequencer2000 {
 					fileHasBeenModified.set(true);
 					updateWindowTitle();
 				}
+				
+				return true;
+			case 'P':
+				addProgramChange();
+				if (!fileHasBeenModified.get()) {
+					fileHasBeenModified.set(true);
+					updateWindowTitle();
+				}
+				
 				return true;
 			case 'S':
 				addTempo();
@@ -941,17 +1224,19 @@ public class TabSequencer2000 {
 					fileHasBeenModified.set(true);
 					updateWindowTitle();
 				}
+				
 				return true;
 			case 'N':
 				addStickyNote();
 				if (!fileHasBeenModified.get()) {
 					fileHasBeenModified.set(true);
 					updateWindowTitle();
+					
 				}
 				return true;
 			default:
 				return false;				
-			}
+			}			
 			
 		}
 	}
@@ -1018,7 +1303,9 @@ public class TabSequencer2000 {
 					soundbankTextField.setText(soundfontFile.getName());
 					try {
 						DefaultListModel<Instrument> model = new DefaultListModel<>();
-						model.addAll(Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()));					
+						Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()).forEach(model::addElement);
+							
+						//model.addAll(Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()));					
 						instrumentList.setModel(model);						
 					} catch (Exception ex) {
 						ex.printStackTrace();
@@ -1030,7 +1317,8 @@ public class TabSequencer2000 {
 				soundbankTextField.setText(soundfontFile.getName());
 				try {
 					DefaultListModel<Instrument> model = new DefaultListModel<>();
-					model.addAll(Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()));					
+					Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()).forEach(model::addElement);
+					//model.addAll(Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()));					
 					instrumentList.setModel(model);
 				} catch (Exception ex) {
 					ex.printStackTrace();
@@ -1039,7 +1327,8 @@ public class TabSequencer2000 {
 				soundbankTextField.setText("<default>");
 				try {
 					DefaultListModel<Instrument> model = new DefaultListModel<>();
-					model.addAll(Arrays.asList(synth.getLoadedInstruments()));					
+					Arrays.asList(synth.getLoadedInstruments()).forEach(model::addElement);
+					//model.addAll(Arrays.asList(synth.getLoadedInstruments()));					
 					instrumentList.setModel(model);
 				} catch (Exception ex) {
 					ex.printStackTrace();
@@ -1055,7 +1344,8 @@ public class TabSequencer2000 {
 						soundbankTextField.setText(soundfontFile.getName());
 						try {
 							DefaultListModel<Instrument> model = new DefaultListModel<>();
-							model.addAll(Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()));					
+							Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()).forEach(model::addElement);
+//							/model.addAll(Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()));					
 							instrumentList.setModel(model);
 						} catch (Exception ex) {
 							ex.printStackTrace();
@@ -1138,12 +1428,31 @@ public class TabSequencer2000 {
 				int y = rowHeight+infoPanelHeight; 
 				g.setFont(font);
 				for (int row = 0; row< rows; row++) {
-					g.setPaint(Color.WHITE);									
+					g.setPaint(Color.WHITE);
+					Point p = new Point(row,t_);
+					if (outerSelectionCells.contains(p) || innerSelectionCells.contains(p)) {
+						g.setPaint(Color.RED);
+					}
 					String s = data.getOrDefault(t_,new HashMap<>()).getOrDefault(row,"");					
 					g.drawString(s,(int) (x+(cellWidth-fontMetrics.stringWidth(s))*0.5),y-3);
 					y+=rowHeight;
 				}
 				x+=cellWidth;
+			}
+			if (!guitarClipboard.isEmpty() && isSelected()) {
+				g.setPaint(Color.pink);
+				int timeOffset = guitarClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
+				int rowOffset = guitarClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
+				guitarClipboard.forEach((point,guitarEvent) -> {
+					int t = cursorT.get()+point.y-timeOffset;
+					int row = getSelectedRow()+point.x-rowOffset;
+					int x_ = (t-t0)*cellWidth;
+					int y = rowHeight+infoPanelHeight+(rowHeight*row);
+					if (row >= 0) {
+						g.drawString(guitarEvent.toString(),x_+1,y-3);
+					}
+				});
+				
 			}
 		}
 
@@ -1184,8 +1493,9 @@ public class TabSequencer2000 {
 			IntStream.range(0, getRowCount()).forEach(row -> {
 				MidiChannel channel = synth.getChannels()[row<9?row:row+1];
 				double baseFreq = canvasConfig.getFrequencies()[row];
-				 
-				this.getValueAt(t, row).ifPresentOrElse(inputVal -> {
+				Optional<String> inputValO = this.getValueAt(t, row);
+				if (inputValO.isPresent()) {
+					String inputVal = inputValO.get();
 					if (inputVal.charAt(0) != '-') {
 						//
 						if (openMidiNums.containsKey(channel)) {
@@ -1209,9 +1519,9 @@ public class TabSequencer2000 {
 							f.accept(row, freq);
 						}					
 					}
-				}, () -> {
+				} else  {
 					noteOff(row);
-				});
+				}
 			});
 			
 			
@@ -1268,25 +1578,27 @@ public class TabSequencer2000 {
 			if (c == '-') {
 				{
 					int t = cursorT.get()+1;
-					
-					while (getValueAt(t,getSelectedRow()).orElse("").equals("-")) {
-						System.out.println(t+" "+getValueAt(t,getSelectedRow()).orElse("").contentEquals("-"));
-						data.getOrDefault(t,Collections.emptyMap()).remove(getSelectedRow());
-						t++;
-					}
-					
-				}
-
-				for (int t = cursorT.get()-1; t>=0; t--) {
-					
-					if (getValueAt(t,getSelectedRow()).isPresent()) {
-						for (int t2 = t+1; t2<cursorT.get(); t2++) {
-							data.putIfAbsent(t2, new HashMap<>());
-							data.get(t2).put(getSelectedRow(),"-");
-						}						
-						
+				
+					while (!getValueAt(t,getSelectedRow()).filter(a->a.contentEquals("-")).isEmpty()) {
+						data.getOrDefault(t, Collections.emptyMap()).remove(getSelectedRow());
+											t++;
 					}
 				}
+				/*
+				for (int t = cursorT.get()+1; getValueAt(t-1,getSelectedRow()).filter(a->a.charAt(0)=='-').isPresent(); t++) {
+					data.getOrDefault(t, Collections.emptyMap()).remove(getSelectedRow());
+				}
+				*/
+				data.entrySet().stream().flatMap(a->a.getValue().entrySet().stream().map(b->new Trio<>(a.getKey(),b.getKey(),b.getValue())))
+				.filter(a->a.b == getSelectedRow())
+				.filter(a->!a.c.contentEquals("-"))
+				.mapToInt(a->a.a).max().ifPresent(eventPosition -> {
+					for (int t = eventPosition+1; t<cursorT.get();t++) {
+						data.putIfAbsent(t, new HashMap<>());
+						data.get(t).put(getSelectedRow(), "-");
+					}
+				});
+									
 				setSelectedValue(String.valueOf(c));
 				if (!fileHasBeenModified.get()) {
 					fileHasBeenModified.set(true);
@@ -1301,9 +1613,8 @@ public class TabSequencer2000 {
 			
 			Predicate<String> isValid = token -> {
 				Matcher harmonicMatcher = harmonicPattern.matcher(token);
-				if (harmonicMatcher.find() && (harmonicMatcher.group(1).isBlank() || 
-						Integer.parseInt(harmonicMatcher.group(1)) <= canvasConfig.getMaxHarmonic())) {
-					
+				if (harmonicMatcher.find() && (harmonicMatcher.group(1).trim().isEmpty() || 
+						Integer.parseInt(harmonicMatcher.group(1)) <= canvasConfig.getMaxHarmonic())) {					
 					return true;
 				}
 				Matcher integerMatcher = integerPattern.matcher(token);
@@ -1322,7 +1633,7 @@ public class TabSequencer2000 {
 					fileHasBeenModified.set(true);
 					updateWindowTitle();
 				}
-				repaint();
+				repaint();				
 				return true;
 			} 
 			if (isValid.test(String.valueOf(c))) {
@@ -1332,15 +1643,36 @@ public class TabSequencer2000 {
 					updateWindowTitle();
 				}
 				repaint();
+				
 				return true;
 			}
 			
+			
 			return false;
+		}
+
+		@Override
+		public void programChange(ProgramChange event) {
+			
+			Arrays.asList(synth.getAvailableInstruments()).stream().filter(a->
+			a.getPatch().getBank() == event.getBank()&& a.getPatch().getProgram() == event.getProgram())
+			.findFirst().ifPresent(instrument -> {					
+				loadedInstrument.set(instrument);					
+				synth.loadInstrument(instrument);
+				synth.getChannels()[9].programChange(event.getBank(),event.getProgram());
+			
+				for (int row = 0; row < getRowCount(); row++) {
+					MidiChannel channel = synth.getChannels()[row<9?row:row+1];
+					channel.programChange(event.getBank(), event.getProgram());
+				}
+			});
+			
 		}
 	}
 	
 	interface SoundfontPlayer {
 		public void initializeMidi(File file, int bank, int program);
+		public void programChange(ProgramChange event);			
 		public void silence();
 		public Synthesizer getSynth();
 		
@@ -1442,7 +1774,22 @@ public class TabSequencer2000 {
 					y+=rowHeight;
 				}				
 				x+=cellWidth;
-			}			
+			}
+			if (!drumClipboard.isEmpty()) {
+				g.setPaint(Color.pink);
+				int timeOffset = drumClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
+				int rowOffset = drumClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
+				drumClipboard.forEach((point,drumEvent) -> {
+					int t = cursorT.get()+point.y-timeOffset;
+					int row = getSelectedRow()+point.x-rowOffset;
+					int x_ = (t-t0)*cellWidth;
+					int y = rowHeight+infoPanelHeight+(rowHeight*row);
+					if (row >= 0) {
+						g.drawString(drumEvent.getToken(),x_+1,y-3);
+					}
+				});
+				
+			}
 		}
 
 		@Override
@@ -1490,6 +1837,20 @@ public class TabSequencer2000 {
 			}			
 			return false;
 		}
+
+		@Override
+		public void programChange(ProgramChange event) {
+
+			//MidiChannel channel = synth.getChannels()[9];
+			//channel.programChange(event.getBank(), event.getProgram());
+			Arrays.asList(synth.getAvailableInstruments()).stream().filter(a->
+			a.getPatch().getBank() == event.getBank()&& a.getPatch().getProgram() == event.getProgram())
+			.findFirst().ifPresent(instrument -> {					
+				loadedInstrument.set(instrument);					
+				synth.loadInstrument(instrument);
+				synth.getChannels()[9].programChange(event.getBank(),event.getProgram());
+			});
+		}
 	}
 	
 	
@@ -1533,6 +1894,11 @@ public class TabSequencer2000 {
 		KeyStroke k_ctrlO = KeyStroke.getKeyStroke("control O");
 		KeyStroke k_ctrlS = KeyStroke.getKeyStroke("control S");
 		KeyStroke k_ctrlR = KeyStroke.getKeyStroke("control R");
+		KeyStroke k_ctrlL = KeyStroke.getKeyStroke("control L");
+		KeyStroke k_ctrlC = KeyStroke.getKeyStroke("control C");
+		KeyStroke k_ctrlV = KeyStroke.getKeyStroke("control V");
+		KeyStroke k_ctrlX = KeyStroke.getKeyStroke("control X");
+		
 		KeyStroke k_Up = KeyStroke.getKeyStroke("UP");
 		KeyStroke k_Down = KeyStroke.getKeyStroke("DOWN");
 		KeyStroke k_ShiftUp = KeyStroke.getKeyStroke("shift UP");
@@ -1543,8 +1909,10 @@ public class TabSequencer2000 {
 		KeyStroke k_CtrlRight= KeyStroke.getKeyStroke("control RIGHT");
 		KeyStroke k_Left = KeyStroke.getKeyStroke("LEFT");
 		KeyStroke k_ShiftLeft = KeyStroke.getKeyStroke("shift LEFT");
+		KeyStroke k_AltLeft = KeyStroke.getKeyStroke("alt LEFT");
 		KeyStroke k_Right = KeyStroke.getKeyStroke("RIGHT");
 		KeyStroke k_ShiftRight= KeyStroke.getKeyStroke("shift RIGHT");
+		KeyStroke k_AltRight= KeyStroke.getKeyStroke("alt RIGHT");
 		
 		KeyStroke k_ShiftSpace = KeyStroke.getKeyStroke("shift SPACE");
 		KeyStroke k_CtrlSpace = KeyStroke.getKeyStroke("ctrl SPACE");
@@ -1557,6 +1925,16 @@ public class TabSequencer2000 {
 		KeyStroke k_Hyphen= KeyStroke.getKeyStroke("MINUS");
 		
 		
+		inputMap.put(k_ctrlC, "copySelectedNotes");
+		actionMap.put("copySelectedNotes",rToA(this::copySelectedNotes));
+		inputMap.put(k_ctrlV, "pasteSelectedNotes");
+		actionMap.put("pasteSelectedNotes",rToA(this::pasteSelectedNotes));
+		inputMap.put(k_ctrlX, "cutSelectedNotes");
+		actionMap.put("cutSelectedNotes",rToA(this::cutSelectedNotes));
+		inputMap.put(k_ctrlL, "toggleSelectionMode");
+		actionMap.put("toggleSelectionMode",rToA(this::toggleSelectionMode));
+		inputMap.put(k_CtrlSpace,"ctrlspace");
+		actionMap.put("ctrlspace",rToA(this::returnPlayToStopT0));
 		inputMap.put(k_Hyphen, "hyphen");
 		actionMap.put("hyphen",rToA(()->this.handleABCInput('-')));
 		inputMap.put(k_CtrlI, "configureCanvasInstrument");
@@ -1575,27 +1953,18 @@ public class TabSequencer2000 {
 		actionMap.put("adjustRepeatT", rToA(this::adjustRepeatT));		
 		inputMap.put(k_ShiftSpace, "setPlayT");
 		actionMap.put("setPlayT", rToA(() -> this.setPlayT()));
-		inputMap.put(k_CtrlSpace, "returnToStopT0");
-		actionMap.put("returnToStopT0", rToA(() -> this.returnToStopT0()));
+		
+
 		inputMap.put(k_Space, "togglePlayStatus");
 		actionMap.put("togglePlayStatus", rToA(() -> this.togglePlayStatus()));
 		inputMap.put(k_ShiftCtrlSpace, "setStopT0");
 		actionMap.put("setStopT0", rToA(() -> this.setStopT0()));
-		
-		//inputMap.put(k_Period, "toggleNoteSelectionMode");
-		//actionMap.put("toggleNoteSelectionMode", rToA.apply(()->this.toggleNoteSelectionMode()));
+
 		inputMap.put(k_Backspace, "backspace");
 		actionMap.put("backspace",rToA(this::backspace));
 		inputMap.put(k_Delete, "delete");
 		actionMap.put("delete",rToA(this::backspace));
-		inputMap.put(k_CtrlShiftLeft, "ctrlShiftLeft");
-		actionMap.put("ctrlShiftLeft", rToA(this::playTToPreviousMeasure));
-		inputMap.put(k_CtrlShiftRight, "ctrlShiftRight");
-		actionMap.put("ctrlShiftRight", rToA(this::playTToNextMeasure));
-		inputMap.put(k_CtrlLeft, "ctrlLeft");
-		actionMap.put("ctrlLeft", rToA(this::decrementPlayT));
-		inputMap.put(k_CtrlRight, "ctrlRight");
-		actionMap.put("ctrlRight", rToA(this::incrementPlayT));
+		
 		inputMap.put(k_Up, "up");
 		actionMap.put("up", rToA(this::arrowUp));
 		inputMap.put(k_Down, "down");
@@ -1604,14 +1973,32 @@ public class TabSequencer2000 {
 		actionMap.put("shiftUp", rToA(this::shiftArrowUp));
 		inputMap.put(k_ShiftDown, "shiftDown");
 		actionMap.put("shiftDown", rToA(this::shiftArrowDown));
+		
 		inputMap.put(k_Right, "right");
 		actionMap.put("right", rToA(this::incrementCursorT));	
 		inputMap.put(k_Left, "left");
 		actionMap.put("left", rToA(this::decrementCursorT));
+		
+		inputMap.put(k_CtrlLeft, "ctrlLeft");
+		actionMap.put("ctrlLeft", rToA(this::decrementPlayT));
+		inputMap.put(k_CtrlRight, "ctrlRight");
+		actionMap.put("ctrlRight", rToA(this::incrementPlayT));
+		
 		inputMap.put(k_ShiftRight, "shiftRight");;
 		actionMap.put("shiftRight", rToA(this::cursorTToNextMeasure));
 		inputMap.put(k_ShiftLeft, "shiftLeft");;
 		actionMap.put("shiftLeft", rToA(this::cursorTToPrevMeasure));
+		
+		inputMap.put(k_CtrlShiftLeft, "ctrlShiftLeft");
+		actionMap.put("ctrlShiftLeft", rToA(this::playTToPreviousMeasure));
+		inputMap.put(k_CtrlShiftRight, "ctrlShiftRight");
+		actionMap.put("ctrlShiftRight", rToA(this::playTToNextMeasure));
+		
+		
+		inputMap.put(k_AltLeft, "AltLeft");
+		actionMap.put("AltLeft", rToA(this::cursorToStart));
+		inputMap.put(k_AltRight, "AltRight");
+		actionMap.put("AltRight", rToA(this::advanceCursorToFinalEvent));
 		
 		for (int i = 'A'; i <= 'Z'; i++) {
 			final int i_ = i;
@@ -1733,6 +2120,66 @@ public class TabSequencer2000 {
 	}
 	
 	
+	void addProgramChange() {
+		JDialog dialog = new JDialog(frame,String.format("Adding program change(t = %d)",cursorT.get()));
+		dialog.setModalityType(ModalityType.APPLICATION_MODAL);
+		JLabel canvasLabel = new JLabel("Canvas");
+		DefaultComboBoxModel<String> canvasModel = new DefaultComboBoxModel<>();
+		Map<String,KiteTabCanvas<?>> nameToPlayerMap = new HashMap<>();
+		
+		allCanvases.stream().filter(a->a!=eventCanvas).forEach(a-> {
+			nameToPlayerMap.put(a.getName(),(KiteTabCanvas<?>) a);
+			canvasModel.addElement(a.getName());	
+		});
+		JComboBox<String> canvasComboBox = new JComboBox<>(canvasModel);
+		
+		JList<Instrument> instrumentList = new JList<>();
+		
+		Runnable instrumentComboBoxF = () -> {
+			Instrument[] instruments = ((SoundfontPlayer) nameToPlayerMap.get(canvasComboBox.getSelectedItem().toString()))
+					.getSynth().getAvailableInstruments();
+			DefaultListModel<Instrument> model = new DefaultListModel<>();
+			//model.addAll(Arrays.asList(instruments));
+			Arrays.asList(instruments).forEach(model::addElement);
+			instrumentList.setModel(model);
+		};
+		instrumentComboBoxF.run();
+		canvasComboBox.addActionListener(ae -> instrumentComboBoxF.run());
+		
+		JScrollPane instrumentScrollPane = new JScrollPane(instrumentList,JScrollPane.VERTICAL_SCROLLBAR_ALWAYS,JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		
+		Runnable r = () -> {
+			if (instrumentList.getSelectedValue() == null) {
+				return;
+			}
+			ProgramChange programChange = new ProgramChange(
+					nameToPlayerMap.get(canvasComboBox.getSelectedItem()).getName(),
+					instrumentList.getSelectedValue().getPatch().getBank(),
+					instrumentList.getSelectedValue().getPatch().getProgram());
+			eventCanvas.setSelectedValue(programChange);
+			eventCanvas.repaint();
+			dialog.dispose();
+		};
+		Arrays.asList(canvasComboBox,instrumentList).forEach(component -> {
+			component.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+			.put(KeyStroke.getKeyStroke("ENTER"),"enterPressed");
+			component.getActionMap().put("enterPressed",rToA(r));
+		});
+		
+		Box topPanel = Box.createHorizontalBox();
+		topPanel.add(canvasLabel);
+		topPanel.add(canvasComboBox);
+		topPanel.add(Box.createHorizontalGlue());
+		dialog.add(topPanel,BorderLayout.NORTH);
+		dialog.add(instrumentScrollPane,BorderLayout.CENTER);
+		dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+		dialog.setLocationRelativeTo(null);
+		
+		dialog.pack();
+		dialog.setVisible(true);
+
+		
+	}
 	void addTempo() {
 		JDialog dialog = new JDialog(frame,String.format("Adding tempo (t = %d)",cursorT.get()));
 		dialog.setModalityType(ModalityType.APPLICATION_MODAL);
@@ -1869,10 +2316,11 @@ public class TabSequencer2000 {
 	}
 	
 	void loadXML(File file) throws Exception {
+		allCanvases.forEach(a->a.data.clear());
 		SchemaFactory schemaF = SchemaFactory.newInstance("http://www.w3.org/2001/XMLSchema");
 		Schema schema = schemaF.newSchema(new File("schemas/projectFiles.xsd"));
 		
-		DocumentBuilderFactory dbf = DocumentBuilderFactory.newDefaultInstance();
+		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
 		dbf.setNamespaceAware(true);
 		dbf.setSchema(schema);
 		DocumentBuilder db = dbf.newDocumentBuilder();
@@ -1922,6 +2370,11 @@ public class TabSequencer2000 {
 			.map(TempoEvent::fromXMLElement).forEach(tempo-> {
 				eventCanvas.setSelectedValue(tempo);
 			});
+			NodeList programChangeNodes = eventNode.getElementsByTagName("programChange");
+			IntStream.range(0, programChangeNodes.getLength()).mapToObj(k->(Element) programChangeNodes.item(k))
+			.map(ProgramChange::fromXMLElement).forEach(programChange-> {
+				eventCanvas.setSelectedValue(programChange);
+			});
 			NodeList stickyNodes = eventNode.getElementsByTagName("note");
 			IntStream.range(0, stickyNodes.getLength()).mapToObj(k->(Element) stickyNodes.item(k))
 			.map(StickyNote::fromXMLElement).forEach(stickyNote-> {
@@ -1957,6 +2410,7 @@ public class TabSequencer2000 {
 			}
 			
 		}
+		
 		updateMeasureLinePositions();
 		repaintCanvases();
 		
@@ -1965,7 +2419,7 @@ public class TabSequencer2000 {
 	
 	void saveXML(File file) throws Exception {
 		
-		DocumentBuilderFactory dbf = DocumentBuilderFactory.newDefaultInstance();
+		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
 		DocumentBuilder db = dbf.newDocumentBuilder();
 		
 		Document doc = db.newDocument();
@@ -1988,22 +2442,7 @@ public class TabSequencer2000 {
 				eventElement.appendChild(e);
 				e.setAttribute("t",""+t);
 				e.setAttribute("r",""+r);
-				switch (controlEvent.getType()) {
-				case NIL:
-					break;
-				case STICKY_NOTE:
-					e.appendChild(((StickyNote) controlEvent).toXMLElement(doc));
-					break;
-				case TEMPO:
-					e.appendChild(((TempoEvent) controlEvent).toXMLElement(doc));
-					break;
-				case TIME_SIGNATURE:
-					e.appendChild(((TimeSignatureEvent) controlEvent).toXMLElement(doc));
-					break;
-				default:
-					break;
-				
-				}
+				e.appendChild(controlEvent.toXMLElement(doc));				
 			});
 		});
 		
@@ -2027,7 +2466,7 @@ public class TabSequencer2000 {
 			 
 		});
 		
-		TransformerFactory tf = TransformerFactory.newDefaultInstance();
+		TransformerFactory tf = TransformerFactory.newInstance();
 		Transformer t  = tf.newTransformer();
 		t.setOutputProperty(OutputKeys.INDENT,"yes");
 		t.setOutputProperty("{http://xml.apache.org/xslt}indent-amount","4");
@@ -2044,4 +2483,5 @@ public class TabSequencer2000 {
 		};
 	}	
 	
+
 }

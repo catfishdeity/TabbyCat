@@ -20,24 +20,21 @@ public class StickyNote extends ControlEvent {
 	public ControlEventType getType() {
 		return ControlEventType.STICKY_NOTE;
 	}
+	
+	@Override
+	public String toString() {
+		return getText();
+	}
 
 	@Override
 	public Element toXMLElement(Document doc) {
 		Element e = doc.createElement("note");
-		//e.setAttribute("r", color.getRed()+"");
-		//e.setAttribute("g", color.getGreen()+"");
-		//e.setAttribute("b", color.getBlue()+"");
-		//e.setAttribute("a", color.getAlpha()+"");
 		e.setTextContent(this.getText());
 		return e;
 	}
 	
 	public static StickyNote fromXMLElement(Element e) {
-		//Color color = new Color(
-			//	Integer.parseInt(e.getAttribute("r")),
-				//Integer.parseInt(e.getAttribute("g")),
-				//Integer.parseInt(e.getAttribute("b")),
-				//Integer.parseInt(e.getAttribute("a")));
+
 		return new StickyNote(e.getTextContent());
 	}
 

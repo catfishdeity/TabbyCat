@@ -27,7 +27,7 @@ public class CanvasesConfig {
 		SchemaFactory schemaF = SchemaFactory.newInstance("http://www.w3.org/2001/XMLSchema");
 		Schema schema = schemaF.newSchema(new File("schemas/canvases.xsd"));
 		
-		DocumentBuilderFactory dbf = DocumentBuilderFactory.newDefaultInstance();
+		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
 		dbf.setNamespaceAware(true);
 		dbf.setSchema(schema);
 		DocumentBuilder db = dbf.newDocumentBuilder();

@@ -3,6 +3,7 @@ package tabsequencer.config;
 import java.io.File;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.w3c.dom.Element;
@@ -38,11 +39,13 @@ public class DrumCanvasConfig extends CanvasConfig {
 		NodeList rowNodes = e.getElementsByTagName("row");
 		List<PercRowType> rowTypes = 
 				IntStream.range(0, rowNodes.getLength()).mapToObj(i->PercRowType.lookup(((Element) rowNodes.item(i)).getAttribute("type")))
-				.toList();
+				.collect(Collectors.toList());
+				
 		NodeList tokenNodes = e.getElementsByTagName("token");
 		List<PercRowToken> tokens = 
 				IntStream.range(0,tokenNodes.getLength()).mapToObj(i->PercRowToken.fromXMLElement((Element) tokenNodes.item(i)))
-				.toList();
+				.collect(Collectors.toList());
+				
 		return new DrumCanvasConfig(name,soundfontFile,bank,program,rowTypes,tokens);		
 	}
 		
