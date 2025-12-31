@@ -3,43 +3,78 @@
   xmlns="tab"    
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:schemaLocation="tab ../schemas/canvases.xsd">
-    <stringCanvas name="Bass" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="33" maxFrets="41" ed2="20.5">		
-		<string frequency="196.274"/>
-		<string frequency="157.549"/>
-		<string frequency="126.463"/>
-		<string frequency="101.512"/>
-		<string frequency="81.483"/>
-		<string frequency="65.406"/>
-		<additionalPitch token="B" edoSteps="1.5"/>
-		<additionalPitch token="D" edoSteps="3.5"/>
-		<additionalPitch token="E" edoSteps="4.5"/>
+    <stringCanvas name="KiteBass" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="33" maxFrets="41" ed2="41" fretStepSkip="2" baseFrequency="32.703">		
+		<string steps="65"/>
+		<string steps="52" />
+		<string steps="39"/>
+		<string steps="26"/>
+		<string steps="13"/>
+		<string steps="0"/>
+		<additionalPitch token="B" steps="1.5"/>
+		<additionalPitch token="D" steps="3.5"/>
+		<additionalPitch token="E" steps="4.5"/>
 	</stringCanvas>    
-    <stringCanvas name="ElectricG" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="30" maxFrets="41" ed2="20.5">
-  
-  		<string frequency = "489.0366359813304"/>
-		<string frequency = "392.54808236164797"/>
-		<string frequency = "315.09704105622444"/>
-		<string frequency = "252.92734761322137"/>
-		<string frequency = "203.02394131097032"/>
-		<string frequency = "162.96664292891072"/>
-		<string frequency = "130.8127826502993"/>
+    <stringCanvas name="KiteElectric" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="30" maxFrets="41" ed2="41" fretStepSkip="2" baseFrequency="65.406">
+  		<string steps="78"/>
+		<string steps="65"/>
+		<string steps="52"/>
+		<string steps="39"/>
+		<string steps="26"/>
+		<string steps="13"/>
+		<string steps="0"/>
     
-		<additionalPitch token="B" edoSteps="1.5"/>
-		<additionalPitch token="D" edoSteps="3.5"/>
-		<additionalPitch token="E" edoSteps="4.5"/>
+		<additionalPitch token="B" steps="1.5"/>
+		<additionalPitch token="D" steps="3.5"/>
+		<additionalPitch token="E" steps="4.5"/>
 	</stringCanvas>
-	<stringCanvas name="AcousticG" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="25" ed2="20.5">
-		<string frequency = "489.0366359813304"/>	
-		<string frequency = "392.54808236164797"/>
-		<string frequency = "315.09704105622444"/>
-		<string frequency = "252.92734761322137"/>
-		<string frequency = "203.02394131097032"/>
-		<string frequency = "162.96664292891072"/>
-		
-		<additionalPitch token="B" edoSteps="1.5"/>
-		<additionalPitch token="D" edoSteps="3.5"/>
-		<additionalPitch token="E" edoSteps="4.5"/>
+	<stringCanvas name="KiteAcoustic" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="25" ed2="41" fretStepSkip="2" baseFrequency="65.406">
+		<string steps="78"/>	
+		<string steps="65"/>
+		<string steps="52"/>
+		<string steps="39"/>
+		<string steps="26"/>
+		<string steps="13"/>		
+		<additionalPitch token="B" steps="1.5"/>
+		<additionalPitch token="D" steps="3.5"/>
+		<additionalPitch token="E" steps="4.5"/>
 	</stringCanvas>    
+	<!--
+	<stringCanvas name="ElectricGuitar" soundfontFile="sf2/SM64SF V2.sf2" ed2="12" program="28">
+		<string steps="24"/>
+		<string steps="19"/>
+		<string steps="15"/>
+		<string steps="10"/>
+		<string steps="5"/>
+		<string steps="0"/>
+	</stringCanvas>
+	
+	<stringCanvas name="5 String Banjo" soundfontFile="sf2/SM64SF V2.sf2" ed2="12" program="105">
+		<string steps="22"/>
+		<string steps="19"/>
+		<string steps="15"/>
+		<string steps="10"/>
+		<string steps="27"/>
+	</stringCanvas>
+	<stringCanvas name="Irish Tenor Banjo" soundfontFile="sf2/SM64SF V2.sf2" ed2="12" program="105">
+		<string steps="24"/>	
+		<string steps="17"/>
+		<string steps="10"/>	
+		<string steps="3"/>
+	</stringCanvas>
+	<stringCanvas name="Mandolin" soundfontFile="sf2/SM64SF V2.sf2" ed2="12">
+		<string steps="36"/>	
+		<string steps="29"/>
+		<string steps="22"/>	
+		<string steps="15"/>
+	</stringCanvas>
+	
+	<stringCanvas name="Mandocello" soundfontFile="sf2/SM64SF V2.sf2" ed2="12">
+		<string steps="17"/>	
+		<string steps="10"/>
+		<string steps="3"/>	
+		<string steps="-4"/>
+	</stringCanvas>
+	--> 
     <drumCanvas name="Drums" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="16">
 		<row type="HAND"/>
 		<row type="HAND"/>
@@ -64,4 +99,5 @@
 		<token token="H" position="HAND" midiNumber="50" />
 		<token token="H2" position="HAND" midiNumber="48" />		
 	</drumCanvas>
+	
     </canvases>

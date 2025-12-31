@@ -114,14 +114,14 @@ import tabsequencer.events.TimeSignatureDenominator;
 import tabsequencer.events.TimeSignatureEvent;
 
 
-public class TabSequencer2000 {
+public class TabbyCat {
 	
 	public static void main(String[] args) {
-		TabSequencer2000.getInstance(); 
+		TabbyCat.getInstance(); 
 	}
-	private static TabSequencer2000 instance;
+	private static TabbyCat instance;
 	
-	private Font font = new Font("Monospaced",Font.BOLD,11);
+	private Font font = new Font("Monospaced",Font.BOLD,10);
 	private FontMetrics fontMetrics = new Canvas().getFontMetrics(font);
 	int infoPanelHeight = fontMetrics.getMaxAscent()+10;
 	int cellWidth = fontMetrics.stringWidth("88")+3;
@@ -154,7 +154,7 @@ public class TabSequencer2000 {
 	final ScheduledExecutorService playbackDaemon = Executors.newSingleThreadScheduledExecutor();
 	final ScheduledExecutorService midiDaemon = Executors.newSingleThreadScheduledExecutor();	
 		
-	final JFrame frame = new JFrame("TabSequencer 2000");
+	final JFrame frame = new JFrame("TabbyCat");
 	
 	LeftClickablePanelButton playButton, stopButton;
 	final PlayStatusPanel playStatusPanel = new PlayStatusPanel();
@@ -739,14 +739,14 @@ public class TabSequencer2000 {
 	}
 		
 	
-	public static TabSequencer2000 getInstance() {
+	public static TabbyCat getInstance() {
 		if (instance == null) {
-			instance = new TabSequencer2000();
+			instance = new TabbyCat();
 		}
 		return instance;
 	}
 	
-	private TabSequencer2000() {		
+	private TabbyCat() {		
 		createGui();		
 	}
 
@@ -787,14 +787,12 @@ public class TabSequencer2000 {
 						}
 						selectedCanvas.get().repaint();
 					}
-				}
-				
+				}				
 			});
 		}
 		
 		
-		public final void setSelectionT0AndRow() {
-			
+		public final void setSelectionT0AndRow() {		
 			selectionT0.set(cursorT.get());
 			selectionRow0.set(getSelectedRow());			
 		}
@@ -822,8 +820,10 @@ public class TabSequencer2000 {
 		private Color repeatColor = Color.orange.darker();
 		private Color selectionOuterColor = new Color(0,150,100);
 		private Color selectionInnerColor = new Color(0,75,50);
+		
 		protected final Set<Point> outerSelectionCells = new HashSet<>();
-		protected final Set<Point> innerSelectionCells = new HashSet<>();				
+		protected final Set<Point> innerSelectionCells = new HashSet<>();
+		
 		public final void drawGrid(Graphics2D g) {
 			g.setFont(font);
 			outerSelectionCells.clear();
@@ -1243,9 +1243,8 @@ public class TabSequencer2000 {
 	
 	class TabCanvas extends KiteTabCanvas<String> implements SoundfontPlayer {		
 		
-		private final String name;
-		private final double[] baseFrequencies;	
-		private final int rows;
+		private final String name;		
+		
 
 		private final Map<Integer,String> openNotes = new ConcurrentHashMap<>();
 		private final Map<MidiChannel,Integer> openMidiNums = new ConcurrentHashMap<>();
@@ -1257,9 +1256,8 @@ public class TabSequencer2000 {
 				
 		public TabCanvas(StringCanvasConfig config) {
 			this.canvasConfig = config;
-			this.rows = config.getFrequencies().length;
-			this.name = config.getName();
-			this.baseFrequencies = config.getFrequencies();
+			
+			this.name = config.getName();			
 			initializeMidi(config.getSoundfontFile().orElse(defaultSoundfontFile),
 					config.getBank(),config.getProgram());
 		}
@@ -1398,13 +1396,13 @@ public class TabSequencer2000 {
 			
 		}
 		
-		public double[] getBaseFrequencies() {
-			return baseFrequencies;
-		}
+		//public double[] getBaseFrequencies() {
+			//return baseFrequencies;
+		//}
 				
 		@Override
 		public Dimension getSize() {				 			
-			return new Dimension(super.getWidth(),infoPanelHeight + rowHeight * rows);
+			return new Dimension(super.getWidth(),infoPanelHeight + rowHeight * getRowCount());
 		}		
 		 
 		@Override
@@ -1427,7 +1425,7 @@ public class TabSequencer2000 {
 			for (int t_ = t0; t_<t1; t_+=1) {
 				int y = rowHeight+infoPanelHeight; 
 				g.setFont(font);
-				for (int row = 0; row< rows; row++) {
+				for (int row = 0; row< getRowCount(); row++) {
 					g.setPaint(Color.WHITE);
 					Point p = new Point(row,t_);
 					if (outerSelectionCells.contains(p) || innerSelectionCells.contains(p)) {
@@ -1458,7 +1456,7 @@ public class TabSequencer2000 {
 
 		@Override
 		public int getRowCount() {			
-			return rows;
+			return canvasConfig.getEdoSteps().length;
 		}
 
 		@Override
@@ -1492,10 +1490,13 @@ public class TabSequencer2000 {
 			};
 			IntStream.range(0, getRowCount()).forEach(row -> {
 				MidiChannel channel = synth.getChannels()[row<9?row:row+1];
-				double baseFreq = canvasConfig.getFrequencies()[row];
+
+				
 				Optional<String> inputValO = this.getValueAt(t, row);
 				if (inputValO.isPresent()) {
 					String inputVal = inputValO.get();
+					double baseFreq = canvasConfig.getBaseFrequency()*Math.pow(2.0, canvasConfig.getEdoSteps()[row]/canvasConfig.getEd2());
+
 					if (inputVal.charAt(0) != '-') {
 						//
 						if (openMidiNums.containsKey(channel)) {
@@ -1506,16 +1507,22 @@ public class TabSequencer2000 {
 						if (inputVal.charAt(0) == 'H') {
 							double freq = baseFreq;
 							freq*=Integer.parseInt(inputVal.substring(1));
+
 							f.accept(row, freq);
 							
 						} else if (canvasConfig.getAdditionalPitchMap().containsKey(inputVal)){
 							
 							double edoSteps = canvasConfig.getAdditionalPitchMap().get(inputVal);
-							double freq = baseFreq*Math.pow(2, edoSteps/canvasConfig.getEd2());
+							double freq = baseFreq*Math.pow(2, canvasConfig.getFretStepSkip()*edoSteps/canvasConfig.getEd2());
 							f.accept(row, freq);
 						} else {
+							
 							double edoSteps = Double.parseDouble(inputVal);
-							double freq = baseFreq*Math.pow(2, edoSteps/canvasConfig.getEd2());
+							
+							double freq = baseFreq*Math.pow(2.0, canvasConfig.getFretStepSkip()*edoSteps/canvasConfig.getEd2());
+							System.out.println(getName()+" "+canvasConfig.getFretStepSkip()*edoSteps/canvasConfig.getEd2());
+							System.out.println(canvasConfig.getFretStepSkip()+" "+edoSteps+" "+canvasConfig.getEd2());
+							
 							f.accept(row, freq);
 						}					
 					}
@@ -1584,11 +1591,7 @@ public class TabSequencer2000 {
 											t++;
 					}
 				}
-				/*
-				for (int t = cursorT.get()+1; getValueAt(t-1,getSelectedRow()).filter(a->a.charAt(0)=='-').isPresent(); t++) {
-					data.getOrDefault(t, Collections.emptyMap()).remove(getSelectedRow());
-				}
-				*/
+				
 				data.entrySet().stream().flatMap(a->a.getValue().entrySet().stream().map(b->new Trio<>(a.getKey(),b.getKey(),b.getValue())))
 				.filter(a->a.b == getSelectedRow())
 				.filter(a->!a.c.contentEquals("-"))
@@ -2078,40 +2081,12 @@ public class TabSequencer2000 {
 			mainPanel.add(canvas);
 		}
 		mainPanel.add(Box.createVerticalGlue());
-		//panel.setLayout(null);
-		/*
-		int y = 0;		
-		mainPanel.add(navigationBar);
-		navigationBar.setBounds(new Rectangle(0,y,Toolkit.getDefaultToolkit().getScreenSize().width,20));
-		y+=navigationBar.getBounds().height;
-		mainPanel.add(eventCanvas);
-		eventCanvas.setBounds(new Rectangle(0,y,Toolkit.getDefaultToolkit().getScreenSize().width,80));
-		y+=eventCanvas.getBounds().height;
-		
-		panel.add(bassCanvas);						
-		bassCanvas.setBounds(new Rectangle(0,y,Toolkit.getDefaultToolkit().getScreenSize().width,130));
-		y+=bassCanvas.getBounds().height;		
-		panel.add(guitarCanvas);						
-		guitarCanvas.setBounds(new Rectangle(0,y,Toolkit.getDefaultToolkit().getScreenSize().width,150));
-		y+=guitarCanvas.getBounds().height;
-		panel.add(acousticCanvas);						
-		acousticCanvas.setBounds(new Rectangle(0,y,Toolkit.getDefaultToolkit().getScreenSize().width,130));
-		y+=acousticCanvas.getBounds().height;
-		panel.add(drumCanvas);						
-		drumCanvas.setBounds(new Rectangle(0,y,Toolkit.getDefaultToolkit().getScreenSize().width,100));
-		y+=drumCanvas.getBounds().height;
-		*/
-		//panel.add(controlBar);
-		//controlBar.setBounds(new Rectangle(0,y,Toolkit.getDefaultToolkit().getScreenSize().width,20));
-		//y+=controlBar.getBounds().height;
-		//y+=80;
+
 				
 		updateMeasureLinePositions();		
-		//mainPanel.setPreferredSize(new Dimension(
-			//	(int) drumCanvas.getBounds().getMaxX(),
-				//(int) drumCanvas.getBounds().getMaxY()));
+
 		
-		JScrollPane scrollPane = new JScrollPane(mainPanel,JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+		JScrollPane scrollPane = new JScrollPane(mainPanel,JScrollPane.VERTICAL_SCROLLBAR_NEVER,JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
 		frame.getContentPane().add(scrollPane,BorderLayout.CENTER);
 		frame.getContentPane().add(controlBar,BorderLayout.SOUTH);
 		frame.pack();

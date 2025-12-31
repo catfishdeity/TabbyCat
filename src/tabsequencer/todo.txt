@@ -1,0 +1,4 @@
+Separate out xsd types
+Amend save file to include instrument data, which 
+will require a splash screen asking if you want to load a project or
+start a new one
