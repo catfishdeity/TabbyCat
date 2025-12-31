@@ -27,48 +27,60 @@ public class StringCanvasConfig extends CanvasConfig {
 		int program = Integer.parseInt(e.getAttribute("program"));
 		
 		NodeList stringNodes = e.getElementsByTagName("string");
-		double[] frequencies = 
+		double[] edoSteps = 
 				IntStream.range(0, stringNodes.getLength())
 				.mapToDouble(i -> Double.parseDouble(((Element) stringNodes.item(i))
-						.getAttribute("frequency"))).toArray();
+						.getAttribute("steps"))).toArray();
 		Map<String,Double> additionalPitchMap = new HashMap<>();
 		NodeList additionalPitchNodes = e.getElementsByTagName("additionalPitch");
 		for (int i = 0; i < additionalPitchNodes.getLength(); i++) {
 			Element node = (Element) additionalPitchNodes.item(i);
 			String token = node.getAttribute("token");
-			double edoSteps = Double.parseDouble(node.getAttribute("edoSteps"));
-			
-			additionalPitchMap.put(token, edoSteps);
+			double edoStep = Double.parseDouble(node.getAttribute("steps"));			
+			additionalPitchMap.put(token, edoStep);
 		}
 		
 		int maxFrets = Integer.parseInt(e.getAttribute("maxFrets"));
-		int maxHarmonic= Integer.parseInt(e.getAttribute("maxHarmonic"));
+		int maxHarmonic = Integer.parseInt(e.getAttribute("maxHarmonic"));
+		int fretStepSkip = Integer.parseInt(e.getAttribute("fretStepSkip"));
 		double ed2 = Double.parseDouble(e.getAttribute("ed2"));
+		double baseFrequency = Double.parseDouble(e.getAttribute("baseFrequency"));
 		
 		
-		return new StringCanvasConfig(frequencies,name,maxFrets,maxHarmonic,ed2,soundfontFile,bank,program,additionalPitchMap);
+		return new StringCanvasConfig(edoSteps,name,maxFrets,maxHarmonic,ed2,soundfontFile,bank,program,fretStepSkip,baseFrequency,additionalPitchMap);
 	}
 	
-	private final double[] frequencies;	
-	private final int maxFrets, maxHarmonic;
-	private final double ed2;
+	private final double[] edoSteps;	
+	private final int maxFrets, maxHarmonic, fretStepSkip;
+	private final double ed2, baseFrequency;
+	
 	private final Map<String,Double> additionalPitchMap;
-	public StringCanvasConfig(double[] frequencies, String name, int maxFrets, int maxHarmonic, double ed2, File soundfontFile,
-			int bank, int program,Map<String,Double> additionalPitchMap) {
+	public StringCanvasConfig(double[] edoSteps, String name, int maxFrets, int maxHarmonic, double ed2, File soundfontFile,
+			int bank, int program, int fretStepSkip, double baseFrequency, Map<String,Double> additionalPitchMap) {
 		super(name,soundfontFile,bank,program);
-		this.frequencies = frequencies;		
+		this.edoSteps = edoSteps;		
 		this.maxFrets = maxFrets;
 		this.maxHarmonic = maxHarmonic;
 		this.ed2 = ed2;
+		this.fretStepSkip = fretStepSkip;
+		this.baseFrequency = baseFrequency;
 		this.additionalPitchMap = Collections.unmodifiableMap(additionalPitchMap);			
+	}
+	
+	public double getBaseFrequency() {
+		return baseFrequency;
+	}
+	
+	public int getFretStepSkip() {
+		return fretStepSkip;
 	}
 	
 	public Map<String,Double> getAdditionalPitchMap() {
 		return additionalPitchMap;
 	}
 
-	public double[] getFrequencies() {
-		return frequencies;
+	public double[] getEdoSteps(){
+		return edoSteps;
 	}
 
 	public int getMaxFrets() {
@@ -83,8 +95,5 @@ public class StringCanvasConfig extends CanvasConfig {
 	public int getMaxHarmonic() {
 		return maxHarmonic;
 	}
-
-	
-	
 	
 }
