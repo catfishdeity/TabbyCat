@@ -1,17 +1,23 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<xsd:schema xmlns="tab" xmlns:xsd="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified" targetNamespace="tab">
-	<xsd:element name="tabProject" type="TabProjectComplexType"/>
-	
+<xsd:schema xmlns="tabby" xmlns:xsd="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified" targetNamespace="tabby">
+	<xsd:include schemaLocation="common.xsd"/>	
+	<xsd:element name="tabProject" type="TabProjectComplexType"/>	
 	<xsd:complexType name="TabProjectComplexType">
 		<xsd:sequence>
-			<xsd:element name="eventCanvas" type="EventTabData" minOccurs="1"/>
-			<xsd:element name="instrumentCanvas" type="TabData" minOccurs="0" maxOccurs="unbounded"/>			
-		</xsd:sequence>		
+			<xsd:element name="canvases" type="CanvasesComplexType"/>
+			<xsd:element name="eventTabData" type="EventTabData" minOccurs="1"/>
+			<xsd:element name="instrumentTabData" type="TabData" minOccurs="0" maxOccurs="unbounded"/>			
+		</xsd:sequence>	
+		<xsd:attribute name="songName" type="xsd:string" default="Untitled"/>
+		<xsd:attribute name="artistName" type="xsd:string" default="Unknown Artist"/>
+		<xsd:attribute name="viewT" type="xsd:integer" default="-4"/>
 		<xsd:attribute name="cursorT" type="xsd:nonNegativeInteger" default="0"/>
 		<xsd:attribute name="repeatT" type="xsd:integer" default="-1"/>
-		<xsd:attribute name="stopT" type="xsd:nonNegativeInteger" default="0"/>
+		<xsd:attribute name="playbackStartT" type="xsd:nonNegativeInteger" default="0"/>
+		<xsd:attribute name="playbackT" type="xsd:nonNegativeInteger" default="0"/>
 		<xsd:attribute name="selectedRow" type="xsd:nonNegativeInteger" default="0"/>
 		<xsd:attribute name="selectedCanvas" type="xsd:nonNegativeInteger" default="0"/>
+		<xsd:attribute name="tempo" type="xsd:positiveInteger" default="110"/>
  	</xsd:complexType>
 	
 	<xsd:complexType name="TabData">

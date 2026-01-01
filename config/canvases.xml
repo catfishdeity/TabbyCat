@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <canvases
-  xmlns="tab"    
+  xmlns="tabby"    
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xsi:schemaLocation="tab ../schemas/canvases.xsd">
+    xsi:schemaLocation="tabby ../schemas/canvases.xsd">
     <stringCanvas name="KiteBass" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="33" maxFrets="41" ed2="41" fretStepSkip="2" baseFrequency="32.703">		
 		<string steps="65"/>
 		<string steps="52" />
@@ -38,7 +38,7 @@
 		<additionalPitch token="D" steps="3.5"/>
 		<additionalPitch token="E" steps="4.5"/>
 	</stringCanvas>    
-	<!--
+	
 	<stringCanvas name="ElectricGuitar" soundfontFile="sf2/SM64SF V2.sf2" ed2="12" program="28">
 		<string steps="24"/>
 		<string steps="19"/>
@@ -74,7 +74,7 @@
 		<string steps="3"/>	
 		<string steps="-4"/>
 	</stringCanvas>
-	--> 
+	 
     <drumCanvas name="Drums" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="16">
 		<row type="HAND"/>
 		<row type="HAND"/>

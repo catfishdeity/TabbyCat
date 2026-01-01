@@ -3,6 +3,9 @@ package tabsequencer.config;
 import java.io.File;
 import java.util.Optional;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
 public abstract class CanvasConfig {
 	public abstract CanvasType getType();
 	protected final File soundfontFile;
@@ -19,6 +22,8 @@ public abstract class CanvasConfig {
 	public final Optional<File> getSoundfontFile() {
 		return Optional.ofNullable(soundfontFile);
 	}
+	
+	public abstract Element toXMLElement(Document doc, String tagName);
 
 	public final String getName() {
 		return name;
