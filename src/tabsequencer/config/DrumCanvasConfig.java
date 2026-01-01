@@ -6,14 +6,15 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
 public class DrumCanvasConfig extends CanvasConfig {
-	private final List<PercRowToken> tokens;
+	private final List<PercToken> tokens;
 	private final List<PercRowType> rowTypes;
 	
-	protected DrumCanvasConfig(String name, File soundfontFile, int bank, int program,List<PercRowType> rowTypes, List<PercRowToken> tokens) {
+	protected DrumCanvasConfig(String name, File soundfontFile, int bank, int program,List<PercRowType> rowTypes, List<PercToken> tokens) {
 		super(name, soundfontFile, bank, program);
 		this.rowTypes = Collections.unmodifiableList(rowTypes);
 		this.tokens = Collections.unmodifiableList(tokens);
@@ -22,7 +23,7 @@ public class DrumCanvasConfig extends CanvasConfig {
 	public List<PercRowType> getRowTypes() {
 		return rowTypes;
 	}
-	public List<PercRowToken> getTokens() {
+	public List<PercToken> getTokens() {
 		return tokens;
 	}
 	@Override
@@ -42,11 +43,36 @@ public class DrumCanvasConfig extends CanvasConfig {
 				.collect(Collectors.toList());
 				
 		NodeList tokenNodes = e.getElementsByTagName("token");
-		List<PercRowToken> tokens = 
-				IntStream.range(0,tokenNodes.getLength()).mapToObj(i->PercRowToken.fromXMLElement((Element) tokenNodes.item(i)))
+		List<PercToken> tokens = 
+				IntStream.range(0,tokenNodes.getLength()).mapToObj(i->PercToken.fromXMLElement((Element) tokenNodes.item(i)))
 				.collect(Collectors.toList());
 				
 		return new DrumCanvasConfig(name,soundfontFile,bank,program,rowTypes,tokens);		
+	}
+
+	@Override
+	public Element toXMLElement(Document doc, String tagName) {
+		Element e = doc.createElement(tagName);
+		getSoundfontFile().ifPresent(f -> {
+			e.setAttribute("soundfontFile", f.toString());
+		});
+		e.setAttribute("name", getName());
+		e.setAttribute("bank", getBank()+"");
+		e.setAttribute("program", getProgram()+"");
+		
+		for (PercRowType rowType : rowTypes) {
+			Element rowE = doc.createElement("row");
+			e.appendChild(rowE);
+			rowE.setAttribute("type", rowType.toString().toUpperCase());			
+		}
+		for (PercToken token : tokens) {
+			Element tokenE = doc.createElement("token");
+			e.appendChild(tokenE);
+			tokenE.setAttribute("token", token.getToken());
+			tokenE.setAttribute("position", token.getPosition().toString().toUpperCase());
+			tokenE.setAttribute("midiNumber", token.getMidiNumber()+"");
+		}
+		return e;
 	}
 		
 	

@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.IntStream;
 
+import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
@@ -94,6 +95,23 @@ public class StringCanvasConfig extends CanvasConfig {
 
 	public int getMaxHarmonic() {
 		return maxHarmonic;
+	}
+
+	@Override
+	public Element toXMLElement(Document doc, String tagName) {
+		Element e = doc.createElement(tagName);
+		getSoundfontFile().ifPresent(f -> {
+			e.setAttribute("soundfontFile", f.toString());
+		});
+		e.setAttribute("name", getName());
+		e.setAttribute("bank", getBank()+"");
+		e.setAttribute("program", getProgram()+"");
+		e.setAttribute("maxFrets", maxFrets+"");
+		e.setAttribute("maxHarmonic", maxHarmonic+"");
+		e.setAttribute("ed2", ed2+"");
+		e.setAttribute("fretStepSkip", fretStepSkip+"");
+		e.setAttribute("baseFrequency", baseFrequency+"");
+		return e;		
 	}
 	
 }

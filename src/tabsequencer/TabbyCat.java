@@ -2,8 +2,8 @@ package tabsequencer;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Canvas;
+import java.awt.CardLayout;
 import java.awt.Color;
-import java.awt.Component;
 import java.awt.Dialog.ModalityType;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
@@ -11,7 +11,6 @@ import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.GridLayout;
 import java.awt.MouseInfo;
 import java.awt.Point;
 import java.awt.RenderingHints;
@@ -31,7 +30,6 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -52,6 +50,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
@@ -98,12 +97,12 @@ import javax.xml.validation.SchemaFactory;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
-import org.w3c.dom.NodeList;
 
 import tabsequencer.config.CanvasConfig;
 import tabsequencer.config.CanvasesConfig;
 import tabsequencer.config.DrumCanvasConfig;
-import tabsequencer.config.PercRowToken;
+import tabsequencer.config.PercToken;
+import tabsequencer.config.ProjectFileData;
 import tabsequencer.config.StringCanvasConfig;
 import tabsequencer.events.ControlEvent;
 import tabsequencer.events.ControlEventType;
@@ -121,30 +120,29 @@ public class TabbyCat {
 	}
 	private static TabbyCat instance;
 	
+	static String loadProjectKey = "LOAD PROJECT";
+	static String newProjectCardKey = "NEW PROJECT";
+	private ProjectFileData projectData = null;
+	private CanvasesConfig canvasesConfig = CanvasesConfig.getXMLInstance();
 	private Font font = new Font("Monospaced",Font.BOLD,10);
 	private FontMetrics fontMetrics = new Canvas().getFontMetrics(font);
 	int infoPanelHeight = fontMetrics.getMaxAscent()+10;
 	int cellWidth = fontMetrics.stringWidth("88")+3;
 	int rowHeight = fontMetrics.getMaxAscent()+2;
 	final int scrollTimeMargin = 4;	
-	final double middleC = 220.0 * Math.pow(2d, 3.0/12.0);	
+	static final double MIDDLE_C = 220.0 * Math.pow(2d, 3.0/12.0);	
 	
 	FileFilter fileFilter = new FileNameExtensionFilter(".tab files (.tab)","tab");
-	final File defaultPath = new File("scores");
+	final File defaultProjectPath = new File("scores");
 	
-	final Map<Point,String> guitarClipboard = new HashMap<>();
-	final Map<Point,PercRowToken> drumClipboard = new HashMap<>();
+	final Map<Point,String> instrumentClipboard = new HashMap<>();	
 	final Map<Point,ControlEvent> eventClipboard = new HashMap<>();
 	
 	final AtomicReference<File> activeFile = new AtomicReference<>(null);	
 	final AtomicBoolean fileHasBeenModified = new AtomicBoolean(false);
 	final AtomicBoolean isSelectionMode = new AtomicBoolean(false);
 	final AtomicBoolean isPlaying = new AtomicBoolean(false);
-	final AtomicInteger playT = new AtomicInteger(0);
-	final AtomicInteger viewT0 = new AtomicInteger(-scrollTimeMargin);
-	final AtomicInteger cursorT = new AtomicInteger(0);
-	final AtomicInteger stopT0 = new AtomicInteger(0);
-	final AtomicInteger repeatT = new AtomicInteger(-1);
+	
 	final AtomicInteger tempo = new AtomicInteger(120);
 	final AtomicBoolean playbackDaemonIsStarted = new AtomicBoolean(false);
 		 
@@ -158,14 +156,18 @@ public class TabbyCat {
 	
 	LeftClickablePanelButton playButton, stopButton;
 	final PlayStatusPanel playStatusPanel = new PlayStatusPanel();
-	
-	final EventCanvas eventCanvas = new EventCanvas();
-	
-	File defaultSoundfontFile = null;
 	final NavigationCanvas navigationBar = new NavigationCanvas();
-	final List<KiteTabCanvas<?>> allCanvases = new ArrayList<>(Arrays.asList(eventCanvas));
-	final List<SoundfontPlayer> allSoundPlayers = new ArrayList<>();
-	final AtomicReference<KiteTabCanvas<?>> selectedCanvas = new AtomicReference<>(eventCanvas);
+	final EventCanvas eventCanvas = new EventCanvas();	
+	File defaultSoundfontFile = null;		
+	
+	final Map<File,Soundbank> loadedSoundfontCache = new HashMap<>();
+
+	private CardLayout cardLayout;
+	private JPanel cardPanel;
+	
+	KeyStroke k_Up = KeyStroke.getKeyStroke("UP");
+	KeyStroke k_Down = KeyStroke.getKeyStroke("DOWN");
+	KeyStroke k_Enter = KeyStroke.getKeyStroke("ENTER");
 	
 	void playbackDaemonFunction() {
 		//DO NOT CALL THIS ON MASTER THREAD
@@ -174,12 +176,12 @@ public class TabbyCat {
 				continue;
 			}
 			else {
-				int t = playT.get();
+				int t = projectData.getPlaybackT().get();
 				
 				try {
 					
 					midiDaemon.execute(() -> {
-						allCanvases.forEach(a->a.handleEvents(t));	
+						//allCanvases.forEach(a->a.handleEvents(t));	
 					});
 					
 					SwingUtilities.invokeAndWait(() -> {						
@@ -190,7 +192,7 @@ public class TabbyCat {
 					e.printStackTrace();
 				}
 				
-				playT.getAndUpdate(i->i+1==repeatT.get()?stopT0.get():i+1);
+				projectData.getPlaybackT().getAndUpdate(i->i+1==projectData.getRepeatT().get()?projectData.getPlaybackStartT().get():i+1);
 				long bpm = tempo.get();				
 				Duration sixteenth = Duration.ofMinutes(1).dividedBy(bpm).dividedBy(4);  
 				playbackDaemon.schedule(()->playbackDaemonFunction(),
@@ -202,48 +204,46 @@ public class TabbyCat {
 	}
 	
 	void repaintCanvases() {
-		allCanvases.forEach(a->a.repaint());			
+		//TODO PUT THIS BACK
+		/*
+		allCanvases.forEach(a->a.repaint());
+		*/			
 	}
 	
 	
 	void pasteSelectedNotes() {
-		
+		//TODO PUT TIHS BACK
+		/*
 		if (selectedCanvas.get()== eventCanvas) {
 			int timeOffset = eventClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
 			int rowOffset = eventClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();	
 			eventClipboard.forEach((point,controlEvent) -> {
-				int t = cursorT.get()+point.y-timeOffset;
+				int t = projectData.getCursorT().get()+point.y-timeOffset;
 				int row = eventCanvas.getSelectedRow()+point.x-rowOffset;
 				eventCanvas.setSelectedValue(row,t,controlEvent);
 			});
 			updateMeasureLinePositions();		
-		} else if (selectedCanvas.get() instanceof TabCanvas) {
-			int timeOffset = guitarClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
-			int rowOffset = guitarClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
-			guitarClipboard.forEach((point,s) -> {
-				int t = cursorT.get()+point.y-timeOffset;
+		} else if (selectedCanvas.get() instanceof InstrumentCanvas) {
+			int timeOffset = instrumentClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
+			int rowOffset = instrumentClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
+			instrumentClipboard.forEach((point,s) -> {
+				int t = projectData.getCursorT().get()+point.y-timeOffset;
 				int row = selectedCanvas.get().getSelectedRow()+point.x-rowOffset;
-				System.out.println(t+" "+row+" "+s);
-				((TabCanvas) selectedCanvas.get()).setSelectedValue(row,t,s);
+				((InstrumentCanvas) selectedCanvas.get()).setSelectedValue(row,t,s);
 			});
 			
-		} else if (selectedCanvas.get() instanceof DrumTabCanvas) {
-			int timeOffset = drumClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
-			int rowOffset = drumClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
-			drumClipboard.forEach((point,drumEvent) -> {
-				int t = cursorT.get()+point.y-timeOffset;
-				int row = selectedCanvas.get().getSelectedRow()+point.x-rowOffset;
-				((DrumTabCanvas) selectedCanvas.get()).setSelectedValue(row,t,drumEvent);
-			});			
-		}
+		} 
+		*/
 		repaintCanvases();
 	}
 	
 	void cutSelectedNotes() {
-		guitarClipboard.clear();
-		drumClipboard.clear();
+		
+		instrumentClipboard.clear();		
 		eventClipboard.clear();
+		
 		if (isSelectionMode.get()) {
+			/*
 			Stream.of(selectedCanvas.get().innerSelectionCells,selectedCanvas.get().outerSelectionCells)
 			.flatMap(a->a.stream()).forEach(point -> {
 				
@@ -251,25 +251,29 @@ public class TabbyCat {
 				if (opt.isPresent()) {
 					if (selectedCanvas.get() instanceof EventCanvas) {						
 						eventClipboard.put(point, (ControlEvent) opt.get());						
-					} else if (selectedCanvas.get() instanceof TabCanvas) {
-						guitarClipboard.put(point, (String) opt.get());
-					}else if (selectedCanvas.get() instanceof DrumTabCanvas) {
-						drumClipboard.put(point, (PercRowToken) opt.get());
+					} else if (selectedCanvas.get() instanceof InstrumentCanvas) {
+						instrumentClipboard.put(point, (String) opt.get());
 					}
 				}
 				selectedCanvas.get().removeValueAt(point.y,point.x);
 			});
-			selectedCanvas.get().clearSelectionT0AndRow();		
-		} 
+			selectedCanvas.get().clearSelectionT0AndRow();
+			*/		
+		}
+		 
 		isSelectionMode.set(false);
+		
 		repaintCanvases();
 	}
 	
 	void copySelectedNotes() {
-		guitarClipboard.clear();
-		drumClipboard.clear();
+		instrumentClipboard.clear();		
 		eventClipboard.clear();
+
+		
 		if (isSelectionMode.get()) {
+			//TODO put this back
+			/*
 			Stream.of(selectedCanvas.get().innerSelectionCells,selectedCanvas.get().outerSelectionCells)
 			.flatMap(a->a.stream()).forEach(point -> {
 				
@@ -278,14 +282,13 @@ public class TabbyCat {
 					if (selectedCanvas.get() instanceof EventCanvas) {
 						
 						eventClipboard.put(point, (ControlEvent) opt.get());
-					} else if (selectedCanvas.get() instanceof TabCanvas) {
-						guitarClipboard.put(point, (String) opt.get());
-					}else if (selectedCanvas.get() instanceof DrumTabCanvas) {
-						drumClipboard.put(point, (PercRowToken) opt.get());
+					} else if (selectedCanvas.get() instanceof InstrumentCanvas) {
+						instrumentClipboard.put(point, (String) opt.get());
 					}
 				}
 			});
-			selectedCanvas.get().clearSelectionT0AndRow();		
+			selectedCanvas.get().clearSelectionT0AndRow();
+			*/		
 		} 
 		isSelectionMode.set(false);
 		repaintCanvases();
@@ -300,16 +303,19 @@ public class TabbyCat {
 	}
 	
 	void configureCanvasInstrument() {
+		//TODO put this back
+		/*
 		if (selectedCanvas.get() instanceof TabCanvas) {
 			((TabCanvas)selectedCanvas.get()).displayInstrumentDialog();
-		}// else if (selectedCanvas.get() instanceof DrumTabCanvas) {
-			//((DrumTabCanvas)selectedCanvas.get()).displayInstrumentDialog();
-		//}
+		} else if (selectedCanvas.get() instanceof DrumTabCanvas) {
+			((DrumTabCanvas)selectedCanvas.get()).displayInstrumentDialog();
+		}
+		*/
 	}
 	
 	void saveActiveFile() {
-		if (!defaultPath.exists()) {
-			defaultPath.mkdir();
+		if (!defaultProjectPath.exists()) {
+			defaultProjectPath.mkdir();
 		}
 		if (activeFile.get() != null) {
 			if (fileHasBeenModified.get()) {
@@ -322,7 +328,7 @@ public class TabbyCat {
 				}
 			}
 		} else {
-			JFileChooser chooser = new JFileChooser(defaultPath);
+			JFileChooser chooser = new JFileChooser(defaultProjectPath);
 			chooser.setFileFilter(fileFilter);
 			
 			String date = LocalDateTime.now(ZoneId.of("Z")).format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmm"));
@@ -385,12 +391,12 @@ public class TabbyCat {
 	}
 	
 	void adjustRepeatT() {
-		repeatT.updateAndGet(i->i==cursorT.get()?-1:cursorT.get());
+		projectData.getRepeatT().updateAndGet(i->i==projectData.getCursorT().get()?-1:projectData.getCursorT().get());
 		repaintCanvases();
 	}
 	
 	void setPlayT() {
-		playT.set(cursorT.get());
+		projectData.getPlaybackT().set(projectData.getCursorT().get());
 		repaintCanvases();
 	}
 	
@@ -403,17 +409,17 @@ public class TabbyCat {
 	}
 	
 	void returnCursorToStopT0() {
-		cursorT.set(stopT0.get());
-		while (cursorT.get() < viewT0.get()+scrollTimeMargin) {
-			viewT0.getAndDecrement();
+		projectData.getCursorT().set(projectData.getPlaybackStartT().get());
+		while (projectData.getCursorT().get() < projectData.getViewT().get()+scrollTimeMargin) {
+			projectData.getViewT().getAndDecrement();
 		}
 		repaintCanvases();
 	}
 	
 	void returnPlayToStopT0() {
-		playT.set(stopT0.get());
-		while (playT.get() < viewT0.get()+scrollTimeMargin) {
-			viewT0.getAndDecrement();
+		projectData.getPlaybackT().set(projectData.getPlaybackStartT().get());
+		while (projectData.getPlaybackT().get() < projectData.getViewT().get()+scrollTimeMargin) {
+			projectData.getViewT().getAndDecrement();
 		}
 		repaintCanvases();
 		
@@ -435,40 +441,43 @@ public class TabbyCat {
 	void stopPlayback() {		
 		isPlaying.set(false);
 		
-		allSoundPlayers.forEach(soundfontPlayer -> {
+		//TODO put this back
+		/*
+		instrumentCanvases.forEach(soundfontPlayer -> {
 			soundfontPlayer.silence();
 		});
 
+*/
 		repaintCanvases();
 		playStatusPanel.setPlayStatus(PlayStatus.STOP);
 		playStatusPanel.repaint();	
 	}
 	
 	void setStopT0() {
-		stopT0.set(cursorT.get());
+		projectData.getPlaybackStartT().set(projectData.getCursorT().get());
 		repaintCanvases();
 	}
 		
 	public int getCursorT() {
-		return cursorT.get();
+		return projectData.getCursorT().get();
 	}
 	
 	public void setCursorT(int t) {
-		cursorT.set(t);
+		projectData.getCursorT().set(t);
 	}
 	
 	public void incrementCursorT() {		
-		cursorT.getAndIncrement();
-		if (cursorT.get() > eventCanvas.getMaxVisibleTime()-scrollTimeMargin) {
-			viewT0.getAndIncrement();
+		projectData.getCursorT().getAndIncrement();
+		if (projectData.getCursorT().get() > eventCanvas.getMaxVisibleTime()-scrollTimeMargin) {
+			projectData.getViewT().getAndIncrement();
 		}
 		repaintCanvases();
 	}
 	
 	public void decrementCursorT() {
-		cursorT.set(Math.max(0, cursorT.get()-1));
-		if (cursorT.get() < viewT0.get()+scrollTimeMargin) {
-			viewT0.getAndDecrement();
+		projectData.getCursorT().set(Math.max(0, projectData.getCursorT().get()-1));
+		if (projectData.getCursorT().get() < projectData.getViewT().get()+scrollTimeMargin) {
+			projectData.getViewT().getAndDecrement();
 		}
 		repaintCanvases();
 	}
@@ -480,12 +489,15 @@ public class TabbyCat {
 		if (isSelectionMode.get()) {
 			setSelectedT0();
 		} else {
-			allCanvases.forEach(canvas -> canvas.clearSelectionT0AndRow());
+			//TODO put this back
+			//allCanvases.forEach(canvas -> canvas.clearSelectionT0AndRow());
 		}
 		repaintCanvases();
 	}
 	
 	void setSelectedT0() {
+		//TODO fix me
+		/*
 		allCanvases.forEach(canvas -> {
 			if (canvas.isSelected()) {
 				canvas.setSelectionT0AndRow();
@@ -495,6 +507,7 @@ public class TabbyCat {
 			}
 			canvas.repaint();
 		});
+		*/
 	}
 	
 	public void updateMeasureLinePositions() {		
@@ -505,11 +518,14 @@ public class TabbyCat {
 		Set<Integer> markers = new HashSet<>();
 		measures.put(0,measure.getAndIncrement());
 		for (int t = 0; t < 1000*16; t++) {
-			Optional<TimeSignatureEvent> tsO = 
-					eventCanvas.data.getOrDefault(t,Collections.emptyMap()).values().stream()
-					.filter(a->a.getType()==ControlEventType.TIME_SIGNATURE)
-					.map(a->(TimeSignatureEvent) a)
-					.findFirst();
+			int t_= t;
+			Optional<TimeSignatureEvent> tsO = IntStream.range(0, eventCanvas.getRowCount()).mapToObj(row->new Point(t_,row))
+			.filter(a->projectData.getEventData().containsKey(a))
+			.map(projectData.getEventData()::get)
+			.filter(a->a.getType()== ControlEventType.TIME_SIGNATURE)
+			.map(a->(TimeSignatureEvent) a)
+			.findFirst();
+
 			if (tsO.isPresent()) {				
 				timeSignature.set(tsO.get());				
 				counter.set(0);
@@ -536,6 +552,8 @@ public class TabbyCat {
 	}
 	
 	public void backspace() {
+		//TODO fix 
+		/*
 		Optional<?> removed = selectedCanvas.get().removeSelectedValue();
 		
 		removed.filter(a->a instanceof TimeSignatureEvent).ifPresent(object ->{
@@ -548,24 +566,27 @@ public class TabbyCat {
 			updateWindowTitle();
 		}
 		selectedCanvas.get().repaint();
+		*/
 	}
 	
 	public void handleABCInput(char c) {
-		selectedCanvas.get().handleCharInput(c);
+		projectData.handleCharInput(c);
+		//selectedCanvas.get().handleCharInput(c);
 		
 	}
 	
 	public void cursorToStart() {
-		cursorT.set(0);
-		while (cursorT.get() < viewT0.get()) {
-			viewT0.getAndDecrement();
+		projectData.getCursorT().set(0);
+		while (projectData.getCursorT().get() < projectData.getViewT().get()) {
+			projectData.getViewT().getAndDecrement();
 		}
 		repaintCanvases();
 	}
 	
 	void updateDataLength() {
-		int maxT= allCanvases.stream().flatMapToInt(c->c.data.keySet().stream().mapToInt(i->i)).max().orElseGet(()->0)+16;
-
+		//int maxT= allCanvases.stream().flatMapToInt(c->c.data.keySet().stream().mapToInt(i->i)).max().orElseGet(()->0)+16;
+		int maxT = 10;
+		
 		navigationBar.dataLength = maxT;
 		navigationBar.repaint();
 		System.out.println(maxT);
@@ -574,65 +595,70 @@ public class TabbyCat {
 	
 	public void advanceCursorToFinalEvent() {
 
-		int maxT= 0;
-		KiteTabCanvas<?> canvasToSelect = eventCanvas;
-		int row = 0;
-		for (KiteTabCanvas<?> canvas : allCanvases)  {
-			for (int t : canvas.data.keySet()) {
-				if (t>maxT) {
-					canvasToSelect = canvas;
-					maxT = t;
-					row = canvas.data.get(t).keySet().stream().mapToInt(i->i).min().orElse(0);  
-				}
-			}
-		}
-		canvasToSelect.setSelectedRow(row);
+		AtomicReference<GeneralTabCanvas<?>> canvasToSelect = new AtomicReference<>(eventCanvas);
+		int maxT = Math.max(
+				projectData.getEventData().keySet().stream().mapToInt(a->a.x).max().orElse(0),
+				projectData.getInstrumentData().keySet().stream().mapToInt(a->a.getTime()).max().orElse(0));
 		setCursorT(maxT);
-		while (cursorT.get() > eventCanvas.getMaxVisibleTime()-scrollTimeMargin) {
-			viewT0.getAndIncrement();
+		projectData.getEventData().keySet().stream().filter(a->a.x == maxT).findFirst().map(a->a.y).ifPresent(row -> {
+			canvasToSelect.get().setSelectedRow(row);			
+		});
+		projectData.getInstrumentData().keySet().stream().filter(a->a.getTime() == maxT).findFirst().ifPresent(dataKey -> {
+			//TODO put this back
+			/*
+			instrumentCanvases.stream().filter(a->a.getName().equals(dataKey.getInstrumentName())).findFirst()
+			.ifPresent(canvas -> {
+				canvasToSelect.set(canvas);
+				canvas.setSelectedRow(dataKey.getRow());
+			});
+			*/
+		});
+				
+		while (projectData.getCursorT().get() > eventCanvas.getMaxVisibleTime()-scrollTimeMargin) {
+			projectData.getViewT().getAndIncrement();
 		}
 		
-		selectedCanvas.set(canvasToSelect);
+		//selectedCanvas.set(canvasToSelect.get());
 		repaintCanvases();
 		
 	}
 	
 	public void playTToPreviousMeasure() {
-		NavigableMap<Integer, Integer> headMap = cachedMeasurePositions.headMap(playT.get(), false);
+		NavigableMap<Integer, Integer> headMap = cachedMeasurePositions.headMap(projectData.getPlaybackT().get(), false);
 		if (!headMap.isEmpty()) {
 			Entry<Integer, Integer> last= headMap.lastEntry();			
-			playT.set(last.getKey());			
+			projectData.getPlaybackT().set(last.getKey());			
 		}
-		while (playT.get() < viewT0.get()+scrollTimeMargin) {
-			viewT0.getAndDecrement();
+		while (projectData.getPlaybackT().get() < projectData.getViewT().get()+scrollTimeMargin) {
+			projectData.getViewT().getAndDecrement();
 		}
 		repaintCanvases();
 	}
 	
 	public void playTToNextMeasure() {
-		NavigableMap<Integer, Integer> tailMap = cachedMeasurePositions.tailMap(playT.get(), false);
+		NavigableMap<Integer, Integer> tailMap = cachedMeasurePositions.tailMap(projectData.getPlaybackT().get(), false);
 		if (!tailMap.isEmpty()) {
 			Entry<Integer, Integer> next = tailMap.firstEntry();			
-			playT.set(next.getKey());			
+			projectData.getPlaybackT().set(next.getKey());			
 		}
-		while (playT.get() > eventCanvas.getMaxVisibleTime()-scrollTimeMargin) {
-			viewT0.getAndIncrement();
+		while (projectData.getPlaybackT().get() > eventCanvas.getMaxVisibleTime()-scrollTimeMargin) {
+			projectData.getViewT().getAndIncrement();
 		}
 		repaintCanvases();
 	}
 	
 	public void incrementPlayT() {
-		playT.incrementAndGet();
-		while (playT.get() > eventCanvas.getMaxVisibleTime()-scrollTimeMargin) {
-			viewT0.getAndIncrement();
+		projectData.getPlaybackT().incrementAndGet();
+		while (projectData.getPlaybackT().get() > eventCanvas.getMaxVisibleTime()-scrollTimeMargin) {
+			projectData.getViewT().getAndIncrement();
 		}
 		repaintCanvases();
 	}
 	
 	public void decrementPlayT() {
-		playT.getAndUpdate(i->Math.max(0,i-1));
-		while (playT.get() < viewT0.get()+scrollTimeMargin) {
-			viewT0.getAndDecrement();
+		projectData.getPlaybackT().getAndUpdate(i->Math.max(0,i-1));
+		while (projectData.getPlaybackT().get() < projectData.getViewT().get()+scrollTimeMargin) {
+			projectData.getViewT().getAndDecrement();
 		}
 		repaintCanvases();
 	}
@@ -641,6 +667,8 @@ public class TabbyCat {
 		if (isSelectionMode.get()) {
 			return;
 		}
+		//TODO fix this
+		/*
 		if (selectedCanvas.get() == null) {
 			selectedCanvas.set(allCanvases.get(0));
 			allCanvases.get(0).setSelectedRow(allCanvases.get(0).getRowCount()-1);
@@ -655,13 +683,15 @@ public class TabbyCat {
 			selectedCanvas.get().setSelectedRow(selectedCanvas.get().getRowCount()-1);
 			selectedCanvas.get().repaint();							
 		}
-		
+		*/
 	}
 	
 	public void shiftArrowDown() {
 		if (isSelectionMode.get()) {
 			return;
 		}
+		//TODO fix this
+		/*
 		if (selectedCanvas.get() == null) {
 			selectedCanvas.set(allCanvases.get(allCanvases.size()-1));
 			eventCanvas.setSelectedRow(0);
@@ -675,10 +705,14 @@ public class TabbyCat {
 			selectedCanvas.set(allCanvases.get(index));				
 			selectedCanvas.get().setSelectedRow(0);
 			selectedCanvas.get().repaint();					
-		}	
+		}
+		*/
+		
 	}
 	
 	public void arrowUp() {
+		//TODO fix this
+		/*
 		if (selectedCanvas.get() == null) {
 			selectedCanvas.set(allCanvases.get(0));
 			allCanvases.get(0).setSelectedRow(allCanvases.get(0).getRowCount()-1);
@@ -693,10 +727,12 @@ public class TabbyCat {
 				selectedCanvas.get().repaint();
 			}
 		}
-		
+		*/
 	}
 	
 	public void arrowDown() {
+		//TODO fix this
+		/*
 		if (selectedCanvas.get() == null) {
 			selectedCanvas.set(allCanvases.get(allCanvases.size()-1));
 			eventCanvas.setSelectedRow(0);
@@ -707,33 +743,33 @@ public class TabbyCat {
 			} else {
 				selectedCanvas.get().setSelectedRow(selectedCanvas.get().getSelectedRow()+1);
 				selectedCanvas.get().repaint();
-			}
-		
+			}		
 		}
+		*/
 	}
 	
 	public void cursorTToNextMeasure() {
 		
-		NavigableMap<Integer, Integer> tailMap = cachedMeasurePositions.tailMap(cursorT.get(), false);
+		NavigableMap<Integer, Integer> tailMap = cachedMeasurePositions.tailMap(projectData.getCursorT().get(), false);
 		if (!tailMap.isEmpty()) {
 			Entry<Integer, Integer> next = tailMap.firstEntry();			
-			cursorT.set(next.getKey());			
+			projectData.getCursorT().set(next.getKey());			
 		}
-		while (cursorT.get() > eventCanvas.getMaxVisibleTime()-scrollTimeMargin) {
-			viewT0.getAndIncrement();
+		while (projectData.getCursorT().get() > eventCanvas.getMaxVisibleTime()-scrollTimeMargin) {
+			projectData.getViewT().getAndIncrement();
 		}
 		repaintCanvases();
 		
 	}
 	
 	public void cursorTToPrevMeasure() {
-		NavigableMap<Integer, Integer> headMap = cachedMeasurePositions.headMap(cursorT.get(), false);
+		NavigableMap<Integer, Integer> headMap = cachedMeasurePositions.headMap(projectData.getCursorT().get(), false);
 		if (!headMap.isEmpty()) {
 			Entry<Integer, Integer> last= headMap.lastEntry();			
-			cursorT.set(last.getKey());			
+			projectData.getCursorT().set(last.getKey());			
 		}
-		while (cursorT.get() < viewT0.get()+scrollTimeMargin) {
-			viewT0.getAndDecrement();
+		while (projectData.getCursorT().get() < projectData.getViewT().get()+scrollTimeMargin) {
+			projectData.getViewT().getAndDecrement();
 		}
 		repaintCanvases();
 	}
@@ -749,11 +785,10 @@ public class TabbyCat {
 	private TabbyCat() {		
 		createGui();		
 	}
-
-
-	abstract class KiteTabCanvas<A> extends JPanel {
+	
+	abstract class GeneralTabCanvas<A> extends JPanel {
 		
-		protected final TreeMap<Integer,Map<Integer,A>> data = new TreeMap<>();
+		//protected final TreeMap<Integer,Map<Integer,A>> data = new TreeMap<>();
 		AtomicInteger selectedRow = new AtomicInteger(0);		
 		AtomicInteger selectionT0= new AtomicInteger(-1);
 		AtomicInteger selectionRow0= new AtomicInteger(-1);
@@ -762,17 +797,17 @@ public class TabbyCat {
 		public abstract boolean handleCharInput(char c);
 		public abstract String getName();			
 		
-		KiteTabCanvas() {
+		GeneralTabCanvas() {
 			this.addMouseListener(new MouseAdapter() {
 				@Override
 				public void mouseClicked(MouseEvent me) {
-									
-					int t_ = (int) Math.floor(me.getPoint().getX()/cellWidth)+viewT0.get();										
+					/*
+					int t_ = (int) Math.floor(me.getPoint().getX()/cellWidth)+projectData.getViewT().get();										
 					int row = (int) Math.floor((me.getPoint().y-infoPanelHeight)/rowHeight);
 					if (selectedCanvas.get() != null) {						
 						selectedCanvas.get().repaint();
 					}
-					selectedCanvas.set(KiteTabCanvas.this);					
+					selectedCanvas.set(GeneralTabCanvas.this);					
 					selectedCanvas.get().setSelectedRow(row);
 					if (t_ >= 0) {
 												
@@ -787,13 +822,14 @@ public class TabbyCat {
 						}
 						selectedCanvas.get().repaint();
 					}
+					*/
 				}				
 			});
 		}
 		
 		
 		public final void setSelectionT0AndRow() {		
-			selectionT0.set(cursorT.get());
+			selectionT0.set(projectData.getCursorT().get());
 			selectionRow0.set(getSelectedRow());			
 		}
 		
@@ -803,7 +839,9 @@ public class TabbyCat {
 		}
 		
 		public final boolean isSelected() {
-			return this == selectedCanvas.get(); 
+			return false;
+			//TODO fix this!
+			//return this == selectedCanvas.get(); 
 		}
 		
 		private Color selectedLabelTextColor = Color.yellow;
@@ -834,7 +872,7 @@ public class TabbyCat {
 			g.setStroke(new BasicStroke(1));			
 			g.setPaint(isSelected()?selectedLabelTextColor:unselectedLabelTextColor);
 			g.drawString(getName(),2,fontMetrics.getMaxAscent());			
-			int t0 = viewT0.get();
+			int t0 = projectData.getViewT().get();
 			int tDelta = getWidth()/cellWidth;
 			int t1 = t0+tDelta;
 						
@@ -860,7 +898,7 @@ public class TabbyCat {
 			
 			x = 0;
 			for (int t = t0; t < t1; t++) {
-				if (t == playT.get()) {
+				if (t == projectData.getPlaybackT().get()) {
 					g.setPaint(playTColor);
 					g.fillRect(x, infoPanelHeight, cellWidth, rowHeight*getRowCount());
 				}
@@ -879,8 +917,8 @@ public class TabbyCat {
 			
 			if (isSelected() && selectionT0.get() != -1 && selectionRow0.get() != -1) {
 				//means we're selecting things				
-				int sT0 = Math.min(cursorT.get(), selectionT0.get());
-				int sT1 = Math.max(cursorT.get(), selectionT0.get());
+				int sT0 = Math.min(projectData.getCursorT().get(), selectionT0.get());
+				int sT1 = Math.max(projectData.getCursorT().get(), selectionT0.get());
 				int row0 = Math.min(getSelectedRow(),selectionRow0.get());
 				int row1 = Math.max(getSelectedRow(),selectionRow0.get());
 				IntStream.rangeClosed(row0, row1).forEach(row -> {
@@ -930,7 +968,7 @@ public class TabbyCat {
 						g.fillRect(x+1, y-rowHeight+1, cellWidth-2,rowHeight-2);
 					}
 					if (isSelected() && row == getSelectedRow() && 
-							t == cursorT.get()) {
+							t == projectData.getCursorT().get()) {
 						g.setPaint(selectedCellColor);
 						g.setStroke(new BasicStroke(1));
 						g.drawRect(x, y-rowHeight, cellWidth,rowHeight);
@@ -938,14 +976,14 @@ public class TabbyCat {
 					}
 					y+=rowHeight;
 				}
-				if (stopT0.get() == t) {
+				if (projectData.getPlaybackStartT().get() == t) {
 					g.setStroke(new BasicStroke(1));
 					g.setPaint(repeatColor);
 					g.drawLine(x, infoPanelHeight, x, infoPanelHeight+getRowCount()*rowHeight);					
 					g.drawLine(x+3, infoPanelHeight, x+3, infoPanelHeight+getRowCount()*rowHeight);
 				}
 				
-				if (repeatT.get() == t && t>=0) {
+				if (projectData.getRepeatT().get() == t && t>=0) {
 					g.setStroke(new BasicStroke(1));
 					g.setPaint(repeatColor);					
 					g.drawLine(x, infoPanelHeight, x, infoPanelHeight+getRowCount()*rowHeight);					
@@ -956,50 +994,54 @@ public class TabbyCat {
 		}
 		
 		public final int getMaxVisibleTime() {
-			int t0 = viewT0.get();
+			int t0 = projectData.getViewT().get();
 			int tDelta = getWidth()/cellWidth;
 			int t1 = t0+tDelta;
 			return t1;
 		}
 				
-		public final Optional<A> getValueAt(int t, int row) {
-			return Optional.ofNullable(data.getOrDefault(t,Collections.emptyMap()).get(row));
+		//@SuppressWarnings("unchecked")
+		public abstract Optional<A> getValueAt(int t, int row);
+		/*
+		{
+			if (this == eventCanvas) {
+				return (Optional<A>) Optional.ofNullable(eventData.get(new Point(t,row)));
+			} else {
+				return (Optional<A>) Optional.ofNullable(instrumentData.get(new InstrumentDataKey(this.getName(),t,row)));
+			}			
 		}
-		
+		*/
 		public final Optional<A> getPrecedingValue() {
-			return getValueAt(cursorT.get()-1, getSelectedRow());					
+			return getValueAt(projectData.getCursorT().get()-1, getSelectedRow());					
 		}
 
 		public final Optional<A> getSelectedValue() {
-			return getValueAt(cursorT.get(), getSelectedRow());			
+			return getValueAt(projectData.getCursorT().get(), getSelectedRow());			
 		}
 		
-		public final void setSelectedValue(int row, int t, A inputVal) {
-			if (!data.containsKey(t)) {			
-				data.put(t, new HashMap<>());
-			}
-			data.get(t).put(row, inputVal);
-		}
+		public abstract void setSelectedValue(int t, int row, A inputVal);
 		
 		public final void setSelectedValue(int t, A inputVal) {
-			setSelectedValue(getSelectedRow(),t,inputVal);
+			setSelectedValue(t,getSelectedRow(),inputVal);
 		}
 		
 		public final void setSelectedValue(A inputVal) {			
-			setSelectedValue(cursorT.get(),inputVal);
+			setSelectedValue(projectData.getCursorT().get(),inputVal);
 			updateDataLength();
 		}					
 		
 		public final Optional<A> removeSelectedValue() {
-			return removeValueAt(cursorT.get(),selectedRow.get());
+			return removeValueAt(projectData.getCursorT().get(),selectedRow.get());
 			
 		}
 		
-		public final Optional<A> removeValueAt(int t, int row) {
+		public abstract Optional<A> removeValueAt(int t, int row);
+		/*
 			Optional<A> toReturn = Optional.ofNullable(data.getOrDefault(t, new HashMap<>()).get(row));
 			data.getOrDefault(t,new HashMap<>()).remove(row);
 			return toReturn;
 		}
+		*/
 		
 		public final int getSelectedRow() {
 			return selectedRow.get();
@@ -1033,7 +1075,7 @@ public class TabbyCat {
 			
 			g.setPaint(Color.BLACK);
 			g.fill(getBounds());				
-			double t0 = viewT0.get();
+			double t0 = projectData.getViewT().get();
 			
 			double tDelta = getWidth()/cellWidth;
 			double t1 = t0+tDelta;
@@ -1065,9 +1107,9 @@ public class TabbyCat {
 			pressedX = me.getPoint().x;
 			
 			int deltaT= (int) (deltaX/navigationBar.getWidth()*dataLength);
-			double t0 = viewT0.get();				 				
+			double t0 = projectData.getViewT().get();				 				
 			double displayedt1 = t0+navigationBar.getWidth()/cellWidth;
-			viewT0.updateAndGet(a->Math.min(dataLength-(int)(displayedt1-t0), Math.max(0,a-deltaT)));			
+			projectData.getViewT().updateAndGet(a->Math.min(dataLength-(int)(displayedt1-t0), Math.max(0,a-deltaT)));			
 			repaintCanvases();			 
 		}
 			
@@ -1086,15 +1128,11 @@ public class TabbyCat {
 		public void mouseMoved(MouseEvent e) {}
 	}
 
-	class EventCanvas extends KiteTabCanvas<ControlEvent> {
+	class EventCanvas extends GeneralTabCanvas<ControlEvent> {
 				
 		public EventCanvas() {}
 
-		public Optional<TimeSignatureEvent> getTimeSignatureEventForTime(int t_) {
-			return data.getOrDefault(t_, Collections.emptyMap()).values().stream()
-					.filter(a->a instanceof TimeSignatureEvent).map(a->(TimeSignatureEvent)a)
-					.findFirst();
-		}
+		
 
 		@Override
 		public int getRowCount() {
@@ -1110,7 +1148,7 @@ public class TabbyCat {
 		public void paint(Graphics g_) {
 			Graphics2D g = (Graphics2D) g_;
 			drawGrid(g);			
-			int t0 = viewT0.get();
+			int t0 = projectData.getViewT().get();
 			int tDelta = getWidth()/cellWidth;
 			int t1 = t0+tDelta;
 			int x = 0;			
@@ -1120,7 +1158,8 @@ public class TabbyCat {
 				
 				for (int rowNumber = 0; rowNumber < getRowCount(); rowNumber++) {					
 					g.setPaint(Color.black);
-					ControlEvent event = data.getOrDefault(t_,new HashMap<>()).getOrDefault(rowNumber,null);
+					
+					ControlEvent event = projectData.getEventData().get(new Point(t_,rowNumber));
 					if (event != null) {
 						switch (event.getType()) {
 						
@@ -1160,7 +1199,7 @@ public class TabbyCat {
 				int timeOffset = eventClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
 				int rowOffset = eventClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
 				eventClipboard.forEach((point,controlEvent) -> {
-					int t = cursorT.get()+point.y-timeOffset;
+					int t = projectData.getCursorT().get()+point.y-timeOffset;
 					int row = getSelectedRow()+point.x-rowOffset;
 					int x_ = (t-t0)*cellWidth;
 					int y = rowHeight+infoPanelHeight+(rowHeight*row);
@@ -1180,21 +1219,21 @@ public class TabbyCat {
 				.ifPresent(event -> {
 					tempo.set(((TempoEvent) event).getTempo());
 				});
-				
+				//TODO put this back
+				/*
 				controlEvent.filter(a->a.getType()==ControlEventType.PROGRAM_CHANGE)
 				.ifPresent(event -> {
 					allCanvases.stream().filter(a->a.getName().equals(((ProgramChange) event).getInstrument()))
 					.findFirst()
 					.ifPresent(canvas -> {
 						try {
-							((SoundfontPlayer) canvas).programChange((ProgramChange) event);
-
+							((TabCanvas) canvas).programChange((ProgramChange) event);
 						} catch (Exception ex) {
 							ex.printStackTrace();
 						}
 					});
-					//tempo.set(((TempoEvent) event).getTempo());
 				});
+				*/
 			}			
 		}
 
@@ -1239,9 +1278,35 @@ public class TabbyCat {
 			}			
 			
 		}
+
+		public Optional<TimeSignatureEvent> getTimeSignatureEventForTime(int t_) {
+			return Optional.ofNullable(projectData.getEventData().get(new Point(t_,getSelectedRow())))
+					.filter(a->a.getType() == ControlEventType.TIME_SIGNATURE)
+					.map(a->(TimeSignatureEvent) a);
+			
+		}	
+		
+		@Override
+		public Optional<ControlEvent> getValueAt(int t, int row) {
+			return Optional.ofNullable(projectData.getEventData().get(new Point(t,row)));
+		}
+
+		@Override
+		public void setSelectedValue(int t, int row, ControlEvent inputVal) {
+			projectData.getEventData().put(new Point(t,row), inputVal);
+			
+		}
+
+		@Override
+		public Optional<ControlEvent> removeValueAt(int t, int row) {
+			Optional<ControlEvent> toReturn = Optional.ofNullable(projectData.getEventData().get(new Point(t,row)));
+			projectData.getEventData().remove(new Point(t,row));
+			return toReturn;
+			
+		}
 	}
 	
-	class TabCanvas extends KiteTabCanvas<String> implements SoundfontPlayer {		
+	class TabCanvas extends InstrumentCanvas  {		
 		
 		private final String name;		
 		
@@ -1250,6 +1315,7 @@ public class TabbyCat {
 		private final Map<MidiChannel,Integer> openMidiNums = new ConcurrentHashMap<>();
 		
 		Synthesizer synth = null;
+		//Map<Integer,Synthesizer> synths = new HashMap<>();
 		private File soundfontFile = defaultSoundfontFile;
 		private final AtomicReference<Instrument> loadedInstrument = new AtomicReference<>(null);
 		private final StringCanvasConfig canvasConfig;
@@ -1264,6 +1330,7 @@ public class TabbyCat {
 
 		public Synthesizer getSynth() {
 			return synth;
+
 		}
 				
 		public void displayInstrumentDialog() {
@@ -1418,7 +1485,7 @@ public class TabbyCat {
 					12+fontMetrics.stringWidth(getName()),fontMetrics.getMaxAscent());
 			
 			g.setPaint(Color.BLACK);
-			int t0 = viewT0.get();
+			int t0 = projectData.getViewT().get();
 			int tDelta = getWidth()/cellWidth;
 			int t1 = t0+tDelta;
 			int x = 0;
@@ -1431,18 +1498,18 @@ public class TabbyCat {
 					if (outerSelectionCells.contains(p) || innerSelectionCells.contains(p)) {
 						g.setPaint(Color.RED);
 					}
-					String s = data.getOrDefault(t_,new HashMap<>()).getOrDefault(row,"");					
+					String s = projectData.getInstrumentData().getOrDefault(getDataKey(t_,row), "");					
 					g.drawString(s,(int) (x+(cellWidth-fontMetrics.stringWidth(s))*0.5),y-3);
 					y+=rowHeight;
 				}
 				x+=cellWidth;
 			}
-			if (!guitarClipboard.isEmpty() && isSelected()) {
+			if (!instrumentClipboard.isEmpty() && isSelected()) {
 				g.setPaint(Color.pink);
-				int timeOffset = guitarClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
-				int rowOffset = guitarClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
-				guitarClipboard.forEach((point,guitarEvent) -> {
-					int t = cursorT.get()+point.y-timeOffset;
+				int timeOffset = instrumentClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
+				int rowOffset = instrumentClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
+				instrumentClipboard.forEach((point,guitarEvent) -> {
+					int t = projectData.getCursorT().get()+point.y-timeOffset;
 					int row = getSelectedRow()+point.x-rowOffset;
 					int x_ = (t-t0)*cellWidth;
 					int y = rowHeight+infoPanelHeight+(rowHeight*row);
@@ -1584,24 +1651,27 @@ public class TabbyCat {
 		public boolean handleCharInput(char c) {
 			if (c == '-') {
 				{
-					int t = cursorT.get()+1;
+					int t = projectData.getCursorT().get()+1;
 				
 					while (!getValueAt(t,getSelectedRow()).filter(a->a.contentEquals("-")).isEmpty()) {
-						data.getOrDefault(t, Collections.emptyMap()).remove(getSelectedRow());
-											t++;
+						//instrument
+						projectData.getInstrumentData().remove(getDataKey(t,getSelectedRow()));
+						t++;
+						//projectData.getInstrumentData().getOrDefault(new t, Collections.emptyMap()).remove(getSelectedRow());
+						//					t++;
 					}
 				}
-				
-				data.entrySet().stream().flatMap(a->a.getValue().entrySet().stream().map(b->new Trio<>(a.getKey(),b.getKey(),b.getValue())))
-				.filter(a->a.b == getSelectedRow())
-				.filter(a->!a.c.contentEquals("-"))
-				.mapToInt(a->a.a).max().ifPresent(eventPosition -> {
-					for (int t = eventPosition+1; t<cursorT.get();t++) {
-						data.putIfAbsent(t, new HashMap<>());
-						data.get(t).put(getSelectedRow(), "-");
+				IntStream.iterate(projectData.getCursorT().get(),i->i-1).takeWhile(i->i>=0)
+				.filter(t->
+					projectData.getInstrumentData().get(getDataKey(t,getSelectedRow())) != null)
+				.filter(t->projectData.getInstrumentData().get(getDataKey(t,getSelectedRow())).charAt(0) != '-')
+				.max().ifPresent(previousEventT0 -> {
+					for (int t = previousEventT0+1; t < projectData.getCursorT().get(); t+=1) {
+						projectData.getInstrumentData().put(getDataKey(t,getSelectedRow()),"-");
 					}
 				});
-									
+				
+								
 				setSelectedValue(String.valueOf(c));
 				if (!fileHasBeenModified.get()) {
 					fileHasBeenModified.set(true);
@@ -1611,7 +1681,7 @@ public class TabbyCat {
 				return true;
 			}
 			
-			String token0 = getValueAt(cursorT.get(),getSelectedRow()).orElse("");
+			String token0 = getValueAt(projectData.getCursorT().get(),getSelectedRow()).orElse("");
 			String token1 = token0+String.valueOf(c);
 			
 			Predicate<String> isValid = token -> {
@@ -1671,22 +1741,49 @@ public class TabbyCat {
 			});
 			
 		}
-	}
-	
-	interface SoundfontPlayer {
-		public void initializeMidi(File file, int bank, int program);
-		public void programChange(ProgramChange event);			
-		public void silence();
-		public Synthesizer getSynth();
+
 		
 	}
 	
-	class DrumTabCanvas extends KiteTabCanvas<PercRowToken> implements SoundfontPlayer {
+	abstract class InstrumentCanvas extends GeneralTabCanvas<String> {
+		public abstract void initializeMidi(File file, int bank, int program);
+		public void programChange(ProgramChange event) {
+			
+		}
+		public void silence() {
+			
+		}
+		public abstract Synthesizer getSynth();
+
+		@Override
+		public final Optional<String> getValueAt(int t, int row) {
+			return Optional.ofNullable(projectData.getInstrumentData().get(getDataKey(t,row)));
+		}
+		
+		public final InstrumentDataKey getDataKey(int t, int row) {
+			return new InstrumentDataKey(this.getName(),t,row);
+		}
+		@Override
+		public final void setSelectedValue(int t, int row, String value) {
+			projectData.getInstrumentData().put(getDataKey(t,row),value);
+		}
+		
+		@Override
+		public final Optional<String> removeValueAt(int t, int row) {
+			Optional<String> toReturn = Optional.ofNullable(projectData.getInstrumentData().get(getDataKey(t,row)));
+			projectData.getInstrumentData().remove(getDataKey(t,row));
+			return toReturn;
+		}
+		
+	}
+	
+	class DrumTabCanvas extends InstrumentCanvas  {
 
 		Synthesizer synth = null;
 				
 		private final AtomicReference<Instrument> loadedInstrument = new AtomicReference<>(null);
 		private final DrumCanvasConfig canvasConfig;
+		
 		public Synthesizer getSynth() {
 			return synth;
 		}
@@ -1695,7 +1792,6 @@ public class TabbyCat {
 			this.canvasConfig = canvasConfig;
 			initializeMidi(canvasConfig.getSoundfontFile().orElse(defaultSoundfontFile),
 					canvasConfig.getBank(),canvasConfig.getProgram());
-			//initializeMidi(defaultSoundfontFile,0,0);
 		}
 		
 		@Override
@@ -1737,14 +1833,9 @@ public class TabbyCat {
 			MidiChannel channel = synth.getChannels()[9];
 			openNotes.forEach(channel::noteOff);
 			openNotes.clear();
-			
-			this.data.getOrDefault(t,Collections.emptyMap())
-			.values().stream().distinct().forEach(drumVal -> {				
-				channel.noteOn(drumVal.getMidiNumber(), 100);
-				openNotes.add(drumVal.getMidiNumber());
-			});			
-			
-			
+			projectData.getInstrumentData().keySet().stream().filter(a->a.getTime() == t).map(projectData.getInstrumentData()::get).forEach(s -> {
+				
+			});
 		}
 
 		@Override
@@ -1759,7 +1850,7 @@ public class TabbyCat {
 					loadedInstrument.get() == null ? "<null>" : loadedInstrument.get().getName()),					
 					12+fontMetrics.stringWidth(getName()),fontMetrics.getMaxAscent());
 						
-			int t0 = viewT0.get();
+			int t0 = projectData.getViewT().get();
 			int tDelta = getWidth()/cellWidth;
 			int t1 = t0+tDelta;
 			int x = 0;			
@@ -1770,7 +1861,8 @@ public class TabbyCat {
 					g.setPaint(Color.WHITE);
 					int y_ = y;
 					int x_ = x;
-					this.getValueAt(t_, row).map(a->a.getToken()).ifPresent(s->{
+
+					this.getValueAt(t_, row).ifPresent(s->{
 						g.drawString(s,(int) (x_+(cellWidth-fontMetrics.stringWidth(s))*0.5),y_-3);	
 					});
 
@@ -1778,17 +1870,17 @@ public class TabbyCat {
 				}				
 				x+=cellWidth;
 			}
-			if (!drumClipboard.isEmpty()) {
+			if (!instrumentClipboard.isEmpty()) {
 				g.setPaint(Color.pink);
-				int timeOffset = drumClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
-				int rowOffset = drumClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
-				drumClipboard.forEach((point,drumEvent) -> {
-					int t = cursorT.get()+point.y-timeOffset;
+				int timeOffset = instrumentClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
+				int rowOffset = instrumentClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
+				instrumentClipboard.forEach((point,drumEvent) -> {
+					int t = projectData.getCursorT().get()+point.y-timeOffset;
 					int row = getSelectedRow()+point.x-rowOffset;
 					int x_ = (t-t0)*cellWidth;
 					int y = rowHeight+infoPanelHeight+(rowHeight*row);
 					if (row >= 0) {
-						g.drawString(drumEvent.getToken(),x_+1,y-3);
+						g.drawString(drumEvent,x_+1,y-3);
 					}
 				});
 				
@@ -1815,26 +1907,26 @@ public class TabbyCat {
 		@Override
 		public boolean handleCharInput(char c) {
 			
-			Optional<PercRowToken> tokenO = getValueAt(cursorT.get(),getSelectedRow());			
-			Predicate<PercRowToken> permitted = a->a.getPosition() == canvasConfig.getRowTypes().get(getSelectedRow());
+			Optional<String> tokenO = getValueAt(projectData.getCursorT().get(),getSelectedRow());			
+			Predicate<PercToken> permitted = a->a.getPosition() == canvasConfig.getRowTypes().get(getSelectedRow());
 			if (tokenO.isPresent()) {
-				Optional<PercRowToken> newTokenO = 
+				Optional<PercToken> newTokenO = 
 						canvasConfig.getTokens().stream()
-						.filter(a->a.getToken().equals(tokenO.get().getToken()+String.valueOf(c).toUpperCase()))
+						.filter(a->a.getToken().equals(tokenO.get()+String.valueOf(c).toUpperCase()))
 						.filter(permitted).findFirst();
 				if (newTokenO.isPresent()) {					
-					setSelectedValue(cursorT.get(),newTokenO.get());
+					setSelectedValue(projectData.getCursorT().get(),newTokenO.get().getToken());
 					repaint();
 					return true;
 				}				
 			}	
 			
-			Optional<PercRowToken> newTokenO = 
+			Optional<PercToken> newTokenO = 
 					canvasConfig.getTokens().stream().filter(a->a.getToken().equals(String.valueOf(c).toUpperCase()))
 					.filter(permitted).findFirst();
 			
 			if (newTokenO.isPresent()) {					
-				setSelectedValue(cursorT.get(),newTokenO.get());
+				setSelectedValue(projectData.getCursorT().get(),newTokenO.get().getToken());
 				repaint();
 				return true;
 			}			
@@ -1844,8 +1936,6 @@ public class TabbyCat {
 		@Override
 		public void programChange(ProgramChange event) {
 
-			//MidiChannel channel = synth.getChannels()[9];
-			//channel.programChange(event.getBank(), event.getProgram());
 			Arrays.asList(synth.getAvailableInstruments()).stream().filter(a->
 			a.getPatch().getBank() == event.getBank()&& a.getPatch().getProgram() == event.getProgram())
 			.findFirst().ifPresent(instrument -> {					
@@ -1856,7 +1946,7 @@ public class TabbyCat {
 		}
 	}
 	
-	
+	/*
 	void initializeCanvases() {
 		try {
 			CanvasesConfig config = CanvasesConfig.getXMLInstance();
@@ -1866,14 +1956,14 @@ public class TabbyCat {
 					DrumCanvasConfig drumConfig = (DrumCanvasConfig) canvasConfig;					
 					DrumTabCanvas canvas = new DrumTabCanvas(drumConfig);
 					allCanvases.add(canvas);
-					allSoundPlayers.add(canvas);
+					instrumentCanvases.add(canvas);
 					break;
 				}
 				case STRING:{
 					StringCanvasConfig stringConfig = (StringCanvasConfig) canvasConfig;
 					TabCanvas canvas = new TabCanvas(stringConfig);
 					allCanvases.add(canvas);
-					allSoundPlayers.add(canvas);
+					instrumentCanvases.add(canvas);
 					break;
 				}
 				default:
@@ -1887,8 +1977,10 @@ public class TabbyCat {
 		
 	}
 	
+	*/
 	void createGui() {
-		initializeCanvases();
+		//initializeCanvases();
+		/* 
 		Box mainPanel = Box.createVerticalBox();
 		InputMap inputMap = mainPanel.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
 		ActionMap actionMap = mainPanel.getActionMap();
@@ -2072,15 +2164,8 @@ public class TabbyCat {
 		navigationBar.setMinimumSize(new Dimension(0,20));
 		navigationBar.setPreferredSize(new Dimension(Toolkit.getDefaultToolkit().getScreenSize().width,20));
 		
-		mainPanel.add(navigationBar);
-		for (KiteTabCanvas<?> canvas : allCanvases) {
-			int h = (int) canvas.getRowCount()*rowHeight+50;
-			canvas.setMaximumSize(new Dimension(Integer.MAX_VALUE,h));
-			canvas.setMinimumSize(new Dimension(0,h));
-			canvas.setPreferredSize(new Dimension(Toolkit.getDefaultToolkit().getScreenSize().width,h));
-			mainPanel.add(canvas);
-		}
-		mainPanel.add(Box.createVerticalGlue());
+		//mainPanel.add(navigationBar);
+		
 
 				
 		updateMeasureLinePositions();		
@@ -2089,30 +2174,46 @@ public class TabbyCat {
 		JScrollPane scrollPane = new JScrollPane(mainPanel,JScrollPane.VERTICAL_SCROLLBAR_NEVER,JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
 		frame.getContentPane().add(scrollPane,BorderLayout.CENTER);
 		frame.getContentPane().add(controlBar,BorderLayout.SOUTH);
+		*/
+		cardLayout = new CardLayout();
+		cardPanel = new JPanel(cardLayout);
+		
+		LoadProjectPanel loadProjectPanel = new LoadProjectPanel();
+		cardPanel.add(loadProjectPanel,loadProjectKey);
+		NewProjectPanel newProjectPanel = new NewProjectPanel();
+		cardPanel.add(newProjectPanel,newProjectCardKey);
+		frame.getContentPane().add(cardPanel,BorderLayout.CENTER);
 		frame.pack();
+		frame.setSize(new Dimension(
+				(int) Math.min(1000, Toolkit.getDefaultToolkit().getScreenSize().getWidth()),
+				(int) Math.min(500, Toolkit.getDefaultToolkit().getScreenSize().getHeight())));
+				
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		frame.setVisible(true);
 	}
 	
 	
 	void addProgramChange() {
-		JDialog dialog = new JDialog(frame,String.format("Adding program change(t = %d)",cursorT.get()));
+		JDialog dialog = new JDialog(frame,String.format("Adding program change(t = %d)",projectData.getCursorT().get()));
 		dialog.setModalityType(ModalityType.APPLICATION_MODAL);
 		JLabel canvasLabel = new JLabel("Canvas");
 		DefaultComboBoxModel<String> canvasModel = new DefaultComboBoxModel<>();
-		Map<String,KiteTabCanvas<?>> nameToPlayerMap = new HashMap<>();
-		
+		Map<String,InstrumentCanvas> nameToPlayerMap = new HashMap<>();
+		/*
 		allCanvases.stream().filter(a->a!=eventCanvas).forEach(a-> {
-			nameToPlayerMap.put(a.getName(),(KiteTabCanvas<?>) a);
+			nameToPlayerMap.put(a.getName(),(InstrumentCanvas) a);
 			canvasModel.addElement(a.getName());	
 		});
+		*/
 		JComboBox<String> canvasComboBox = new JComboBox<>(canvasModel);
 		
 		JList<Instrument> instrumentList = new JList<>();
 		
 		Runnable instrumentComboBoxF = () -> {
-			Instrument[] instruments = ((SoundfontPlayer) nameToPlayerMap.get(canvasComboBox.getSelectedItem().toString()))
-					.getSynth().getAvailableInstruments();
+			Instrument[] instruments = 
+					nameToPlayerMap.get(canvasComboBox.getSelectedItem().toString()).getSynth().getAvailableInstruments();
+			//Instrument[] instruments = ((SoundfontPlayer) nameToPlayerMap.get(canvasComboBox.getSelectedItem().toString()))
+					//.getSynth().getAvailableInstruments();
 			DefaultListModel<Instrument> model = new DefaultListModel<>();
 			//model.addAll(Arrays.asList(instruments));
 			Arrays.asList(instruments).forEach(model::addElement);
@@ -2156,7 +2257,7 @@ public class TabbyCat {
 		
 	}
 	void addTempo() {
-		JDialog dialog = new JDialog(frame,String.format("Adding tempo (t = %d)",cursorT.get()));
+		JDialog dialog = new JDialog(frame,String.format("Adding tempo (t = %d)",projectData.getCursorT().get()));
 		dialog.setModalityType(ModalityType.APPLICATION_MODAL);
 		
 		JLabel tempoLabel = new JLabel("Tempo");
@@ -2182,10 +2283,12 @@ public class TabbyCat {
 	}
 	
 	void addTimeSignature() {
+		//TODO fix this
+		/*
 		if (selectedCanvas.get() != eventCanvas) {
 			return;
 		}
-		JDialog dialog = new JDialog(frame,String.format("Adding time signature (t = %d)",cursorT.get()));
+		JDialog dialog = new JDialog(frame,String.format("Adding time signature (t = %d)",projectData.getCursorT().get()));
 		dialog.setModalityType(ModalityType.APPLICATION_MODAL);
 		
 		JPanel outerBox = new JPanel(new GridLayout(2,0));
@@ -2221,11 +2324,11 @@ public class TabbyCat {
 		dialog.setLocation(MouseInfo.getPointerInfo().getLocation());
 		dialog.pack();
 		dialog.setVisible(true);
-
+	*/
 	}
 	
 	void addStickyNote() {
-		JDialog dialog = new JDialog(frame,String.format("Adding sticky note (t = %d)",cursorT.get()));
+		JDialog dialog = new JDialog(frame,String.format("Adding sticky note (t = %d)",projectData.getCursorT().get()));
 		dialog.setModalityType(ModalityType.APPLICATION_MODAL);		
 		
 		JPanel topPanel = new JPanel();		
@@ -2291,101 +2394,20 @@ public class TabbyCat {
 	}
 	
 	void loadXML(File file) throws Exception {
-		allCanvases.forEach(a->a.data.clear());
+		//allCanvases.forEach(a->a.data.clear());
+		projectData.getInstrumentData().clear();
+		projectData.getEventData().clear();
 		SchemaFactory schemaF = SchemaFactory.newInstance("http://www.w3.org/2001/XMLSchema");
 		Schema schema = schemaF.newSchema(new File("schemas/projectFiles.xsd"));
-		
 		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
 		dbf.setNamespaceAware(true);
 		dbf.setSchema(schema);
 		DocumentBuilder db = dbf.newDocumentBuilder();
 		Document doc = db.parse(file);
-		Element root = doc.getDocumentElement();
-		if (root.hasAttribute("cursorT")) {
-			cursorT.set(Integer.parseInt(root.getAttribute("cursorT")));
-		}
-		if (root.hasAttribute("stopT")) {
-			stopT0.set(Integer.parseInt(root.getAttribute("stopT")));
-		}
-		if (root.hasAttribute("selectedCanvas")) {
-			try {
-				selectedCanvas.set(
-						allCanvases.get(Integer.parseInt(root.getAttribute("selectedCanvas"))));
-			} catch (Exception ex) {
-				selectedCanvas.set(eventCanvas);				
-			}
-			
-		}
-		if (root.hasAttribute("selectedRow")) {
-			selectedCanvas.get().setSelectedRow(Integer.parseInt(root.getAttribute("selectedRow")));
-		}
-		if (root.hasAttribute("repeatT")) {			
-			repeatT.set(Integer.parseInt(root.getAttribute("repeatT")));
-			
-		}
+		ProjectFileData projectFileData = ProjectFileData.fromXMLElement(doc.getDocumentElement());
+		this.projectData = projectFileData;
 		
-		NodeList eventCanvasNodes = root.getElementsByTagName("eventCanvas") ;
-		Element eventCanvasNode = (Element) eventCanvasNodes.item(0);
-		NodeList eventCanvasEventNodes = eventCanvasNode.getElementsByTagName("event");
-		for (int i = 0; i < eventCanvasEventNodes.getLength(); i++) {
-			Element eventNode = (Element) eventCanvasEventNodes.item(i);	
-			int t = Integer.parseInt(eventNode.getAttribute("t"));
-			int row = Integer.parseInt(eventNode.getAttribute("r"));
-			setCursorT(t);
-			eventCanvas.setSelectedRow(row);
-			NodeList timeSignatureNodes = eventNode.getElementsByTagName("timeSignature");
-			IntStream.range(0, timeSignatureNodes.getLength()).mapToObj(k->(Element) timeSignatureNodes.item(k))
-			.map(TimeSignatureEvent::fromXMLElement).forEach(timeSignature -> {
-				System.out.println(timeSignature);
-				eventCanvas.setSelectedValue(timeSignature);
-				updateMeasureLinePositions();
-			});
-			NodeList tempoNodes = eventNode.getElementsByTagName("tempo");
-			IntStream.range(0, tempoNodes.getLength()).mapToObj(k->(Element) tempoNodes.item(k))
-			.map(TempoEvent::fromXMLElement).forEach(tempo-> {
-				eventCanvas.setSelectedValue(tempo);
-			});
-			NodeList programChangeNodes = eventNode.getElementsByTagName("programChange");
-			IntStream.range(0, programChangeNodes.getLength()).mapToObj(k->(Element) programChangeNodes.item(k))
-			.map(ProgramChange::fromXMLElement).forEach(programChange-> {
-				eventCanvas.setSelectedValue(programChange);
-			});
-			NodeList stickyNodes = eventNode.getElementsByTagName("note");
-			IntStream.range(0, stickyNodes.getLength()).mapToObj(k->(Element) stickyNodes.item(k))
-			.map(StickyNote::fromXMLElement).forEach(stickyNote-> {
-				eventCanvas.setSelectedValue(stickyNote);
-			});
 				
-		}
-		
-		NodeList instrumentNodes = root.getElementsByTagName("instrumentCanvas");
-		for (int i = 0; i < instrumentNodes.getLength(); i++) {
-			Element iNode = (Element) instrumentNodes.item(i);
-			
-			for (KiteTabCanvas<?> canvas : allCanvases) {
-				if (canvas == eventCanvas) {
-					continue;
-				}
-				
-				if (canvas.getName().contentEquals(iNode.getAttribute("name"))) {
-					
-					NodeList eventNodes = iNode.getElementsByTagName("event");
-					for (int j = 0; j < eventNodes.getLength(); j++) {
-						Element e = (Element) eventNodes.item(j);
-						int r = Integer.parseInt(e.getAttribute("r"));
-						int t = Integer.parseInt(e.getAttribute("t"));
-						String v = e.getAttribute("v");
-						canvas.setSelectedRow(r);
-						setCursorT(t);
-						for (char c : v.toCharArray()) {							
-							canvas.handleCharInput(c);
-						}	
-					}
-				}
-			}
-			
-		}
-		
 		updateMeasureLinePositions();
 		repaintCanvases();
 		
@@ -2393,25 +2415,35 @@ public class TabbyCat {
 
 	
 	void saveXML(File file) throws Exception {
-		
 		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
 		DocumentBuilder db = dbf.newDocumentBuilder();
+		Document doc = db.newDocument();
+		Element root = projectData.toXMLElement(doc);
+		doc.appendChild(root);
+		TransformerFactory tf = TransformerFactory.newInstance();
+		Transformer t  = tf.newTransformer();
+		t.setOutputProperty(OutputKeys.INDENT,"yes");
+		t.setOutputProperty("{http://xml.apache.org/xslt}indent-amount","4");
+		t.transform(new DOMSource(doc), new StreamResult(file));
+		t.transform(new DOMSource(doc), new StreamResult(System.out));
+		/*
+		
 		
 		Document doc = db.newDocument();
 		Element root = doc.createElement("tabProject");
 		root.setAttribute("xmlns","tab");		
-		root.setAttribute("cursorT",""+cursorT.get());
+		root.setAttribute("cursorT",""+projectData.getCursorT().get());
 		root.setAttribute("repeatT",""+repeatT.get());
-		root.setAttribute("stopT",""+stopT0.get());
+		root.setAttribute("stopT",""+projectData.getPlaybackStartT().get());
 		root.setAttribute("selectedRow",""+selectedCanvas.get().getSelectedRow());
 		root.setAttribute("selectedCanvas",""+allCanvases.indexOf(selectedCanvas.get()));
 		root.setAttribute("xmlns:xsi","http://www.w3.org/2001/XMLSchema-instance");
 		root.setAttribute("xsi:schemaLocation","tab ../schemas/projectFiles.xsd");
 		
 		doc.appendChild(root);
-		Element eventElement = doc.createElement("eventCanvas");
+		Element eventElement = doc.createElement("eventTabData");
 		root.appendChild(eventElement);
-		eventCanvas.data.keySet().forEach(t -> {
+		projectData.getEventData().keySet().forEach(t -> {
 			eventCanvas.data.get(t).forEach((r,controlEvent) -> {
 				Element e = doc.createElement("event");
 				eventElement.appendChild(e);
@@ -2422,7 +2454,7 @@ public class TabbyCat {
 		});
 		
 		allCanvases.stream().filter(a->a!=eventCanvas).forEach(canvas -> {
-			Element instrumentElement = doc.createElement("instrumentCanvas");
+			Element instrumentElement = doc.createElement("instrumentTabData");
 			root.appendChild(instrumentElement);
 			instrumentElement.setAttribute("name", canvas.getName());
 			canvas.data.keySet().forEach(t -> {
@@ -2441,13 +2473,9 @@ public class TabbyCat {
 			 
 		});
 		
-		TransformerFactory tf = TransformerFactory.newInstance();
-		Transformer t  = tf.newTransformer();
-		t.setOutputProperty(OutputKeys.INDENT,"yes");
-		t.setOutputProperty("{http://xml.apache.org/xslt}indent-amount","4");
-		t.transform(new DOMSource(doc), new StreamResult(file));
-		t.transform(new DOMSource(doc), new StreamResult(System.out));
 		
+		
+		*/
 	}
 	AbstractAction rToA(Runnable r) {
 		return new AbstractAction() {
@@ -2458,5 +2486,234 @@ public class TabbyCat {
 		};
 	}	
 	
+	class NewProjectPanel extends JPanel {
+		
+		StringBuffer songName = new StringBuffer();
+		StringBuffer artistName = new StringBuffer();
+		int selectedIndex = 0;
+		public Set<Integer> selectedIndices = new HashSet<>();
+		final int modulo = 3;
+		public NewProjectPanel() {
+			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap actionMap = this.getActionMap();
+			inputMap.put(k_Up,"up");
+			actionMap.put("up", rToA(this::up));
+			inputMap.put(k_Down,"down");
+			actionMap.put("down", rToA(this::down));
+			inputMap.put(k_Enter,"enter");
+			actionMap.put("enter", rToA(this::enter));
+			
+		}
+		
+		void down() {
+			selectedIndex++;
+			//if (selectedIndex < 2) {
+			if (selectedIndex+1==3+canvasesConfig.getCanvases().size()) {
+				selectedIndex=0;
+			} //else {
+				 
+			//}
+			repaint();
+		}
+		
+		void up() {
+			selectedIndex--;
+			if (selectedIndex==-1) {
+				selectedIndex=2+canvasesConfig.getCanvases().size();
+			}
+			repaint();
+		}
+		
+		void enter() {
+			if (selectedIndex>=2 && selectedIndex != 2+canvasesConfig.getCanvases().size()) {
+				//System.out.println(canvasesConfig.getCanvases().get(selectedIndex-2));
+				if (selectedIndices.contains(selectedIndex-2)) {
+					selectedIndices.remove(selectedIndex-2);
+				} else {
+					selectedIndices.add(selectedIndex-2);
+				}
+				repaint();
+			}
+		}
+		
+
+		
+		@Override
+		public void paint(Graphics g_) {
+			Graphics2D g = (Graphics2D) g_;
+			//Map<Object,Point> stringPositions = new HashMap<>();
+			g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+			g.setFont(font.deriveFont(14f));
+			FontMetrics metrics = g.getFontMetrics();
+			g.setPaint(Color.BLACK);
+			g.fill(this.getBounds());
+			int y = metrics.getMaxAscent();
+			int rowHeight = metrics.getMaxAscent();
+			String titleLabel = "Title:";
+			String artistLabel = "Artist:";
+			int textFieldX = Stream.of(titleLabel,artistLabel).mapToInt(a->(int) metrics.stringWidth(a)).max().getAsInt();
+			int textFieldWidth = metrics.stringWidth("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+			g.setPaint(Color.WHITE);
+			g.drawString(titleLabel,2,y);
+			g.setPaint(selectedIndex==0?Color.gray:Color.DARK_GRAY);
+			g.fillRect(textFieldX,y-rowHeight,textFieldWidth,rowHeight);
+			g.setPaint(Color.WHITE);
+			g.setClip(new Rectangle2D.Double(textFieldX,y-rowHeight,textFieldWidth,rowHeight));
+			g.drawString(songName.toString(),textFieldX+textFieldWidth-metrics.stringWidth(songName.toString()),y);
+			g.setClip(null);
+			y+=rowHeight;
+			g.setPaint(Color.WHITE);
+			g.drawString(artistLabel,2,y);
+			g.setPaint(selectedIndex==1?Color.gray:Color.DARK_GRAY);
+			g.fillRect(textFieldX,y-rowHeight,textFieldWidth,rowHeight);
+			g.setPaint(Color.WHITE);
+			g.setClip(new Rectangle2D.Double(textFieldX,y-rowHeight,textFieldWidth,rowHeight));
+			g.drawString(artistName.toString(),textFieldX+textFieldWidth-metrics.stringWidth(artistName.toString()),y);
+			g.setClip(null);
+			y+=rowHeight;
+			int yForInstruments = y;
+			int xForInstruments = 2;
+			Map<Integer, List<Pair<Integer, CanvasConfig>>> groupedByModulo = 
+					IntStream.range(0, canvasesConfig.getCanvases().size()).mapToObj(i->new Pair<>(i,canvasesConfig.getCanvases().get(i)))
+					.collect(Collectors.groupingBy(a->a.a%modulo));
+			for (int i : groupedByModulo.keySet()) {
+				int w = groupedByModulo.get(i).stream().mapToInt(a->metrics.stringWidth(a.b.getName())).max().orElse(0)+rowHeight+20;
+				for (Pair<Integer,CanvasConfig> p : groupedByModulo.get(i)) {
+					g.setPaint(Color.white);
+					g.drawRect(xForInstruments, yForInstruments-rowHeight,rowHeight, rowHeight);
+					g.setPaint(p.a.intValue() == selectedIndex-2?Color.DARK_GRAY:Color.black);
+					g.fillRect(xForInstruments+rowHeight,yForInstruments-rowHeight,w-rowHeight,rowHeight);
+					g.setPaint(Color.WHITE);
+					if (selectedIndices.contains(p.a)) {
+						g.drawString("\u2713",xForInstruments,yForInstruments);
+					}
+					g.drawString(p.b.getName(), rowHeight+2+xForInstruments,yForInstruments);
+					yForInstruments+=rowHeight;
+				}
+				xForInstruments+=w;
+				yForInstruments = y;
+			}
+			y+=rowHeight*groupedByModulo.values().stream().mapToInt(a->a.size()).max().orElse(1);
+			
+			g.setPaint(selectedIndex == canvasesConfig.getCanvases().size()+2?Color.DARK_GRAY:Color.black);
+			g.fillRect(0,y-rowHeight,metrics.stringWidth("LOAD"),rowHeight);
+			g.setPaint(selectedIndex == canvasesConfig.getCanvases().size()+2?new Color(255,255,150):Color.WHITE);
+			g.drawString("LOAD", 2,y);
+			
+			
+		}
+	}
+	class LoadProjectPanel extends JPanel {
+		private File workingDir = defaultProjectPath;
+		private int selectedIndex = 0;
+		public LoadProjectPanel() {
+			this.workingDir = defaultProjectPath;
+			if (!workingDir.exists()) {
+				workingDir.mkdir();
+			}
+			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap actionMap = this.getActionMap();
+			
+			//KeyStroke k_Esc = KeyStroke.getKeyStroke("ESCAPE");
+			inputMap.put(k_Up,"up");
+			actionMap.put("up", rToA(this::up));
+			inputMap.put(k_Down,"down");
+			actionMap.put("down", rToA(this::down));
+			inputMap.put(k_Enter,"enter");
+			actionMap.put("enter", rToA(this::enter));
+			
+		}
+		
+		private void up() {
+			int numFiles = 0;
+			for (File f : workingDir.listFiles()) {
+				if (f.isDirectory() || fileFilter.accept(f)) {
+					numFiles++;
+				}
+			}
+			
+			if (selectedIndex==0) {
+				selectedIndex = 1+numFiles;				
+			} else {
+				selectedIndex-=1;
+			}
+			repaint();
+		}
+		
+		private void down() {
+			int numFiles = 0;
+			for (File f : workingDir.listFiles()) {
+				if (f.isDirectory() || fileFilter.accept(f)) {
+					numFiles++;
+				}
+			}
+			selectedIndex+=1;
+			if (selectedIndex == 2+numFiles) {
+				selectedIndex = 0;
+			}
+			repaint();
+			
+		}
+		
+		private void enter() {
+			if (selectedIndex == 0) {
+				cardLayout.show(cardPanel, newProjectCardKey);
+			} else if (selectedIndex == 1) {
+				this.workingDir = new File(workingDir.getAbsolutePath()).getParentFile();
+				repaint();
+			} else {
+				List<File> files = 
+						Arrays.asList(workingDir.listFiles()).stream().filter(a->a.isDirectory() || fileFilter.accept(a))
+						.toList();
+				if (files.get(selectedIndex-2).isDirectory()) {
+					workingDir = new File(workingDir.getAbsolutePath()+"/"+files.get(selectedIndex-2).getName());
+					selectedIndex= 1;
+					repaint();
+				} else {
+					System.out.println("loading "+files.get(selectedIndex-2));
+				}
+					
+			}
+		}
+		
+
+		
+		@Override
+		public void paint(Graphics g_) {
+			Graphics2D g = (Graphics2D) g_;
+			g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+			g.setFont(font.deriveFont(14f));
+			FontMetrics metrics = g.getFontMetrics();
+			g.setPaint(Color.BLACK);
+			g.fill(this.getBounds());
+			int y = metrics.getMaxAscent();
+			g.setPaint(Color.RED);
+			g.drawString(workingDir.getAbsolutePath(),getWidth()-metrics.stringWidth(workingDir.getAbsolutePath())-2, y);
+
+			List<Pair<String,Color>> strings= new ArrayList<>();
+			strings.add(new Pair<>("<New Project>",new Color(180,180,255)));
+			strings.add(new Pair<>("..",new Color(255,255,180)));
+			if (workingDir == null) {
+				return;
+			}
+			for (File f : this.workingDir.listFiles()) {
+				if (f.isDirectory() || fileFilter.accept(f)) {
+					strings.add(new Pair<>(f.getName(),f.isDirectory()?new Color(255,255,180):new Color(180,255,180)));
+				}
+			
+			}
+			int w = strings.stream().mapToInt(a->metrics.stringWidth(a.a)).max().getAsInt();
+			for (int i = 0; i < strings.size(); i++) {
+				Pair<String,Color> p = strings.get(i);
+				g.setPaint(selectedIndex == i?Color.DARK_GRAY:Color.black);
+				g.fillRect(0, y-metrics.getMaxAscent(), w, metrics.getMaxAscent());
+				g.setPaint(p.b);
+				g.drawString(p.a, 2, y);
+				y+=metrics.getMaxAscent();
+			}
+			
+						
+		}
+	}
 
 }

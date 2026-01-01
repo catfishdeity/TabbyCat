@@ -18,26 +18,11 @@ import org.w3c.dom.NodeList;
 
 public class CanvasesConfig {
 	
-	public static void main(String[] args) throws Exception {
-		System.out.println(getXMLInstance());
-	}
-	public static CanvasesConfig getXMLInstance() throws Exception {
-		File f = Stream.of("etc","config").map(d->new File(d+"/canvases.xml"))
-				.filter(a->a.exists()).findFirst().get();
-		SchemaFactory schemaF = SchemaFactory.newInstance("http://www.w3.org/2001/XMLSchema");
-		Schema schema = schemaF.newSchema(new File("schemas/canvases.xsd"));
-		
-		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-		dbf.setNamespaceAware(true);
-		dbf.setSchema(schema);
-		DocumentBuilder db = dbf.newDocumentBuilder();
-		Document doc = db.parse(f);
-		Element root = doc.getDocumentElement();
-
+	
+	
+	public static CanvasesConfig fromXMLElement(Element e) {
 		List<CanvasConfig> canvases= new ArrayList<>();
-		//List<DrumCanvasConfig> drumCanvases = new ArrayList<>();
-		
-		NodeList kids = root.getChildNodes();
+		NodeList kids = e.getChildNodes();
 		for (int i = 0; i < kids.getLength(); i++) {
 			if (kids.item(i).getNodeType() != Node.ELEMENT_NODE) {
 				continue;
@@ -49,9 +34,42 @@ public class CanvasesConfig {
 				canvases.add(DrumCanvasConfig.fromXMLElement(kid));
 			}
 		}
-		
-		
 		return new CanvasesConfig(canvases);
+	}
+	
+	public static CanvasesConfig getXMLInstance(){
+		try {
+			File f = Stream.of("etc","config").map(d->new File(d+"/canvases.xml"))
+					.filter(a->a.exists()).findFirst().get();
+			SchemaFactory schemaF = SchemaFactory.newInstance("http://www.w3.org/2001/XMLSchema");
+			Schema schema = schemaF.newSchema(new File("schemas/canvases.xsd"));
+			
+			DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+			dbf.setNamespaceAware(true);
+			dbf.setSchema(schema);
+			DocumentBuilder db = dbf.newDocumentBuilder();
+			Document doc = db.parse(f);
+			Element root = doc.getDocumentElement();
+			return fromXMLElement(root);
+		} catch (Exception ex) {
+			throw new RuntimeException(ex);
+		}
+
+	}
+	
+	public Element toXMLElement(Document doc, String tagName) {
+		Element toReturn = doc.createElement(tagName);
+		for (CanvasConfig canvas : canvases) {
+			switch(canvas.getType()) {
+			case DRUM:
+				toReturn.appendChild(canvas.toXMLElement(doc,"drumCanvas"));
+				break;
+			case STRING:
+				toReturn.appendChild(canvas.toXMLElement(doc,"stringCanvas"));
+				break;
+			}
+		}
+		return toReturn;
 	}
 	
 	private final List<CanvasConfig> canvases;
