@@ -10,7 +10,7 @@ public enum TimeSignatureDenominator {
 		return super.toString().replace("_","");
 	}
 	
-	static Optional<TimeSignatureDenominator> fromInt(int i) {
+	public static Optional<TimeSignatureDenominator> fromInt(int i) {
 		switch (i) {
 		case 2: return Optional.of(_2);
 		case 4: return Optional.of(_4);

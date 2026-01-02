@@ -132,6 +132,10 @@ public class TabbyCat {
 	static String newProjectCardKey = "NEW PROJECT";
 	static String mainInterfaceCardKey = "MAIN INTERFACE";
 	static String saveProjectCardKey = "SAVE PROJECT";
+	static String timeSignatureEventCardKey = "TIME SIGNATURE";
+	static String tempoEventCardKey = "TEMPO EVENT";
+	static String notesEventCardKey = "NEW NOTE";;
+	
 	static int numEventRows = 3;
 	private ProjectFileData projectData = null;
 	private CanvasesConfig canvasesConfig = CanvasesConfig.getXMLInstance();
@@ -173,7 +177,14 @@ public class TabbyCat {
 
 	final Map<File, Soundbank> loadedSoundfontCache = new HashMap<>();
 
-	private SaveProjectPanel fileChooserPanel;
+	private TimeSignatureEventPanel timeSignatureEventPanel;
+	private TempoEventPanel tempoEventPanel;
+	private NotesEventPanel notesEventPanel;
+	private LoadProjectPanel loadProjectPanel;
+	private NewProjectPanel newProjectPanel;
+	private MainInterfacePanel mainInterfacePanel;
+	private SaveProjectPanel saveProjectPanel;
+	
 	private CardLayout cardLayout;
 	private JPanel cardPanel;
 
@@ -205,17 +216,11 @@ public class TabbyCat {
 	KeyStroke k_CtrlC = KeyStroke.getKeyStroke("ctrl C");
 	KeyStroke k_CtrlV = KeyStroke.getKeyStroke("ctrl V");
 	KeyStroke k_CtrlX = KeyStroke.getKeyStroke("ctrl X");
-	KeyStroke k_CtrlR = KeyStroke.getKeyStroke("ctrl )");
+	KeyStroke k_CtrlR = KeyStroke.getKeyStroke("ctrl R");
 	
 	KeyStroke k_Space = KeyStroke.getKeyStroke("SPACE");
 
-	private LoadProjectPanel loadProjectPanel;
-
-	private NewProjectPanel newProjectPanel;
-
-	private MainInterfacePanel mainInterfacePanel;
-
-	private SaveProjectPanel saveProjectPanel;
+	
 
 	void playbackDaemonFunction() {
 		// DO NOT CALL THIS ON MASTER THREAD
@@ -228,12 +233,11 @@ public class TabbyCat {
 				try {
 
 					midiDaemon.execute(() -> {
-						// allCanvases.forEach(a->a.handleEvents(t));
+						handleProgramEvents();
 					});
 
 					SwingUtilities.invokeAndWait(() -> {
 						mainInterfacePanel.repaint();
-						//frame.repaint();
 					});
 
 				} catch (Exception e) {
@@ -249,6 +253,26 @@ public class TabbyCat {
 				return;
 			}
 		}
+	}
+	
+	void handleProgramEvents() {
+		int t = projectData.getPlaybackT().get();
+		projectData.getEventData().entrySet().stream() 
+		.filter(e->e.getKey().x == t).map(e->e.getValue())
+		.forEach(a -> {
+			switch (a.getType()) {			
+			case TEMPO:
+				projectData.getTempo().set(((TempoEvent) a).getTempo());				
+				break;			
+			default:
+				break;
+			}
+		});
+		projectData.getInstrumentData().entrySet().stream()
+		.filter(e->e.getKey().getTime() == t).map(e->e.getValue())
+		.forEach(a -> {
+			System.out.println(a);
+		});
 	}
 
 
@@ -1847,6 +1871,12 @@ public class TabbyCat {
 		cardPanel.add(mainInterfacePanel,mainInterfaceCardKey);
 		saveProjectPanel = new SaveProjectPanel();
 		cardPanel.add(saveProjectPanel,saveProjectCardKey);
+		timeSignatureEventPanel = new TimeSignatureEventPanel();
+		cardPanel.add(timeSignatureEventPanel,timeSignatureEventCardKey);
+		tempoEventPanel = new TempoEventPanel();
+		cardPanel.add(tempoEventPanel,tempoEventCardKey);
+		notesEventPanel = new NotesEventPanel();
+		cardPanel.add(notesEventPanel,notesEventCardKey);
 		frame.getContentPane().add(cardPanel,BorderLayout.CENTER);
 		frame.pack();
 		frame.setSize(new Dimension(
@@ -2482,6 +2512,8 @@ public class TabbyCat {
 			actionMap.put("ctrlx", rToA(this::ctrlX));
 			inputMap.put(k_CtrlV,"ctrlv");
 			actionMap.put("ctrlv", rToA(this::ctrlV));
+			inputMap.put(k_CtrlR,"ctrlr");
+			actionMap.put("ctrlr", rToA(this::ctrlR));
 			
 			inputMap.put(k_Enter,"enter");
 			actionMap.put("enter", rToA(this::enter));
@@ -2513,6 +2545,13 @@ public class TabbyCat {
 			int row = pair.b;
 			if (canvasNumber == 0) {
 				//event canvas
+				if (c == 'T') {
+					cardLayout.show(cardPanel, timeSignatureEventCardKey);
+				} else if (c == 'S') {
+					cardLayout.show(cardPanel, tempoEventCardKey);
+				} else if (c == 'N') {
+					cardLayout.show(cardPanel, notesEventCardKey);
+				}
 			} else {
 				CanvasConfig canvasConfig = 
 						projectData.getCanvases().getCanvases().get(canvasNumber-1);
@@ -2526,6 +2565,18 @@ public class TabbyCat {
 				}
 			}
 			
+		}
+		
+		void ctrlR() {
+			if (isInGrid) {
+				if (projectData.getRepeatT().get() == projectData.getCursorT().get()+1) {
+					projectData.getRepeatT().set(-1);
+				} else {
+					projectData.getRepeatT().set(projectData.getCursorT().get()+1);
+				}
+				
+				repaint();
+			}
 		}
 		
 		void ctrlL() {
@@ -3186,6 +3237,7 @@ public class TabbyCat {
 			g.setPaint(Color.RED);
 			g.draw(selectionRectangle);
 			int canvasNumber = 0;
+			g.setFont(gridFont);
 			for (Shape canvasGrid : canvasGrids) {				
 				
 				Rectangle2D bounds = canvasGrid.getBounds2D();
@@ -3194,7 +3246,7 @@ public class TabbyCat {
 				int repeatX = (projectData.getRepeatT().get()-projectData.getViewT().get())*cellWidth;
 				
 				g.setPaint(Color.orange.darker());
-				
+				g.setStroke(new BasicStroke(1));
 				if (projectData.getRepeatT().get()>=0) {
 					g.draw(new Line2D.Double(repeatX, bounds.getMinY(), repeatX,bounds.getMaxY()));
 					g.draw(new Line2D.Double(repeatX-3, bounds.getMinY(), repeatX-3,bounds.getMaxY()));
@@ -3213,7 +3265,56 @@ public class TabbyCat {
 					
 					for (int row = 0; row < rowCount; row++) {
 						if (canvasNumber == 0) {
-							
+							ControlEvent event = projectData.getEventData().get(new Point(t,row));
+							if (event != null) {
+								switch (event.getType()) {
+								
+								case TIME_SIGNATURE: {
+									
+								
+									g.setFont(font.deriveFont(Font.ITALIC));
+									g.setPaint(Color.YELLOW);
+									String text = event.toString();
+									g.drawString(text,
+											x+(rowHeight-gridMetrics.stringWidth(text))/2,
+											(int) (bounds.getMinY()+(row+1)*rowHeight-2));
+									g.setFont(font);
+									break;
+								}
+								case PROGRAM_CHANGE: {
+									g.setFont(font.deriveFont(Font.ITALIC));
+									g.setPaint(new Color(100,200,255));
+									String text = event.toString();
+									g.drawString(text,
+											x+(rowHeight-gridMetrics.stringWidth(text))/2,
+											(int) (bounds.getMinY()+(row+1)*rowHeight-2));
+											
+									g.setFont(font);
+									break;
+								}
+								case TEMPO: {
+									g.setFont(font.deriveFont(Font.ITALIC));
+									g.setPaint(new Color(255,200,100));
+									String text = event.toString();
+									g.drawString(text,
+											x+(rowHeight-gridMetrics.stringWidth(text))/2,
+											(int) (bounds.getMinY()+(row+1)*rowHeight-2));
+									g.setFont(font);
+									break;
+								}
+								case STICKY_NOTE: {
+									g.setFont(font.deriveFont(Font.ITALIC));
+									g.setPaint(Color.WHITE);
+									String text = ((StickyNote) event).getText();
+									g.drawString(text,
+											x+(rowHeight-gridMetrics.stringWidth(text))/2,
+											(int) (bounds.getMinY()+(row+1)*rowHeight-2));
+								}
+								default:
+									break;					
+								}					
+							}					
+						//	y+=rowHeight;
 						} else {
 							InstrumentDataKey dataKey = new InstrumentDataKey(canvasName,t,row);
 							if (projectData.getInstrumentData().containsKey(dataKey)) {
@@ -3224,7 +3325,7 @@ public class TabbyCat {
 							}	
 						}
 					}
-					g.setStroke(new BasicStroke(3));
+					g.setStroke(new BasicStroke(2));
 					g.setPaint(Color.getHSBColor(0.85f, 0.25f, 1f));
 					if (cachedMeasurePositions.containsKey(t)) {
 						g.draw(new Line2D.Double(
@@ -3242,9 +3343,6 @@ public class TabbyCat {
 				x = 0;
 				g.setPaint(Color.white);
 				for (int t = projectData.getViewT().get(); t<t1; t++) {
-					//g.setPaint(isSelected() ? selectedMeasureColor : unselectedMeasureColor);					
-					
-					
 					if (cachedMeasurePositions.containsKey(t)) {
 						int measure = cachedMeasurePositions.get(t);
 						g.drawString("" + measure, x, (int) measurePanel.getMaxY());
@@ -3254,12 +3352,7 @@ public class TabbyCat {
 					}
 					x += cellWidth;
 				}
-				
 			}
-			
-		
-			
-			
 		}
 	}
 	
@@ -3427,6 +3520,173 @@ public class TabbyCat {
 				y+=metrics.getMaxAscent();
 			}
 			
+			
+		}
+	}
+	
+	class TimeSignatureEventPanel extends JPanel {
+		
+		boolean flag = false;
+		int numerator = 4;
+		int denominator = 4;
+		public TimeSignatureEventPanel() {
+			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap actionMap = this.getActionMap();
+			inputMap.put(k_Left,"left");
+			actionMap.put("left", rToA(this::left));
+			inputMap.put(k_Right,"right");
+			actionMap.put("right", rToA(this::right));
+			inputMap.put(k_Up,"up");
+			actionMap.put("up", rToA(this::up));
+			inputMap.put(k_Down,"down");
+			actionMap.put("down", rToA(this::down));
+			inputMap.put(k_Enter,"enter");
+			actionMap.put("enter", rToA(this::enter));
+		}
+		
+		void up() {
+			if (!flag) {
+				numerator = Math.min(999, numerator+1);				
+			} else {
+				denominator = Math.min(16, denominator*2);
+			}
+			repaint();
+		}
+		
+		void down() {
+			if (!flag) {
+				numerator = Math.max(1, numerator-1);				
+			} else {
+				denominator = Math.max(2, denominator/2);
+			}
+			repaint();
+		}
+		
+		void enter() {
+			
+			TimeSignatureDenominator tsd = 
+					TimeSignatureDenominator.fromInt(denominator).get();
+			TimeSignatureEvent tse = 
+					new TimeSignatureEvent(numerator,tsd);
+			projectData.getEventData().put(
+					new Point(projectData.getCursorT().get(),
+							projectData.getSelectedRow().get()),
+					tse);
+			updateMeasureLinePositions();
+			mainInterfacePanel.repaint();
+			cardLayout.show(cardPanel, mainInterfaceCardKey);
+			
+		}
+		
+		void left() {
+			flag=!flag;
+			repaint();
+		}
+		void right() {
+			flag=!flag;
+			repaint();
+		}
+		
+		@Override
+		public void paint(Graphics g_) {
+			
+			Graphics2D g = (Graphics2D) g_;
+			g.setPaint(Color.black);
+			g.fill(getBounds());
+			FontMetrics metrics = g.getFontMetrics();
+			String numerLabel = "Numerator:";
+			String denomLabel = "Denominator:";
+			
+			Rectangle2D numerLabelBounds = 
+					metrics.getStringBounds(numerLabel, g);
+			Rectangle2D numerBounds = 
+					metrics.getStringBounds("000", g);
+			Rectangle2D denomLabelBounds = 
+					metrics.getStringBounds(denomLabel, g);
+			Rectangle2D denomBounds = 
+					metrics.getStringBounds("16", g);
+			g.translate(0, numerLabelBounds.getHeight());
+			g.setPaint(Color.WHITE);
+			g.drawString(numerLabel,(int) numerLabelBounds.getMinX(), (int) numerLabelBounds.getMaxY());
+			g.translate(numerLabelBounds.getWidth()+10,0);
+			g.setPaint(!flag?Color.GRAY:Color.DARK_GRAY);
+			g.fill(numerBounds);
+			g.setPaint(new Color(255,255,100));
+			g.drawString(numerator+"",(int) numerBounds.getMinX(), 0);
+			g.setPaint(Color.WHITE);
+			g.translate(numerBounds.getWidth()+10,0);
+			g.drawString(denomLabel,(int) denomLabelBounds.getMinX(), (int) denomLabelBounds.getMaxY());
+			g.translate(denomLabelBounds.getWidth()+10,0);
+			g.setPaint(flag?Color.GRAY:Color.DARK_GRAY);
+			g.fill(denomBounds);
+			g.setPaint(new Color(255,255,100));
+			g.drawString(denominator+"",(int) denomBounds.getMinX(), 0);
+		}
+	}
+	
+	class TempoEventPanel extends JPanel {
+		int tempo = 120;
+		public TempoEventPanel() {
+			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap actionMap = this.getActionMap();
+			actionMap.put("up", rToA(this::up));
+			inputMap.put(k_Down,"down");
+			actionMap.put("down", rToA(this::down));
+			inputMap.put(k_Enter,"enter");
+			actionMap.put("down", rToA(this::enter));
+		}
+		void enter() {
+			
+		}
+		void up() {
+			tempo = Math.min(1000, tempo-1);
+			repaint();
+		}		
+		void down() {
+			tempo = Math.max(20, tempo-1);
+			repaint();
+		}
+		@Override
+		public void paint(Graphics g_) {
+			Graphics2D g = (Graphics2D) g_;
+			g.setPaint(Color.black);
+			g.fill(getBounds());
+			
+		}
+	}
+	
+	class NotesEventPanel extends JPanel {
+		public NotesEventPanel() {
+			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap actionMap = this.getActionMap();			
+			actionMap.put("enter", rToA(this::enter));
+			for (char c = 'A'; c <= 'Z'; c++) {
+				char c_ = c;
+				KeyStroke k = KeyStroke.getKeyStroke(""+c);
+				inputMap.put(k,""+c);
+				actionMap.put(""+c, rToA(()->handleCharInput(c_)));
+			}
+			for (char c = '0'; c <= '9'; c++) {
+				char c_ = c;
+				KeyStroke k = KeyStroke.getKeyStroke(""+c);
+				inputMap.put(k,""+c);
+				actionMap.put(""+c, rToA(()->handleCharInput(c_)));
+			}		
+		}
+		
+		void enter() {
+			
+		}
+		
+		void handleCharInput(char c) {
+			
+		}
+		
+		@Override
+		public void paint(Graphics g_) {
+			Graphics2D g = (Graphics2D) g_;
+			g.setPaint(Color.black);
+			g.fill(getBounds());
 			
 		}
 	}

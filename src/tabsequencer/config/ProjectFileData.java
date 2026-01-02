@@ -24,7 +24,7 @@ public class ProjectFileData {
 	private final CanvasesConfig canvases;
 	private final Map<Point, ControlEvent> eventData;
 	private final Map<InstrumentDataKey, String> instrumentData;
-	private final AtomicInteger cursorT, repeatT, playbackStartT, selectedRow, selectedCanvas, viewT,tempo,playbackT;
+	private final AtomicInteger cursorT, repeatT, playbackStartT, selectedRow, selectedCanvas, viewT,tempo,playbackT,initialTempo;
 	
 	private final AtomicInteger lassoRow0 = new AtomicInteger(-1);
 	private final AtomicInteger lassoT0 = new AtomicInteger(-1);
@@ -42,10 +42,14 @@ public class ProjectFileData {
 		this.selectedCanvas = new AtomicInteger(0);
 		this.viewT = new AtomicInteger(-4);
 		this.tempo = new AtomicInteger(120);
+		this.initialTempo = new AtomicInteger(120);
 		this.playbackT = new AtomicInteger(0);
 	}
 	
 	
+	public AtomicInteger getInitialTempo() {
+		return initialTempo;
+	}
 
 	public String getSongName() {
 		return songName;
