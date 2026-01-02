@@ -27,7 +27,7 @@
 		<additionalPitch token="D" steps="3.5"/>
 		<additionalPitch token="E" steps="4.5"/>
 	</stringCanvas>
-	<stringCanvas name="KiteAcoustic" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="25" ed2="41" fretStepSkip="2" baseFrequency="65.406">
+	<stringCanvas name="KiteAcoustic" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="25" maxFrets="41" ed2="41" fretStepSkip="2" baseFrequency="65.406">
 		<string steps="78"/>	
 		<string steps="65"/>
 		<string steps="52"/>

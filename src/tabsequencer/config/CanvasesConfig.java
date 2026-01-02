@@ -72,8 +72,13 @@ public class CanvasesConfig {
 		return toReturn;
 	}
 	
+	@Override
+	public String toString() {
+		return "CanvasesConfig [canvases=" + canvases + "]";
+	}
+
 	private final List<CanvasConfig> canvases;
-	CanvasesConfig(List<CanvasConfig> canvases) {
+	public CanvasesConfig(List<CanvasConfig> canvases) {
 		this.canvases = Collections.unmodifiableList(canvases);
 	}
 	public List<CanvasConfig> getCanvases() {

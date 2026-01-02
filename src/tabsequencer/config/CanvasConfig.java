@@ -19,6 +19,8 @@ public abstract class CanvasConfig {
 		this.program = program;
 	}
 	
+	public abstract int getRowCount();
+	
 	public final Optional<File> getSoundfontFile() {
 		return Optional.ofNullable(soundfontFile);
 	}
@@ -36,4 +38,6 @@ public abstract class CanvasConfig {
 	public final int getProgram() {
 		return program;
 	}
+
+	public abstract boolean willAccept(String token, int row);
 }

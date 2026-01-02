@@ -74,6 +74,26 @@ public class DrumCanvasConfig extends CanvasConfig {
 		}
 		return e;
 	}
+
+	@Override
+	public int getRowCount() {
+		return rowTypes.size();
+	}
+
+	@Override
+	public boolean willAccept(String token, int row) {
+		if (row >= rowTypes.size()) {
+			return false;
+		}
+		for (PercToken percToken : tokens) {
+			if (percToken.getToken().toUpperCase().contentEquals(token.toUpperCase())) {
+				if (percToken.getPosition() == rowTypes.get(row)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
 		
 	
 }

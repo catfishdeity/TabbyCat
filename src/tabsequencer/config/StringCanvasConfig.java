@@ -4,6 +4,8 @@ import java.io.File;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 
 import org.w3c.dom.Document;
@@ -100,6 +102,11 @@ public class StringCanvasConfig extends CanvasConfig {
 	@Override
 	public Element toXMLElement(Document doc, String tagName) {
 		Element e = doc.createElement(tagName);
+		for (double edoStep : edoSteps) {
+			Element e2 = doc.createElement("string");
+			e2.setAttribute("steps", String.format("%.3f",edoStep));
+			e.appendChild(e2);
+		}
 		getSoundfontFile().ifPresent(f -> {
 			e.setAttribute("soundfontFile", f.toString());
 		});
@@ -112,6 +119,34 @@ public class StringCanvasConfig extends CanvasConfig {
 		e.setAttribute("fretStepSkip", fretStepSkip+"");
 		e.setAttribute("baseFrequency", baseFrequency+"");
 		return e;		
+	}
+
+	@Override
+	public int getRowCount() {
+		return edoSteps.length;
+	}
+
+	Pattern harmonicPattern = Pattern.compile("^H(\\d*)$");
+	Pattern integerPattern = Pattern.compile("^(\\d+)$");
+	@Override
+	public boolean willAccept(String token, int row) {
+		if (row >= edoSteps.length) {
+			return false;
+		}
+		Matcher harmonicMatcher = harmonicPattern.matcher(token);
+		if (harmonicMatcher.find() && (harmonicMatcher.group(1).trim().isEmpty() || 
+				Integer.parseInt(harmonicMatcher.group(1)) <= getMaxHarmonic())) {					
+			return true;
+		}
+		Matcher integerMatcher = integerPattern.matcher(token);
+		if (integerMatcher.find() && Integer.parseInt(token) <= getMaxFrets()) {
+			return true;
+		}
+		if (getAdditionalPitchMap().keySet().contains(token)) {
+			return true;
+		}
+		return false;
+		
 	}
 	
 }
