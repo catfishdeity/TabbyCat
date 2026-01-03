@@ -3,6 +3,7 @@ package tabsequencer.config;
 import java.io.File;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -94,6 +95,14 @@ public class DrumCanvasConfig extends CanvasConfig {
 		}
 		return false;
 	}
+
+	public Optional<Integer> getMidiNumber(String value) {
+		return tokens.stream().filter(a->a.getToken().equals(value)).findFirst()
+				.map(a->a.getMidiNumber());
+		
+	}
+	
+	 
 		
 	
 }
