@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -46,6 +47,11 @@ public class ProjectFileData {
 		this.playbackT = new AtomicInteger(0);
 	}
 	
+	public Optional<CanvasConfig> getCanvasConfig(String name) {
+		return canvases.getCanvases().stream()
+				.filter(a->a.getName().equals(name))
+				.findFirst();
+	}
 	
 	public AtomicInteger getInitialTempo() {
 		return initialTempo;

@@ -109,7 +109,6 @@ import org.w3c.dom.Element;
 import tabsequencer.config.CanvasConfig;
 import tabsequencer.config.CanvasesConfig;
 import tabsequencer.config.DrumCanvasConfig;
-import tabsequencer.config.PercToken;
 import tabsequencer.config.ProjectFileData;
 import tabsequencer.config.StringCanvasConfig;
 import tabsequencer.events.ControlEvent;
@@ -152,7 +151,9 @@ public class TabbyCat {
 
 	final Map<Point, String> instrumentClipboard = new HashMap<>();
 	final Map<Point, ControlEvent> eventClipboard = new HashMap<>();
-
+	Map<File,Soundbank> loadedSoundbanks = new HashMap<>();
+	Map<DrumCanvasConfig,Synthesizer> drumSynths = new HashMap<>();
+	Map<Pair<StringCanvasConfig,Integer>,Synthesizer> stringSynths = new HashMap<>();
 	final AtomicReference<File> activeFile = new AtomicReference<>(null);
 	final AtomicBoolean fileHasBeenModified = new AtomicBoolean(false);
 	final AtomicBoolean isSelectionMode = new AtomicBoolean(false);
@@ -171,11 +172,9 @@ public class TabbyCat {
 
 	LeftClickablePanelButton playButton, stopButton;
 	final PlayStatusPanel playStatusPanel = new PlayStatusPanel();
-	final NavigationCanvas navigationBar = new NavigationCanvas();
-	final EventCanvas eventCanvas = new EventCanvas();
+	
 	File defaultSoundfontFile = null;
-
-	final Map<File, Soundbank> loadedSoundfontCache = new HashMap<>();
+	
 
 	private TimeSignatureEventPanel timeSignatureEventPanel;
 	private TempoEventPanel tempoEventPanel;
@@ -255,8 +254,13 @@ public class TabbyCat {
 		}
 	}
 	
+	
+	Map<MidiChannel,Integer> activeDrumNotes = new 
+			HashMap<>();
+	Map<MidiChannel,Integer> activeStringNotes = new HashMap<>();
 	void handleProgramEvents() {
 		int t = projectData.getPlaybackT().get();
+		
 		projectData.getEventData().entrySet().stream() 
 		.filter(e->e.getKey().x == t).map(e->e.getValue())
 		.forEach(a -> {
@@ -268,11 +272,162 @@ public class TabbyCat {
 				break;
 			}
 		});
-		projectData.getInstrumentData().entrySet().stream()
-		.filter(e->e.getKey().getTime() == t).map(e->e.getValue())
-		.forEach(a -> {
-			System.out.println(a);
+		activeDrumNotes.forEach((midiChannel,midiNoteNum) -> {
+			midiChannel.noteOff(midiNoteNum);
 		});
+		for (CanvasConfig canvas :projectData.getCanvases().getCanvases()) {
+			if (canvas instanceof StringCanvasConfig) {
+				StringCanvasConfig stringCanvas = (StringCanvasConfig) canvas; 
+				for (int row = 0; row < stringCanvas.getRowCount(); row++) {
+					InstrumentDataKey key = new InstrumentDataKey(stringCanvas.getName(),t,row);
+					String val = projectData.getInstrumentData().get(key);
+					int channelNum = row%15 >= 9 ? row%15+1:row%15;
+					try {
+						Synthesizer synth = getSynth(stringCanvas,row);
+						MidiChannel channel = synth.getChannels()[channelNum];
+						if (activeStringNotes.containsKey(channel)) {
+							if (val == null || val.charAt(0) != '-') {
+								channel.noteOff(activeStringNotes.get(channel));
+								activeStringNotes.remove(channel);
+							}
+						}
+					} catch (Exception ex) {
+						ex.printStackTrace();
+					}
+				}
+			}
+		}
+		projectData.getInstrumentData().entrySet().stream()
+		.filter(e->e.getKey().getTime() == t)
+		.forEach(e -> {
+			InstrumentDataKey dataKey = e.getKey();
+			String value = e.getValue();
+			projectData.getCanvasConfig(dataKey.getInstrumentName()).ifPresent(canvasConfig -> {
+				if (canvasConfig instanceof DrumCanvasConfig) {
+					DrumCanvasConfig drumConfig = (DrumCanvasConfig) canvasConfig;
+					drumConfig.getMidiNumber(value).ifPresent(midiNumber -> {
+						try {
+							Synthesizer synth = getSynth(drumConfig);
+							synth.getChannels()[9].noteOn(midiNumber, 100);
+							activeDrumNotes.put(synth.getChannels()[9],midiNumber);
+						} catch (Exception e1) {
+							e1.printStackTrace();
+						}
+					});
+				} else {
+					StringCanvasConfig guitarConfig = (StringCanvasConfig) canvasConfig;
+					if (value.charAt(0) != '-') {
+
+						guitarConfig.getFrequency(value,dataKey.getRow()).ifPresent(freq -> {
+							try {
+								
+								int channelNum = dataKey.getRow()%15 >= 9 ?
+										dataKey.getRow()%15+1:dataKey.getRow()%15;
+								
+								
+								Synthesizer synth = getSynth(guitarConfig,dataKey.getRow());
+								MidiChannel channel = synth.getChannels()[channelNum];
+								
+								double n = (12 * Math.log(freq/440)/Math.log(2) + 69);
+								int midiNote = (int) Math.round(n);
+								double semitoneOffset = n - midiNote;
+								final double semitoneRange = 2.0;
+								double bendRatio = semitoneOffset/ semitoneRange;
+								int pitchBend = 8192 + (int) (bendRatio*8192);
+								pitchBend = Math.max(0, Math.min(16383, pitchBend));
+								int lsb = pitchBend & 0x7F;
+								int msb = (pitchBend >> 7) & 0x7F;
+								try {
+									ShortMessage pb = new ShortMessage();					
+									pb.setMessage(ShortMessage.PITCH_BEND, channelNum, lsb, msb);
+									synth.getReceiver().send(pb, -1);
+									//channel.noteOff(midiNote);
+									
+									channel.noteOn(midiNote, 100);
+									activeStringNotes.put(channel,midiNote);
+								} catch (Exception ex) {
+									ex.printStackTrace();
+								}
+							} catch (Exception ex) {
+								ex.printStackTrace();
+							}
+							
+						});
+					} 
+				}
+				
+			});
+			
+		});
+	}
+	
+	Synthesizer getSynth(StringCanvasConfig config, int row) throws Exception {
+		
+		Pair<StringCanvasConfig,Integer> key = new Pair<>(config,row);
+		if (stringSynths.containsKey(key)) {
+			return stringSynths.get(key);
+		} else {
+			Synthesizer synth = MidiSystem.getSynthesizer();
+			if (!synth.isOpen()) {
+				synth.open();
+			}			
+			if (config.getSoundfontFile().isPresent()) {
+				File file = config.getSoundfontFile().get();
+				Soundbank soundbank;
+				if (loadedSoundbanks.containsKey(file)) {
+					soundbank = loadedSoundbanks.get(file);
+				} else {
+					soundbank = MidiSystem.getSoundbank(file);
+					loadedSoundbanks.put(file, soundbank);
+				}
+				for (Instrument instrument : soundbank.getInstruments()) {
+					if (instrument.getPatch().getBank() ==
+							config.getBank() &&
+							instrument.getPatch().getProgram() ==
+							config.getProgram()) {
+						synth.loadInstrument(instrument);
+						for (int i : new int[] {0,1,2,3,4,5,6,7,8,10,11,12,13,14,15}) {
+							synth.getChannels()[i].programChange(config.getBank(),config.getProgram());							
+						}
+					}
+				}
+			}
+			stringSynths.put(key,synth);
+			return synth;
+		}
+	}
+	
+	Synthesizer getSynth(DrumCanvasConfig config) throws Exception {
+		if (drumSynths.containsKey(config)) {
+			return drumSynths.get(config);
+		} else {		
+			Synthesizer synth = MidiSystem.getSynthesizer();
+			if (!synth.isOpen()) {
+				synth.open();
+			}			
+			if (config.getSoundfontFile().isPresent()) {
+				File file = config.getSoundfontFile().get();
+				Soundbank soundbank;
+				if (loadedSoundbanks.containsKey(file)) {
+					soundbank = loadedSoundbanks.get(file);
+				} else {
+					soundbank = MidiSystem.getSoundbank(file);
+					loadedSoundbanks.put(file, soundbank);
+				}
+				for (Instrument instrument : soundbank.getInstruments()) {
+					if (instrument.getPatch().getBank() ==
+							config.getBank() &&
+							instrument.getPatch().getProgram() ==
+							config.getProgram()) {
+						synth.loadInstrument(instrument);
+						synth.getChannels()[9].programChange(config.getBank(),config.getProgram());
+					}							
+				}			
+			}
+			
+			drumSynths.put(config,synth);
+			return synth;
+		}
 	}
 
 
@@ -483,7 +638,7 @@ public class TabbyCat {
 
 	void stopPlayback() {
 		isPlaying.set(false);
-
+		
 		// TODO put this back
 		/*
 		 * instrumentCanvases.forEach(soundfontPlayer -> { soundfontPlayer.silence();
@@ -530,7 +685,7 @@ public class TabbyCat {
 		measures.put(0, measure.getAndIncrement());
 		for (int t = 0; t < 1000 * 16; t++) {
 			int t_ = t;
-			Optional<TimeSignatureEvent> tsO = IntStream.range(0, eventCanvas.getRowCount())
+			Optional<TimeSignatureEvent> tsO = IntStream.range(0, 3)
 					.mapToObj(row -> new Point(t_, row)).filter(a -> projectData.getEventData().containsKey(a))
 					.map(projectData.getEventData()::get).filter(a -> a.getType() == ControlEventType.TIME_SIGNATURE)
 					.map(a -> (TimeSignatureEvent) a).findFirst();
@@ -560,23 +715,11 @@ public class TabbyCat {
 		cachedBeatMarkerPositions.addAll(markers);
 	}
 
-	public void backspace() {
-		// TODO fix
-		/*
-		 * Optional<?> removed = selectedCanvas.get().removeSelectedValue();
-		 * 
-		 * removed.filter(a->a instanceof TimeSignatureEvent).ifPresent(object ->{
-		 * updateMeasureLinePositions(); repaintCanvases(); });
-		 * 
-		 * if (!fileHasBeenModified.get()) { fileHasBeenModified.set(true);
-		 * updateWindowTitle(); } selectedCanvas.get().repaint();
-		 */
-	}
+	
 
 	public void handleABCInput(char c) {
 		projectData.handleCharInput(c);
-		// selectedCanvas.get().handleCharInput(c);
-
+	
 	}
 
 	public void cursorToStart() {
@@ -586,19 +729,6 @@ public class TabbyCat {
 		}
 	
 	}
-
-	void updateDataLength() {
-		// int maxT=
-		// allCanvases.stream().flatMapToInt(c->c.data.keySet().stream().mapToInt(i->i)).max().orElseGet(()->0)+16;
-		int maxT = 10;
-
-		navigationBar.dataLength = maxT;
-		navigationBar.repaint();
-		System.out.println(maxT);
-
-	}
-
-	
 
 	
 
@@ -678,1186 +808,10 @@ public class TabbyCat {
 		createGui();
 	}
 
-	abstract class GeneralTabCanvas<A> extends JPanel {
-
-		// protected final TreeMap<Integer,Map<Integer,A>> data = new TreeMap<>();
-		AtomicInteger selectedRow = new AtomicInteger(0);
-		AtomicInteger selectionT0 = new AtomicInteger(-1);
-		AtomicInteger selectionRow0 = new AtomicInteger(-1);
-
-		public abstract int getRowCount();
-
-		public abstract void handleEvents(int t);
-
-		public abstract boolean handleCharInput(char c);
-
-		public abstract String getName();
-
-		GeneralTabCanvas() {
-			this.addMouseListener(new MouseAdapter() {
-				@Override
-				public void mouseClicked(MouseEvent me) {
-					/*
-					 * int t_ = (int)
-					 * Math.floor(me.getPoint().getX()/cellWidth)+projectData.getViewT().get(); int
-					 * row = (int) Math.floor((me.getPoint().y-infoPanelHeight)/rowHeight); if
-					 * (selectedCanvas.get() != null) { selectedCanvas.get().repaint(); }
-					 * selectedCanvas.set(GeneralTabCanvas.this);
-					 * selectedCanvas.get().setSelectedRow(row); if (t_ >= 0) {
-					 * 
-					 * setCursorT(t_);
-					 * 
-					 * if (me.isShiftDown()) { setPlayT(); } else if(me.isControlDown()) {
-					 * setStopT0(); } else if (me.isAltDown()) { adjustRepeatT(); }
-					 * selectedCanvas.get().repaint(); }
-					 */
-				}
-			});
-		}
-
-		public final void setSelectionT0AndRow() {
-			selectionT0.set(projectData.getCursorT().get());
-			selectionRow0.set(getSelectedRow());
-		}
-
-		public final void clearSelectionT0AndRow() {
-			selectionT0.set(-1);
-			selectionRow0.set(-1);
-		}
-
-		public final boolean isSelected() {
-			return false;
-			// TODO fix this!
-			// return this == selectedCanvas.get();
-		}
-
-		private Color selectedLabelTextColor = Color.yellow;
-		private Color unselectedLabelTextColor = Color.white;
-		private Color gridColor = new Color(100, 100, 100);
-		private Color selectedHeaderBackgroundColor = Color.black;
-		private Color unselectedHeaderBackgroundColor = Color.black;
-		private Color evenGridBackground = new Color(20, 20, 20);
-		private Color oddGridBackground = new Color(30, 30, 30);
-		private Color playTColor = new Color(50, 50, 50);
-		private Color selectedMeasureColor = Color.LIGHT_GRAY;
-		private Color unselectedMeasureColor = Color.LIGHT_GRAY;
-		private Color selectedCellColor = Color.red;
-		private Color repeatColor = Color.orange.darker();
-		private Color selectionOuterColor = new Color(0, 150, 100);
-		private Color selectionInnerColor = new Color(0, 75, 50);
-
-		protected final Set<Point> outerSelectionCells = new HashSet<>();
-		protected final Set<Point> innerSelectionCells = new HashSet<>();
-
-		public final void drawGrid(Graphics2D g) {
-			g.setFont(font);
-			outerSelectionCells.clear();
-			innerSelectionCells.clear();
-			g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-			g.setPaint(isSelected() ? selectedHeaderBackgroundColor : unselectedHeaderBackgroundColor);
-			g.fillRect(0, 0, getWidth(), getHeight());
-			g.setStroke(new BasicStroke(1));
-			g.setPaint(isSelected() ? selectedLabelTextColor : unselectedLabelTextColor);
-			g.drawString(getName(), 2, fontMetrics.getMaxAscent());
-			int t0 = projectData.getViewT().get();
-			int tDelta = getWidth() / cellWidth;
-			int t1 = t0 + tDelta;
-
-			{
-				int y = infoPanelHeight;
-
-				for (int row = 0; row < getRowCount(); row++) {
-					g.setPaint(row % 2 == 0 ? evenGridBackground : oddGridBackground);
-					g.fillRect(0, y, getWidth(), rowHeight);
-					y += rowHeight;
-				}
-
-			}
-			int x = 0;
-			Path2D.Double p2d = new Path2D.Double();
-			IntStream.range(0, getRowCount() + 1).map(a -> infoPanelHeight + a * rowHeight).forEach(y -> {
-				p2d.append(new Line2D.Double(0, y, getWidth(), y), false);
-			});
-			for (int t = t0; t < t1; t++) {
-				p2d.append(new Line2D.Double(x, infoPanelHeight, x, infoPanelHeight + rowHeight * getRowCount()),
-						false);
-				x += cellWidth;
-			}
-
-			x = 0;
-			for (int t = t0; t < t1; t++) {
-				if (t == projectData.getPlaybackT().get()) {
-					g.setPaint(playTColor);
-					g.fillRect(x, infoPanelHeight, cellWidth, rowHeight * getRowCount());
-				}
-				g.setPaint(isSelected() ? selectedMeasureColor : unselectedMeasureColor);
-				g.setFont(font.deriveFont(Font.PLAIN));
-
-				if (cachedMeasurePositions.containsKey(t)) {
-					int measure = cachedMeasurePositions.get(t);
-					g.drawString("" + measure, x, infoPanelHeight);
-				}
-				if (cachedBeatMarkerPositions.contains(t)) {
-					g.drawString(".", x, infoPanelHeight);
-				}
-				x += cellWidth;
-			}
-
-			if (isSelected() && selectionT0.get() != -1 && selectionRow0.get() != -1) {
-				// means we're selecting things
-				int sT0 = Math.min(projectData.getCursorT().get(), selectionT0.get());
-				int sT1 = Math.max(projectData.getCursorT().get(), selectionT0.get());
-				int row0 = Math.min(getSelectedRow(), selectionRow0.get());
-				int row1 = Math.max(getSelectedRow(), selectionRow0.get());
-				IntStream.rangeClosed(row0, row1).forEach(row -> {
-					outerSelectionCells.add(new Point(row, sT0));
-					outerSelectionCells.add(new Point(row, sT1));
-				});
-				IntStream.rangeClosed(sT0, sT1).forEach(t -> {
-					outerSelectionCells.add(new Point(row0, t));
-					outerSelectionCells.add(new Point(row1, t));
-				});
-
-				for (int row = 0; row < getRowCount(); row++) {
-					for (int t = t0; t < t1; t++) {
-						Point p = new Point(row, t);
-						if ((row == row0 || row == row1) && (t >= sT0 && t <= sT1)) {
-							outerSelectionCells.add(p);
-						} else if ((t == sT0 || t == sT1) && (row >= row0 && row <= row1)) {
-							outerSelectionCells.add(p);
-						} else if (row > row0 && row < row1 && t > sT0 && t < sT1) {
-							innerSelectionCells.add(p);
-						}
-					}
-				}
-			}
-
-			g.setPaint(gridColor);
-			g.draw(p2d);
-			x = 0;
-
-			for (int t = t0; t < t1; t++) {
-				g.setPaint(gridColor);
-				if (cachedMeasurePositions.containsKey(t)) {
-					g.setStroke(new BasicStroke(2));
-					// g.drawLine(x, y-rowHeight, x, y);
-				} else {
-					g.setStroke(new BasicStroke(1));
-				}
-				int y = rowHeight + infoPanelHeight;
-				for (int row = 0; row < getRowCount(); row++) {
-					if (outerSelectionCells.contains(new Point(row, t))) {
-						g.setPaint(selectionOuterColor);
-						g.fillRect(x + 1, y - rowHeight + 1, cellWidth - 2, rowHeight - 2);
-					}
-					if (innerSelectionCells.contains(new Point(row, t))) {
-						g.setPaint(selectionInnerColor);
-						g.fillRect(x + 1, y - rowHeight + 1, cellWidth - 2, rowHeight - 2);
-					}
-					if (isSelected() && row == getSelectedRow() && t == projectData.getCursorT().get()) {
-						g.setPaint(selectedCellColor);
-						g.setStroke(new BasicStroke(1));
-						g.drawRect(x, y - rowHeight, cellWidth, rowHeight);
-
-					}
-					y += rowHeight;
-				}
-				if (projectData.getPlaybackStartT().get() == t) {
-					g.setStroke(new BasicStroke(1));
-					g.setPaint(repeatColor);
-					g.drawLine(x, infoPanelHeight, x, infoPanelHeight + getRowCount() * rowHeight);
-					g.drawLine(x + 3, infoPanelHeight, x + 3, infoPanelHeight + getRowCount() * rowHeight);
-				}
-
-				if (projectData.getRepeatT().get() == t && t >= 0) {
-					g.setStroke(new BasicStroke(1));
-					g.setPaint(repeatColor);
-					g.drawLine(x, infoPanelHeight, x, infoPanelHeight + getRowCount() * rowHeight);
-					g.drawLine(x - 3, infoPanelHeight, x - 3, infoPanelHeight + getRowCount() * rowHeight);
-				}
-				x += cellWidth;
-			}
-		}
-
-		
-
-		// @SuppressWarnings("unchecked")
-		public abstract Optional<A> getValueAt(int t, int row);
-
-		/*
-		 * { if (this == eventCanvas) { return (Optional<A>)
-		 * Optional.ofNullable(eventData.get(new Point(t,row))); } else { return
-		 * (Optional<A>) Optional.ofNullable(instrumentData.get(new
-		 * InstrumentDataKey(this.getName(),t,row))); } }
-		 */
-		public final Optional<A> getPrecedingValue() {
-			return getValueAt(projectData.getCursorT().get() - 1, getSelectedRow());
-		}
-
-		public final Optional<A> getSelectedValue() {
-			return getValueAt(projectData.getCursorT().get(), getSelectedRow());
-		}
-
-		public abstract void setSelectedValue(int t, int row, A inputVal);
-
-		public final void setSelectedValue(int t, A inputVal) {
-			setSelectedValue(t, getSelectedRow(), inputVal);
-		}
-
-		public final void setSelectedValue(A inputVal) {
-			setSelectedValue(projectData.getCursorT().get(), inputVal);
-			updateDataLength();
-		}
-
-		public final Optional<A> removeSelectedValue() {
-			return removeValueAt(projectData.getCursorT().get(), selectedRow.get());
-
-		}
-
-		public abstract Optional<A> removeValueAt(int t, int row);
-		/*
-		 * Optional<A> toReturn = Optional.ofNullable(data.getOrDefault(t, new
-		 * HashMap<>()).get(row)); data.getOrDefault(t,new HashMap<>()).remove(row);
-		 * return toReturn; }
-		 */
-
-		public final int getSelectedRow() {
-			return selectedRow.get();
-		}
-
-		public final void setSelectedRow(int row) {
-			selectedRow.set(row);
-		}
-
-	}
-
-	class NavigationCanvas extends JPanel implements MouseMotionListener, MouseListener {
-
-		private int dataLength = 16 * 256;
-
-		public NavigationCanvas() {
-			this.addMouseMotionListener(this);
-			this.addMouseListener(this);
-		}
-
-		@Override
-		public Dimension getSize() {
-			return new Dimension(super.getWidth(), 20);
-		}
-
-		@Override
-		public void paint(Graphics g_) {
-			Graphics2D g = (Graphics2D) g_;
-
-			g.setPaint(Color.BLACK);
-			g.fill(getBounds());
-			double t0 = projectData.getViewT().get();
-
-			double tDelta = getWidth() / cellWidth;
-			double t1 = t0 + tDelta;
-			double x0 = t0 / dataLength * getWidth();
-			double x1 = t1 / dataLength * getWidth();
-			g.setPaint(Color.WHITE);
-			g.draw(new Rectangle2D.Double(x0, getBounds().y, x1 - x0 - 1, getHeight() - 1));
-		}
-
-		Integer pressedX = 0;
-
-		@Override
-		public void mousePressed(MouseEvent me) {
-			pressedX = me.getPoint().x;
-		}
-
-		@Override
-		public void mouseDragged(MouseEvent me) {
-			if (pressedX == null) {
-				System.err.println("wtf");
-				return;
-			}
-
-			JPanel navigationBar = (JPanel) me.getSource();
-			double deltaX = pressedX - me.getPoint().x;
-			pressedX = me.getPoint().x;
-
-			int deltaT = (int) (deltaX / navigationBar.getWidth() * dataLength);
-			double t0 = projectData.getViewT().get();
-			double displayedt1 = t0 + navigationBar.getWidth() / cellWidth;
-			projectData.getViewT()
-					.updateAndGet(a -> Math.min(dataLength - (int) (displayedt1 - t0), Math.max(0, a - deltaT)));
-		
-		}
-
-		@Override
-		public void mouseReleased(MouseEvent me) {
-			pressedX = null;
-		}
-
-		@Override
-		public void mouseClicked(MouseEvent e) {
-		}
-
-		@Override
-		public void mouseEntered(MouseEvent e) {
-		}
-
-		@Override
-		public void mouseExited(MouseEvent e) {
-		}
-
-		@Override
-		public void mouseMoved(MouseEvent e) {
-		}
-	}
-
-	class EventCanvas extends GeneralTabCanvas<ControlEvent> {
-
-		public EventCanvas() {
-		}
-
-		@Override
-		public int getRowCount() {
-			return 3;
-		}
-
-		@Override
-		public String getName() {
-			return "Events";
-		}
-
-		@Override
-		public void paint(Graphics g_) {
-			Graphics2D g = (Graphics2D) g_;
-			drawGrid(g);			
-			int t0 = projectData.getViewT().get();
-			int tDelta = getWidth()/cellWidth;
-			int t1 = t0+tDelta;
-			int x = 0;			
-			for (int t_ = t0; t_<t1; t_+=1) {
-				int y = rowHeight+infoPanelHeight; 					
-				g.setFont(font);
-				
-				for (int rowNumber = 0; rowNumber < getRowCount(); rowNumber++) {					
-					g.setPaint(Color.black);
-					
-					ControlEvent event = projectData.getEventData().get(new Point(t_,rowNumber));
-					if (event != null) {
-						switch (event.getType()) {
-						
-						case TIME_SIGNATURE:
-							g.setFont(font.deriveFont(Font.ITALIC));
-							g.setPaint(Color.YELLOW);
-							g.drawString(event.toString(),x+1,y-3);
-							g.setFont(font);
-							break;
-						case PROGRAM_CHANGE:
-							g.setFont(font.deriveFont(Font.ITALIC));
-							g.setPaint(new Color(100,200,255));
-							g.drawString(event.toString(),x+1,y-3);
-							g.setFont(font);
-							break;
-						case TEMPO:
-							g.setFont(font.deriveFont(Font.ITALIC));
-							g.setPaint(new Color(255,200,100));
-							g.drawString(event.toString(),x+1,y-3);
-							g.setFont(font);
-							break;
-						case STICKY_NOTE:
-							g.setFont(font.deriveFont(Font.ITALIC));
-							g.setPaint(Color.WHITE);
-							g.drawString(((StickyNote) event).getText(),x+1,y-3);
-						default:
-							break;					
-						}					
-					}					
-					y+=rowHeight;
-				}				
-				x+=cellWidth;
-			}
-			
-			if (!eventClipboard.isEmpty()) {
-				g.setPaint(Color.pink);
-				int timeOffset = eventClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
-				int rowOffset = eventClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
-				eventClipboard.forEach((point,controlEvent) -> {
-					int t = projectData.getCursorT().get()+point.y-timeOffset;
-					int row = getSelectedRow()+point.x-rowOffset;
-					int x_ = (t-t0)*cellWidth;
-					int y = rowHeight+infoPanelHeight+(rowHeight*row);
-					if (row >= 0) {
-						g.drawString(controlEvent.toString(),x_+1,y-3);
-					}
-				});
-				
-			}
-		}
-
-		@Override
-		public void handleEvents(int t) {
-			for (int row = 0; row < getRowCount(); row++) {
-				Optional<ControlEvent> controlEvent= this.getValueAt(t, row);
-				controlEvent.filter(a->a.getType()==ControlEventType.TEMPO)
-				.ifPresent(event -> {
-					tempo.set(((TempoEvent) event).getTempo());
-				});
-				//TODO put this back
-				/*
-				controlEvent.filter(a->a.getType()==ControlEventType.PROGRAM_CHANGE)
-				.ifPresent(event -> {
-					allCanvases.stream().filter(a->a.getName().equals(((ProgramChange) event).getInstrument()))
-					.findFirst()
-					.ifPresent(canvas -> {
-						try {
-							((TabCanvas) canvas).programChange((ProgramChange) event);
-						} catch (Exception ex) {
-							ex.printStackTrace();
-						}
-					});
-				});
-				*/
-			}			
-		}
-
-		@Override
-		public boolean handleCharInput(char c) {
-			
-			switch (c) {
-			case 'T':
-				addTimeSignature();
-				if (!fileHasBeenModified.get()) {
-					fileHasBeenModified.set(true);
-					updateWindowTitle();
-				}
-				
-				return true;
-			case 'P':
-				addProgramChange();
-				if (!fileHasBeenModified.get()) {
-					fileHasBeenModified.set(true);
-					updateWindowTitle();
-				}
-				
-				return true;
-			case 'S':
-				addTempo();
-				if (!fileHasBeenModified.get()) {
-					fileHasBeenModified.set(true);
-					updateWindowTitle();
-				}
-				
-				return true;
-			case 'N':
-				addStickyNote();
-				if (!fileHasBeenModified.get()) {
-					fileHasBeenModified.set(true);
-					updateWindowTitle();
-					
-				}
-				return true;
-			default:
-				return false;				
-			}			
-			
-		}
-
-		public Optional<TimeSignatureEvent> getTimeSignatureEventForTime(int t_) {
-			return Optional.ofNullable(projectData.getEventData().get(new Point(t_,getSelectedRow())))
-					.filter(a->a.getType() == ControlEventType.TIME_SIGNATURE)
-					.map(a->(TimeSignatureEvent) a);
-			
-		}	
-		
-		@Override
-		public Optional<ControlEvent> getValueAt(int t, int row) {
-			return Optional.ofNullable(projectData.getEventData().get(new Point(t,row)));
-		}
-
-		@Override
-		public void setSelectedValue(int t, int row, ControlEvent inputVal) {
-			projectData.getEventData().put(new Point(t,row), inputVal);
-			
-		}
-
-		@Override
-		public Optional<ControlEvent> removeValueAt(int t, int row) {
-			Optional<ControlEvent> toReturn = Optional.ofNullable(projectData.getEventData().get(new Point(t,row)));
-			projectData.getEventData().remove(new Point(t,row));
-			return toReturn;
-			
-		}
-	}
 	
-	class TabCanvas extends InstrumentCanvas  {		
-		
-		private final String name;		
-		
-
-		private final Map<Integer,String> openNotes = new ConcurrentHashMap<>();
-		private final Map<MidiChannel,Integer> openMidiNums = new ConcurrentHashMap<>();
-		
-		Synthesizer synth = null;
-		//Map<Integer,Synthesizer> synths = new HashMap<>();
-		private File soundfontFile = defaultSoundfontFile;
-		private final AtomicReference<Instrument> loadedInstrument = new AtomicReference<>(null);
-		private final StringCanvasConfig canvasConfig;
-				
-		public TabCanvas(StringCanvasConfig config) {
-			this.canvasConfig = config;
-			
-			this.name = config.getName();			
-			initializeMidi(config.getSoundfontFile().orElse(defaultSoundfontFile),
-					config.getBank(),config.getProgram());
-		}
-
-		public Synthesizer getSynth() {
-			return synth;
-
-		}
-				
-		public void displayInstrumentDialog() {
-			JDialog dialog = new JDialog(frame,String.format("Configuring instruments for [%s]",
-					getName()));
-			dialog.setModalityType(ModalityType.APPLICATION_MODAL);
-			JButton loadSoundfontButton = new JButton("Load Soundbank:");
-			JTextField soundbankTextField = new JTextField(20);
-			
-			JList<Instrument> instrumentList = new JList<>();
-			JScrollPane instrumentScrollPane = new JScrollPane(instrumentList,JScrollPane.VERTICAL_SCROLLBAR_ALWAYS, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-			
-			soundbankTextField.setEditable(false);
-			
-			ListCellRenderer<? super Instrument> originalRenderer = instrumentList.getCellRenderer();
-			
-			instrumentList.setCellRenderer((list,value,index,isSelected,hasFocus) ->{
-				JLabel label = (JLabel) originalRenderer.getListCellRendererComponent(list, value, index, isSelected, hasFocus);				
-				 label.setText(String.format("%s (bank %d, program %d)",
-						value.getName(),
-						value.getPatch().getBank(),
-						value.getPatch().getProgram()));
-				if (value == loadedInstrument.get()) {
-					label.setFont(label.getFont().deriveFont(Font.BOLD | Font.ITALIC));
-				}
-				return label;
-
-			});
-			
-			loadSoundfontButton.addActionListener(ae -> {
-				JFileChooser chooser = new JFileChooser("sf2");
-				chooser.setFileFilter(new FileNameExtensionFilter("Soundfont files (.sf2)","sf2"));
-				if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {					
-					soundfontFile = chooser.getSelectedFile();
-					soundbankTextField.setText(soundfontFile.getName());
-					try {
-						DefaultListModel<Instrument> model = new DefaultListModel<>();
-						Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()).forEach(model::addElement);
-							
-						//model.addAll(Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()));					
-						instrumentList.setModel(model);						
-					} catch (Exception ex) {
-						ex.printStackTrace();
-					}				
-				}
-			});
-			
-			if (soundfontFile != null) {
-				soundbankTextField.setText(soundfontFile.getName());
-				try {
-					DefaultListModel<Instrument> model = new DefaultListModel<>();
-					Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()).forEach(model::addElement);
-					//model.addAll(Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()));					
-					instrumentList.setModel(model);
-				} catch (Exception ex) {
-					ex.printStackTrace();
-				}				
-			} else {
-				soundbankTextField.setText("<default>");
-				try {
-					DefaultListModel<Instrument> model = new DefaultListModel<>();
-					Arrays.asList(synth.getLoadedInstruments()).forEach(model::addElement);
-					//model.addAll(Arrays.asList(synth.getLoadedInstruments()));					
-					instrumentList.setModel(model);
-				} catch (Exception ex) {
-					ex.printStackTrace();
-				}
-			}
-			
-			loadSoundfontButton.addActionListener(ae -> {
-				JFileChooser chooser = new JFileChooser("sf2");
-				if (soundfontFile != null) {
-					chooser.setSelectedFile(soundfontFile);
-					if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
-						soundfontFile = chooser.getSelectedFile();
-						soundbankTextField.setText(soundfontFile.getName());
-						try {
-							DefaultListModel<Instrument> model = new DefaultListModel<>();
-							Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()).forEach(model::addElement);
-//							/model.addAll(Arrays.asList(MidiSystem.getSoundbank(soundfontFile).getInstruments()));					
-							instrumentList.setModel(model);
-						} catch (Exception ex) {
-							ex.printStackTrace();
-						}
-					}
-				}
-			});
-			
-			JButton loadInstrumentButton = new JButton("Load instrument");
-			loadInstrumentButton.addActionListener(ae ->{				
-				Instrument instrument = instrumentList.getSelectedValue();
-				loadedInstrument.set(instrument);
-				initializeMidi(soundfontFile,instrument.getPatch().getBank(),instrument.getPatch().getProgram());
-				repaint();
-			});
-			
-			JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEADING));
-			topPanel.add(loadSoundfontButton);
-			topPanel.add(soundbankTextField);
-			 
-			dialog.getContentPane().add(topPanel,BorderLayout.NORTH);
-			dialog.getContentPane().add(instrumentScrollPane,BorderLayout.CENTER);
-			dialog.getContentPane().add(loadInstrumentButton,BorderLayout.SOUTH);
-			
-			dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
-			dialog.setLocationRelativeTo(null);
-			dialog.pack();
-			dialog.setVisible(true);	
-		}
-
-
-		public void noteOff(int row) {
-			openNotes.remove(row);
-			processTabCanvasEvent(row,null);
-		}
-		
-		public void noteOn(int row,String inputVal) {
-			openNotes.put(row, inputVal);
-			processTabCanvasEvent(row,inputVal);
-		}
-		
-		void processTabCanvasEvent(int row,String inputVal) {
-			MidiChannel channel = synth.getChannels()[row<9?row:row+1]; 			
-			if (inputVal == null) {
-				if (openMidiNums.containsKey(channel)) {
-					channel.noteOff(openMidiNums.get(channel));
-					openMidiNums.remove(channel);
-				}			
-			}
-			
-		}
-		
-		//public double[] getBaseFrequencies() {
-			//return baseFrequencies;
-		//}
-				
-		@Override
-		public Dimension getSize() {				 			
-			return new Dimension(super.getWidth(),infoPanelHeight + rowHeight * getRowCount());
-		}		
-		 
-		@Override
-		public void paint(Graphics g_) {
-			
-			Graphics2D g = (Graphics2D) g_;
-			drawGrid(g);
-			
-			g.setFont(font.deriveFont(Font.ITALIC));
-			g.setPaint(Color.WHITE);
-			g.drawString(String.format("(loaded instrument: '%s')",
-					loadedInstrument.get() == null ? "<null>" : loadedInstrument.get().getName()),					
-					12+fontMetrics.stringWidth(getName()),fontMetrics.getMaxAscent());
-			
-			g.setPaint(Color.BLACK);
-			int t0 = projectData.getViewT().get();
-			int tDelta = getWidth()/cellWidth;
-			int t1 = t0+tDelta;
-			int x = 0;
-			for (int t_ = t0; t_<t1; t_+=1) {
-				int y = rowHeight+infoPanelHeight; 
-				g.setFont(font);
-				for (int row = 0; row< getRowCount(); row++) {
-					g.setPaint(Color.WHITE);
-					Point p = new Point(row,t_);
-					if (outerSelectionCells.contains(p) || innerSelectionCells.contains(p)) {
-						g.setPaint(Color.RED);
-					}
-					String s = projectData.getInstrumentData().getOrDefault(getDataKey(t_,row), "");					
-					g.drawString(s,(int) (x+(cellWidth-fontMetrics.stringWidth(s))*0.5),y-3);
-					y+=rowHeight;
-				}
-				x+=cellWidth;
-			}
-			if (!instrumentClipboard.isEmpty() && isSelected()) {
-				g.setPaint(Color.pink);
-				int timeOffset = instrumentClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
-				int rowOffset = instrumentClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
-				instrumentClipboard.forEach((point,guitarEvent) -> {
-					int t = projectData.getCursorT().get()+point.y-timeOffset;
-					int row = getSelectedRow()+point.x-rowOffset;
-					int x_ = (t-t0)*cellWidth;
-					int y = rowHeight+infoPanelHeight+(rowHeight*row);
-					if (row >= 0) {
-						g.drawString(guitarEvent.toString(),x_+1,y-3);
-					}
-				});
-				
-			}
-		}
-
-		@Override
-		public int getRowCount() {			
-			return canvasConfig.getEdoSteps().length;
-		}
-
-		@Override
-		public String getName() {
-			return name;
-		}
-
-		@Override
-		public void handleEvents(int t) {
-			
-			BiConsumer<Integer,Double> f = (row, freq) -> {
-				MidiChannel channel = synth.getChannels()[row<9?row:row+1];
-				double n = (12 * Math.log(freq/440)/Math.log(2) + 69);
-				int midiNote = (int) Math.round(n);
-				double semitoneOffset = n - midiNote;
-				final double semitoneRange = 2.0;
-				double bendRatio = semitoneOffset/ semitoneRange;
-				int pitchBend = 8192 + (int) (bendRatio*8192);
-				pitchBend = Math.max(0, Math.min(16383, pitchBend));
-				int lsb = pitchBend & 0x7F;
-				int msb = (pitchBend >> 7) & 0x7F;
-				try {
-					ShortMessage pb = new ShortMessage();					
-					pb.setMessage(ShortMessage.PITCH_BEND, row, lsb, msb);
-					synth.getReceiver().send(pb, -1);
-					channel.noteOn(midiNote, 100);
-					openMidiNums.put(channel,midiNote);
-			 	} catch (Exception ex) {
-			 		ex.printStackTrace();
-			 	}
-			};
-			IntStream.range(0, getRowCount()).forEach(row -> {
-				MidiChannel channel = synth.getChannels()[row<9?row:row+1];
-
-				
-				Optional<String> inputValO = this.getValueAt(t, row);
-				if (inputValO.isPresent()) {
-					String inputVal = inputValO.get();
-					double baseFreq = canvasConfig.getBaseFrequency()*Math.pow(2.0, canvasConfig.getEdoSteps()[row]/canvasConfig.getEd2());
-
-					if (inputVal.charAt(0) != '-') {
-						//
-						if (openMidiNums.containsKey(channel)) {
-							channel.noteOff(openMidiNums.get(channel));
-							openMidiNums.remove(channel);
-						}
-						
-						if (inputVal.charAt(0) == 'H') {
-							double freq = baseFreq;
-							freq*=Integer.parseInt(inputVal.substring(1));
-
-							f.accept(row, freq);
-							
-						} else if (canvasConfig.getAdditionalPitchMap().containsKey(inputVal)){
-							
-							double edoSteps = canvasConfig.getAdditionalPitchMap().get(inputVal);
-							double freq = baseFreq*Math.pow(2, canvasConfig.getFretStepSkip()*edoSteps/canvasConfig.getEd2());
-							f.accept(row, freq);
-						} else {
-							
-							double edoSteps = Double.parseDouble(inputVal);
-							
-							double freq = baseFreq*Math.pow(2.0, canvasConfig.getFretStepSkip()*edoSteps/canvasConfig.getEd2());
-							System.out.println(getName()+" "+canvasConfig.getFretStepSkip()*edoSteps/canvasConfig.getEd2());
-							System.out.println(canvasConfig.getFretStepSkip()+" "+edoSteps+" "+canvasConfig.getEd2());
-							
-							f.accept(row, freq);
-						}					
-					}
-				} else  {
-					noteOff(row);
-				}
-			});
-			
-			
-		}
-
-		
-		
-		@Override
-		public void initializeMidi(File file, int bank, int program) {
-			try {
-				this.soundfontFile = file;
-				if (synth == null) {
-					synth = MidiSystem.getSynthesizer();
-				} 
-				if (!synth.isOpen()) {
-					synth.open();
-				}
-				if (this.soundfontFile != null) {
-					Soundbank soundbank = MidiSystem.getSoundbank(soundfontFile);
-					synth.unloadAllInstruments(synth.getDefaultSoundbank());
-					Stream.of(soundbank.getInstruments()).filter(a->
-						a.getPatch().getBank() == bank && a.getPatch().getProgram() == program)
-					.findFirst().ifPresent(instrument -> {
-						loadedInstrument.set(instrument);
-						synth.loadInstrument(instrument);
-					});				
-				}
-				
-				for (int row = 0; row < getRowCount(); row++) {				
-					synth.getChannels()[row<9?row:row+1].programChange(bank,program);
-				}
-				
-			} catch (Exception ex) {
-				ex.printStackTrace();
-			}
-		
-			
-		}
-
-		@Override
-		public void silence() {
-			for (int row = 0; row < getRowCount(); row++) {
-				MidiChannel channel = synth.getChannels()[row<9?row:row+1];
-				channel.allSoundOff();
-			}
-			
-		}
-
-		Pattern harmonicPattern = Pattern.compile("^H(\\d*)$");
-		Pattern integerPattern = Pattern.compile("^(\\d+)$");
-		
-		@Override
-		public boolean handleCharInput(char c) {
-			if (c == '-') {
-				{
-					int t = projectData.getCursorT().get()+1;
-				
-					while (!getValueAt(t,getSelectedRow()).filter(a->a.contentEquals("-")).isEmpty()) {
-						//instrument
-						projectData.getInstrumentData().remove(getDataKey(t,getSelectedRow()));
-						t++;
-						//projectData.getInstrumentData().getOrDefault(new t, Collections.emptyMap()).remove(getSelectedRow());
-						//					t++;
-					}
-				}
-				IntStream.iterate(projectData.getCursorT().get(),i->i-1).takeWhile(i->i>=0)
-				.filter(t->
-					projectData.getInstrumentData().get(getDataKey(t,getSelectedRow())) != null)
-				.filter(t->projectData.getInstrumentData().get(getDataKey(t,getSelectedRow())).charAt(0) != '-')
-				.max().ifPresent(previousEventT0 -> {
-					for (int t = previousEventT0+1; t < projectData.getCursorT().get(); t+=1) {
-						projectData.getInstrumentData().put(getDataKey(t,getSelectedRow()),"-");
-					}
-				});
-				
-								
-				setSelectedValue(String.valueOf(c));
-				if (!fileHasBeenModified.get()) {
-					fileHasBeenModified.set(true);
-					updateWindowTitle();
-				}
-				repaint();
-				return true;
-			}
-			
-			String token0 = getValueAt(projectData.getCursorT().get(),getSelectedRow()).orElse("");
-			String token1 = token0+String.valueOf(c);
-			
-			Predicate<String> isValid = token -> {
-				Matcher harmonicMatcher = harmonicPattern.matcher(token);
-				if (harmonicMatcher.find() && (harmonicMatcher.group(1).trim().isEmpty() || 
-						Integer.parseInt(harmonicMatcher.group(1)) <= canvasConfig.getMaxHarmonic())) {					
-					return true;
-				}
-				Matcher integerMatcher = integerPattern.matcher(token);
-				if (integerMatcher.find() && Integer.parseInt(token) <= canvasConfig.getMaxFrets()) {
-					return true;
-				}
-				if (canvasConfig.getAdditionalPitchMap().keySet().contains(token)) {
-					return true;
-				}
-				return false;				
-			};
-			
-			if (isValid.test(token1)) {
-				setSelectedValue(token1);
-				if (!fileHasBeenModified.get()) {
-					fileHasBeenModified.set(true);
-					updateWindowTitle();
-				}
-				repaint();				
-				return true;
-			} 
-			if (isValid.test(String.valueOf(c))) {
-				setSelectedValue(String.valueOf(c));
-				if (!fileHasBeenModified.get()) {
-					fileHasBeenModified.set(true);
-					updateWindowTitle();
-				}
-				repaint();
-				
-				return true;
-			}
-			
-			
-			return false;
-		}
-
-		@Override
-		public void programChange(ProgramChange event) {
-			
-			Arrays.asList(synth.getAvailableInstruments()).stream().filter(a->
-			a.getPatch().getBank() == event.getBank()&& a.getPatch().getProgram() == event.getProgram())
-			.findFirst().ifPresent(instrument -> {					
-				loadedInstrument.set(instrument);					
-				synth.loadInstrument(instrument);
-				synth.getChannels()[9].programChange(event.getBank(),event.getProgram());
-			
-				for (int row = 0; row < getRowCount(); row++) {
-					MidiChannel channel = synth.getChannels()[row<9?row:row+1];
-					channel.programChange(event.getBank(), event.getProgram());
-				}
-			});
-			
-		}
-
-		
-	}
 	
-	abstract class InstrumentCanvas extends GeneralTabCanvas<String> {
-		public abstract void initializeMidi(File file, int bank, int program);
-		public void programChange(ProgramChange event) {
-			
-		}
-		public void silence() {
-			
-		}
-		public abstract Synthesizer getSynth();
-
-		@Override
-		public final Optional<String> getValueAt(int t, int row) {
-			return Optional.ofNullable(projectData.getInstrumentData().get(getDataKey(t,row)));
-		}
-		
-		public final InstrumentDataKey getDataKey(int t, int row) {
-			return new InstrumentDataKey(this.getName(),t,row);
-		}
-		@Override
-		public final void setSelectedValue(int t, int row, String value) {
-			projectData.getInstrumentData().put(getDataKey(t,row),value);
-		}
-		
-		@Override
-		public final Optional<String> removeValueAt(int t, int row) {
-			Optional<String> toReturn = Optional.ofNullable(projectData.getInstrumentData().get(getDataKey(t,row)));
-			projectData.getInstrumentData().remove(getDataKey(t,row));
-			return toReturn;
-		}
-		
-	}
 	
-	class DrumTabCanvas extends InstrumentCanvas  {
-
-		Synthesizer synth = null;
-				
-		private final AtomicReference<Instrument> loadedInstrument = new AtomicReference<>(null);
-		private final DrumCanvasConfig canvasConfig;
-		
-		public Synthesizer getSynth() {
-			return synth;
-		}
-		
-		public DrumTabCanvas(DrumCanvasConfig canvasConfig) {
-			this.canvasConfig = canvasConfig;
-			initializeMidi(canvasConfig.getSoundfontFile().orElse(defaultSoundfontFile),
-					canvasConfig.getBank(),canvasConfig.getProgram());
-		}
-		
-		@Override
-		public void initializeMidi(File file, int bank, int program) {
-			try {
-				synth = MidiSystem.getSynthesizer();
-				synth.open();
-				
-				Soundbank soundbank = file == null ? synth.getDefaultSoundbank() : MidiSystem.getSoundbank(file);
-				
-				List<Instrument> percussionInstruments = new ArrayList<>();
-				
-				for (Instrument instrument : soundbank.getInstruments()) {
-					boolean bank128 = instrument.getPatch().getBank() == 128;
-					boolean matchesRegex = instrument.getName().toLowerCase().contains("drum") ||
-							instrument.getName().toLowerCase().contains("perc");
-					if (bank128 || matchesRegex) {
-						percussionInstruments.add(instrument);
-					}
-				}	
-				
-				percussionInstruments.stream().filter(a->
-				a.getPatch().getBank() == bank && a.getPatch().getProgram() == program)
-				.findFirst().ifPresent(instrument -> {					
-					loadedInstrument.set(instrument);					
-					synth.loadInstrument(instrument);
-					synth.getChannels()[9].programChange(bank, program);
-				});				
-					
-			} catch (Exception ex) {
-				ex.printStackTrace();
-			}
-		}
-		
-		private final Set<Integer> openNotes = new HashSet<>();
-		
-		@Override
-		public void handleEvents(int t) {
-			MidiChannel channel = synth.getChannels()[9];
-			openNotes.forEach(channel::noteOff);
-			openNotes.clear();
-			projectData.getInstrumentData().keySet().stream().filter(a->a.getTime() == t).map(projectData.getInstrumentData()::get).forEach(s -> {
-				
-			});
-		}
-
-		@Override
-		public void paint(Graphics g_) {
-			
-			Graphics2D g = (Graphics2D) g_;
-			drawGrid(g);
-			
-			g.setFont(font.deriveFont(Font.ITALIC));
-			g.setPaint(Color.WHITE);
-			g.drawString(String.format("(loaded instrument: '%s')",
-					loadedInstrument.get() == null ? "<null>" : loadedInstrument.get().getName()),					
-					12+fontMetrics.stringWidth(getName()),fontMetrics.getMaxAscent());
-						
-			int t0 = projectData.getViewT().get();
-			int tDelta = getWidth()/cellWidth;
-			int t1 = t0+tDelta;
-			int x = 0;			
-			for (int t_ = t0; t_<t1; t_+=1) {
-				int y = rowHeight+infoPanelHeight; 												
-				g.setFont(font);
-				for (int row= 0; row < getRowCount(); row++) {																								
-					g.setPaint(Color.WHITE);
-					int y_ = y;
-					int x_ = x;
-
-					this.getValueAt(t_, row).ifPresent(s->{
-						g.drawString(s,(int) (x_+(cellWidth-fontMetrics.stringWidth(s))*0.5),y_-3);	
-					});
-
-					y+=rowHeight;
-				}				
-				x+=cellWidth;
-			}
-			if (!instrumentClipboard.isEmpty()) {
-				g.setPaint(Color.pink);
-				int timeOffset = instrumentClipboard.keySet().stream().mapToInt(p->p.y).min().getAsInt();
-				int rowOffset = instrumentClipboard.keySet().stream().mapToInt(p->p.x).max().getAsInt();
-				instrumentClipboard.forEach((point,drumEvent) -> {
-					int t = projectData.getCursorT().get()+point.y-timeOffset;
-					int row = getSelectedRow()+point.x-rowOffset;
-					int x_ = (t-t0)*cellWidth;
-					int y = rowHeight+infoPanelHeight+(rowHeight*row);
-					if (row >= 0) {
-						g.drawString(drumEvent,x_+1,y-3);
-					}
-				});
-				
-			}
-		}
-
-		@Override
-		public int getRowCount() {
-			return canvasConfig.getRowTypes().size();
-		}
-
-		@Override
-		public String getName() {
-			return canvasConfig.getName();
-		}
-		@Override
-		public void silence() {
-			MidiChannel channel = synth.getChannels()[9];
-			channel.allSoundOff();
-			
-			
-		}
-
-		@Override
-		public boolean handleCharInput(char c) {
-			
-			Optional<String> tokenO = getValueAt(projectData.getCursorT().get(),getSelectedRow());			
-			Predicate<PercToken> permitted = a->a.getPosition() == canvasConfig.getRowTypes().get(getSelectedRow());
-			if (tokenO.isPresent()) {
-				Optional<PercToken> newTokenO = 
-						canvasConfig.getTokens().stream()
-						.filter(a->a.getToken().equals(tokenO.get()+String.valueOf(c).toUpperCase()))
-						.filter(permitted).findFirst();
-				if (newTokenO.isPresent()) {					
-					setSelectedValue(projectData.getCursorT().get(),newTokenO.get().getToken());
-					repaint();
-					return true;
-				}				
-			}	
-			
-			Optional<PercToken> newTokenO = 
-					canvasConfig.getTokens().stream().filter(a->a.getToken().equals(String.valueOf(c).toUpperCase()))
-					.filter(permitted).findFirst();
-			
-			if (newTokenO.isPresent()) {					
-				setSelectedValue(projectData.getCursorT().get(),newTokenO.get().getToken());
-				repaint();
-				return true;
-			}			
-			return false;
-		}
-
-		@Override
-		public void programChange(ProgramChange event) {
-
-			Arrays.asList(synth.getAvailableInstruments()).stream().filter(a->
-			a.getPatch().getBank() == event.getBank()&& a.getPatch().getProgram() == event.getProgram())
-			.findFirst().ifPresent(instrument -> {					
-				loadedInstrument.set(instrument);					
-				synth.loadInstrument(instrument);
-				synth.getChannels()[9].programChange(event.getBank(),event.getProgram());
-			});
-		}
-	}
 	
-	/*
-	void initializeCanvases() {
-		try {
-			CanvasesConfig config = CanvasesConfig.getXMLInstance();
-			for (CanvasConfig canvasConfig : config.getCanvases()) {
-				switch (canvasConfig.getType()) {
-				case DRUM: {
-					DrumCanvasConfig drumConfig = (DrumCanvasConfig) canvasConfig;					
-					DrumTabCanvas canvas = new DrumTabCanvas(drumConfig);
-					allCanvases.add(canvas);
-					instrumentCanvases.add(canvas);
-					break;
-				}
-				case STRING:{
-					StringCanvasConfig stringConfig = (StringCanvasConfig) canvasConfig;
-					TabCanvas canvas = new TabCanvas(stringConfig);
-					allCanvases.add(canvas);
-					instrumentCanvases.add(canvas);
-					break;
-				}
-				default:
-					break;
-				
-				}
-			}
-		} catch (Exception ex) {
-			ex.printStackTrace();
-		}
-		
-	}
-	
-	*/
 	void createGui() {
 		
 		cardLayout = new CardLayout();
@@ -1887,207 +841,7 @@ public class TabbyCat {
 		frame.setVisible(true);
 	}
 	
-	
-	void addProgramChange() {
-		JDialog dialog = new JDialog(frame,String.format("Adding program change(t = %d)",projectData.getCursorT().get()));
-		dialog.setModalityType(ModalityType.APPLICATION_MODAL);
-		JLabel canvasLabel = new JLabel("Canvas");
-		DefaultComboBoxModel<String> canvasModel = new DefaultComboBoxModel<>();
-		Map<String,InstrumentCanvas> nameToPlayerMap = new HashMap<>();
-		/*
-		allCanvases.stream().filter(a->a!=eventCanvas).forEach(a-> {
-			nameToPlayerMap.put(a.getName(),(InstrumentCanvas) a);
-			canvasModel.addElement(a.getName());	
-		});
-		*/
-		JComboBox<String> canvasComboBox = new JComboBox<>(canvasModel);
-		
-		JList<Instrument> instrumentList = new JList<>();
-		
-		Runnable instrumentComboBoxF = () -> {
-			Instrument[] instruments = 
-					nameToPlayerMap.get(canvasComboBox.getSelectedItem().toString()).getSynth().getAvailableInstruments();
-			//Instrument[] instruments = ((SoundfontPlayer) nameToPlayerMap.get(canvasComboBox.getSelectedItem().toString()))
-					//.getSynth().getAvailableInstruments();
-			DefaultListModel<Instrument> model = new DefaultListModel<>();
-			//model.addAll(Arrays.asList(instruments));
-			Arrays.asList(instruments).forEach(model::addElement);
-			instrumentList.setModel(model);
-		};
-		instrumentComboBoxF.run();
-		canvasComboBox.addActionListener(ae -> instrumentComboBoxF.run());
-		
-		JScrollPane instrumentScrollPane = new JScrollPane(instrumentList,JScrollPane.VERTICAL_SCROLLBAR_ALWAYS,JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-		
-		Runnable r = () -> {
-			if (instrumentList.getSelectedValue() == null) {
-				return;
-			}
-			ProgramChange programChange = new ProgramChange(
-					nameToPlayerMap.get(canvasComboBox.getSelectedItem()).getName(),
-					instrumentList.getSelectedValue().getPatch().getBank(),
-					instrumentList.getSelectedValue().getPatch().getProgram());
-			eventCanvas.setSelectedValue(programChange);
-			eventCanvas.repaint();
-			dialog.dispose();
-		};
-		Arrays.asList(canvasComboBox,instrumentList).forEach(component -> {
-			component.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
-			.put(KeyStroke.getKeyStroke("ENTER"),"enterPressed");
-			component.getActionMap().put("enterPressed",rToA(r));
-		});
-		
-		Box topPanel = Box.createHorizontalBox();
-		topPanel.add(canvasLabel);
-		topPanel.add(canvasComboBox);
-		topPanel.add(Box.createHorizontalGlue());
-		dialog.add(topPanel,BorderLayout.NORTH);
-		dialog.add(instrumentScrollPane,BorderLayout.CENTER);
-		dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
-		dialog.setLocationRelativeTo(null);
-		
-		dialog.pack();
-		dialog.setVisible(true);
 
-		
-	}
-	void addTempo() {
-		JDialog dialog = new JDialog(frame,String.format("Adding tempo (t = %d)",projectData.getCursorT().get()));
-		dialog.setModalityType(ModalityType.APPLICATION_MODAL);
-		
-		JLabel tempoLabel = new JLabel("Tempo");
-		JSpinner tempoSpinner = new JSpinner(new SpinnerNumberModel(120,1,1000,1));
-		
-		Runnable r = () -> {
-			TempoEvent tempo = new TempoEvent((int) tempoSpinner.getValue());
-			eventCanvas.setSelectedValue(tempo);
-			eventCanvas.repaint();
-			dialog.dispose();
-		};
-		tempoSpinner.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
-		.put(KeyStroke.getKeyStroke("ENTER"),"enterPressed");
-		tempoSpinner.getActionMap().put("enterPressed",rToA(r));
-		
-		dialog.getContentPane().add(tempoLabel,BorderLayout.WEST);
-		dialog.getContentPane().add(tempoSpinner,BorderLayout.CENTER);
-		dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
-		dialog.setLocationRelativeTo(null);
-		
-		dialog.pack();
-		dialog.setVisible(true);
-	}
-	
-	void addTimeSignature() {
-		//TODO fix this
-		/*
-		if (selectedCanvas.get() != eventCanvas) {
-			return;
-		}
-		JDialog dialog = new JDialog(frame,String.format("Adding time signature (t = %d)",projectData.getCursorT().get()));
-		dialog.setModalityType(ModalityType.APPLICATION_MODAL);
-		
-		JPanel outerBox = new JPanel(new GridLayout(2,0));
-		JLabel numeratorLabel = new JLabel("Numer");
-		JLabel denominatorLabel = new JLabel("Denom");
-		JSpinner numeratorSpinner = new JSpinner(new SpinnerNumberModel(4,1,Integer.MAX_VALUE,1));
-		JComboBox<TimeSignatureDenominator> denominatorComboBox = new JComboBox<>(TimeSignatureDenominator.values());
-		denominatorComboBox.setEditable(false);
-		Runnable r = () -> {
-			TimeSignatureEvent event = new TimeSignatureEvent((int) numeratorSpinner.getValue(),(TimeSignatureDenominator) denominatorComboBox.getSelectedItem());
-			eventCanvas.setSelectedValue(event);
-			updateMeasureLinePositions();
-			repaintCanvases();
-			dialog.dispose();
-		};
-		((JSpinner.DefaultEditor) numeratorSpinner.getEditor()).getTextField().addActionListener(ae -> r.run());
-		denominatorComboBox.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
-		.put(KeyStroke.getKeyStroke("ENTER"),"enterPressed");
-		denominatorComboBox.getActionMap().put("enterPressed",rToA(r));
-		numeratorSpinner.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
-		.put(KeyStroke.getKeyStroke("ENTER"),"enterPressed");
-		numeratorSpinner.getActionMap().put("enterPressed",rToA(r));
-		
-		denominatorComboBox.setSelectedItem(TimeSignatureDenominator._4);
-		outerBox.add(numeratorLabel);
-		outerBox.add(numeratorSpinner);		
-		outerBox.add(denominatorLabel);
-		outerBox.add(denominatorComboBox);				
-		
-		dialog.getContentPane().add(outerBox,BorderLayout.CENTER);		
-		
-		dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
-		dialog.setLocation(MouseInfo.getPointerInfo().getLocation());
-		dialog.pack();
-		dialog.setVisible(true);
-	*/
-	}
-	
-	void addStickyNote() {
-		JDialog dialog = new JDialog(frame,String.format("Adding sticky note (t = %d)",projectData.getCursorT().get()));
-		dialog.setModalityType(ModalityType.APPLICATION_MODAL);		
-		
-		JPanel topPanel = new JPanel();		
-		JLabel textLabel = new JLabel("Text");
-
-		
-		JTextField textField = new JTextField("New note");
-		
-		eventCanvas.getSelectedValue().filter(a->a instanceof StickyNote).map(a->(StickyNote)a).ifPresent(stickyNote -> {
-			textField.setText(stickyNote.getText());
-		});
-		AtomicReference<Color> color = new AtomicReference<>(Color.BLACK);
-		
-		JButton colorButton = new JButton("Color") {
-			@Override
-			public void paint(Graphics g_) {
-				Graphics2D g = (Graphics2D) g_;
-				Color c = color.get() == null ? Color.white :color.get();
-				g.setPaint(c);
-				g.fillRect(0,0,getWidth(),getHeight());
-				float[] hsb = new float[3];
-				Color.RGBtoHSB(c.getRed(), c.getGreen(), c.getBlue(), hsb);
-				g.setPaint(hsb[2]>0.5?Color.BLACK:Color.WHITE);
-				g.drawString("Color",2,getHeight()-1);				
-			}
-		};
-
-		Runnable chooseColor = () -> {
-			Color c = JColorChooser.showDialog(frame, "Choose color",color.get());
-			if (c != null) {
-				color.set(c);
-			}
-			colorButton.repaint();
-		};
-		colorButton.addActionListener(ae ->{
-			chooseColor.run();
-		});
-		colorButton.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
-		.put(KeyStroke.getKeyStroke("ENTER"),"enterPressed");
-		colorButton.getActionMap().put("enterPressed",rToA(chooseColor));
-		
-		topPanel.add(textLabel,BorderLayout.WEST);
-		topPanel.add(textField,BorderLayout.CENTER);
-		//topPanel.add(colorButton,BorderLayout.EAST);
-				
-		dialog.getContentPane().add(topPanel,BorderLayout.CENTER);
-		
-		Runnable r = () -> {
-		
-			StickyNote event = new StickyNote(textField.getText().trim());
-			eventCanvas.setSelectedValue(event);
-			eventCanvas.repaint();
-			dialog.dispose();
-		};
-		textField.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
-		.put(KeyStroke.getKeyStroke("ENTER"),"enterPressed");
-		textField.getActionMap().put("enterPressed",rToA(r));		
-		dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
-		dialog.setLocation(MouseInfo.getPointerInfo().getLocation());
-		dialog.pack();
-		dialog.setVisible(true);
-
-	}
-	
 	void loadXML(File file) throws Exception {
 		
 
@@ -2460,8 +1214,9 @@ public class TabbyCat {
 			SAVE, LOAD, TEMPO, TAPPER, SETTINGS;  
 		}
 		
-		SequencePosition sequencePosition = SequencePosition.TAPPER; 
+		SequencePosition sequencePosition = SequencePosition.TAPPER;		
 		boolean isInGrid = false;
+		
 		public MainInterfacePanel() {
 			this.setFocusTraversalKeysEnabled(false);
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
@@ -2524,6 +1279,9 @@ public class TabbyCat {
 			inputMap.put(k_Space,"space");
 			actionMap.put("space", rToA(TabbyCat.this::togglePlayStatus));
 			
+			inputMap.put(k_Backspace,"backspace");
+			actionMap.put("backspace", rToA(this::backspace));
+			
 			for (char c = 'A'; c <= 'Z'; c++) {
 				char c_ = c;
 				KeyStroke k = KeyStroke.getKeyStroke(""+c);
@@ -2536,6 +1294,24 @@ public class TabbyCat {
 				inputMap.put(k,""+c);
 				actionMap.put(""+c, rToA(()->handleCharInput(c_)));
 			}
+		}
+		
+		void backspace() {
+			Pair<Integer,Integer> pair = 
+					getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
+			int canvasNumber = pair.a;
+			int row = pair.b;
+			if (canvasNumber == 0) {
+				projectData.getEventData().remove(
+						new Point(projectData.getCursorT().get(),row));
+			} else {
+				String name = projectData.getCanvases().getCanvases().get(canvasNumber-1).getName();
+				InstrumentDataKey dataKey = 
+						new InstrumentDataKey(name,
+								projectData.getCursorT().get(),row);
+				projectData.getInstrumentData().remove(dataKey);							
+			}
+			repaint();
 		}
 		
 		void handleCharInput(char c) {
@@ -2952,27 +1728,6 @@ public class TabbyCat {
 		
 		public void advanceCursorToFinalEvent() {
 
-			AtomicReference<GeneralTabCanvas<?>> canvasToSelect = new AtomicReference<>(eventCanvas);
-			int maxT = Math.max(projectData.getEventData().keySet().stream().mapToInt(a -> a.x).max().orElse(0),
-					projectData.getInstrumentData().keySet().stream().mapToInt(a -> a.getTime()).max().orElse(0));
-			setCursorT(maxT);
-			projectData.getEventData().keySet().stream().filter(a -> a.x == maxT).findFirst().map(a -> a.y)
-					.ifPresent(row -> {
-						canvasToSelect.get().setSelectedRow(row);
-					});
-			projectData.getInstrumentData().keySet().stream().filter(a -> a.getTime() == maxT).findFirst()
-					.ifPresent(dataKey -> {
-						// TODO put this back
-						/*
-						 * instrumentCanvases.stream().filter(a->a.getName().equals(dataKey.
-						 * getInstrumentName())).findFirst() .ifPresent(canvas -> {
-						 * canvasToSelect.set(canvas); canvas.setSelectedRow(dataKey.getRow()); });
-						 */
-					});
-
-			while (projectData.getCursorT().get() > getMaxVisibleTime() - scrollTimeMargin) {
-				projectData.getViewT().getAndIncrement();
-			}
 		}
 		
 

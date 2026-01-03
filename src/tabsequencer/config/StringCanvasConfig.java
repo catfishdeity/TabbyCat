@@ -4,6 +4,7 @@ import java.io.File;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
@@ -147,6 +148,29 @@ public class StringCanvasConfig extends CanvasConfig {
 		}
 		return false;
 		
+	}
+
+	public Optional<Double> getFrequency(String token, int row) {
+		double edoStep = edoSteps[row];
+		double freq = baseFrequency*Math.pow(2, edoStep/ed2);
+		Matcher intMatcher = integerPattern.matcher(token);
+		Matcher harmonicMatcher = harmonicPattern.matcher(token);
+		if (intMatcher.find()) {
+			freq*=Math.pow(2,Integer.parseInt(token)*fretStepSkip/ed2);
+			return Optional.of(freq);
+		} else if (harmonicMatcher.find()) {
+			freq*=Integer.parseInt(harmonicMatcher.group(1) == null?"1":
+				harmonicMatcher.group(1));
+			return Optional.of(freq);
+		} else if (additionalPitchMap.containsKey(token)) {
+			freq*=Math.pow(2,additionalPitchMap.get(token)/ed2);
+			return Optional.of(freq);
+		}
+		
+		else {
+			return Optional.empty();
+		}
+
 	}
 	
 }
