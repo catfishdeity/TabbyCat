@@ -26,9 +26,7 @@ public class ProjectFileData {
 	private final Map<Point, ControlEvent> eventData;
 	private final Map<InstrumentDataKey, String> instrumentData;
 	private final AtomicInteger cursorT, repeatT, playbackStartT, selectedRow, selectedCanvas, viewT,tempo,playbackT,initialTempo;
-	
-	private final AtomicInteger lassoRow0 = new AtomicInteger(-1);
-	private final AtomicInteger lassoT0 = new AtomicInteger(-1);
+		
 	private String songName = "Untitled";
 	private String artistName = "Unknown Artist";
 
@@ -77,18 +75,6 @@ public class ProjectFileData {
 
 	public void setArtistName(String artistName) {
 		this.artistName = artistName;
-	}
-
-
-
-	public AtomicInteger getLassoRow0() {
-		return lassoRow0;
-	}
-
-
-
-	public AtomicInteger getLassoT0() {
-		return lassoT0;
 	}
 
 
