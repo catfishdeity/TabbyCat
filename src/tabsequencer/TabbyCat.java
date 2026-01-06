@@ -179,6 +179,7 @@ public class TabbyCat {
 	KeyStroke k_Enter = KeyStroke.getKeyStroke("ENTER");
 	KeyStroke k_Backspace = KeyStroke.getKeyStroke("BACK_SPACE");
 	KeyStroke k_Comma = KeyStroke.getKeyStroke("COMMA");
+	KeyStroke k_Hyphen= KeyStroke.getKeyStroke('-');
 	
 	KeyStroke k_CtrlL = KeyStroke.getKeyStroke("ctrl L");
 	KeyStroke k_CtrlC = KeyStroke.getKeyStroke("ctrl C");
@@ -531,7 +532,16 @@ public class TabbyCat {
 		ProjectFileData projectFileData = ProjectFileData.fromXMLElement(doc.getDocumentElement());
 		this.projectData = projectFileData;				
 		updateMeasureLinePositions();
-		
+		for (CanvasConfig canvasConfig : projectData.getCanvases().getCanvases()) {
+			if (canvasConfig instanceof StringCanvasConfig ) {
+				StringCanvasConfig a = (StringCanvasConfig) canvasConfig;
+				for (int row = 0; row < a.getRowCount(); row++) {
+					getSynth(a,row);
+				}
+			} else {
+				getSynth((DrumCanvasConfig)canvasConfig);
+			}
+		}
 		
 	}
 
@@ -965,6 +975,9 @@ public class TabbyCat {
 			inputMap.put(k_Backspace,"backspace");
 			actionMap.put("backspace", rToA(this::backspace));
 			
+			inputMap.put(k_Hyphen,"hyphen");
+			actionMap.put("hyphen", rToA(this::hyphen));
+			
 			for (char c = 'A'; c <= 'Z'; c++) {
 				char c_ = c;
 				KeyStroke k = KeyStroke.getKeyStroke(""+c);
@@ -977,6 +990,37 @@ public class TabbyCat {
 				inputMap.put(k,""+c);
 				actionMap.put(""+c, rToA(()->handleCharInput(c_)));
 			}
+		}
+		
+		void hyphen() {
+			if (isInGrid) {
+				Pair<Integer,Integer> pair = 
+						getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
+				int canvasNum = pair.a;
+				int relativeRow = pair.b;
+				if (canvasNum == 0) {
+					return;
+				}
+				CanvasConfig canvasConfig = projectData.getCanvases().getCanvases().get(canvasNum-1);
+				if (canvasConfig instanceof DrumCanvasConfig) {
+					return;
+				}
+				for (int t = projectData.getCursorT().get()+1; 
+						projectData.getInstrumentData().get(new InstrumentDataKey(canvasConfig.getName(),t,relativeRow)) != null &&
+						projectData.getInstrumentData().get(new InstrumentDataKey(canvasConfig.getName(),t,relativeRow)).charAt(0) == '-' ;
+						t++) {
+					InstrumentDataKey dk = new InstrumentDataKey(canvasConfig.getName(),t,relativeRow);
+					projectData.getInstrumentData().remove(dk);
+				}
+				for (int t = projectData.getCursorT().get();
+						projectData.getInstrumentData().get(new InstrumentDataKey(canvasConfig.getName(),t,relativeRow)) == null;
+						t--) {
+					InstrumentDataKey dk = new InstrumentDataKey(canvasConfig.getName(),t,relativeRow);
+					projectData.getInstrumentData().put(dk,"-");
+				}
+				repaint();
+			}
+			
 		}
 		
 		void ctrlS() {
@@ -1193,15 +1237,15 @@ public class TabbyCat {
 			}
 		}
 		
-		double getCellWidth() {
-			return gridFontMetrics.stringWidth("88");
+		double getCellWidth() {			
+			return gridFontMetrics.stringWidth("88.");
 		}
 		
 		public final int getMaxVisibleTime() {
 			int t0 = projectData.getViewT().get();
 			
 			double tDelta = (getWidth() / getCellWidth());
-			double t1 = t0 + tDelta;
+			double t1 = t0 + tDelta;		
 			return (int) t1;
 		}
 		
@@ -1295,6 +1339,7 @@ public class TabbyCat {
 				break;
 			case RIGHT:
 				projectData.getCursorT().incrementAndGet();
+				System.out.printf("%s %s\n", projectData.getCursorT().get(), getMaxVisibleTime());
 				if (projectData.getCursorT().get() >= getMaxVisibleTime()) {
 					projectData.getViewT().getAndIncrement();
 				}
@@ -1582,10 +1627,10 @@ public class TabbyCat {
 			Map<String,Point2D> stringPositions = new HashMap<>();
 			List<Rectangle2D> measurePanels = new ArrayList<>();
 			Path2D.Double eventP2D = new Path2D.Double();
-			int cellWidth = gridMetrics.stringWidth("88")+3;
+			int cellWidth = (int) getCellWidth();
 			int rowHeight = gridMetrics.getMaxAscent()+4;
 			int t0 = projectData.getViewT().get();
-			int tDelta = getWidth()/cellWidth;
+			int tDelta = (int) (getWidth()/cellWidth);
 			int t1 = t0+tDelta;
 			int x = 0;
 			for (int t = t0; t <= t1; t++) {
@@ -2208,6 +2253,8 @@ public class TabbyCat {
 			note.append(c);
 			repaint();
 		}
+		
+
 		
 		@Override
 		public void paint(Graphics g_) {
