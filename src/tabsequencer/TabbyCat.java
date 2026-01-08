@@ -902,7 +902,7 @@ public class TabbyCat {
 		boolean isInGrid = false;
 		AtomicBoolean isSelectionMode = new AtomicBoolean(false);
 		
-		final Map<Point, String> instrumentClipboard = new HashMap<>();
+		final Map<InstrumentDataKey, String> instrumentClipboard = new HashMap<>();
 		final Map<Point, ControlEvent> eventClipboard = new HashMap<>();
 		
 		int lassoCanvasNumber = -1;
@@ -1095,7 +1095,7 @@ public class TabbyCat {
 				String token1 = token0+c;
 				if (canvasConfig.willAccept(token1,row)) {
 					projectData.getInstrumentData().put(dataKey, token1);
-					System.out.println(projectData.getInstrumentData());
+					
 					repaint();
 				}
 			}
@@ -1121,32 +1121,131 @@ public class TabbyCat {
 		}
 		
 		void ctrlC() {
+			
 			instrumentClipboard.clear();
 			eventClipboard.clear();
+			
 			if (isSelectionMode.get()) {
+				Pair<Integer,Integer> p = getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
 				
+				int tMin = Math.min(projectData.getCursorT().get(),lassoT0);
+				int tMax = Math.max(projectData.getCursorT().get(),lassoT0);
+				int rowMin = Math.min(lassoRow0, p.b);
+				int rowMax = Math.max(lassoRow0, p.b);
+				if (lassoCanvasNumber == 0) {
+					
+					Map<Point,ControlEvent> copied = new HashMap<>();
+					int minT = Integer.MAX_VALUE;
+					int minR = Integer.MAX_VALUE;
+					for (int t = tMin; t <= tMax; t++) {
+						for (int r = rowMin; r <=rowMax; r++) {
+							Point point = new Point(t,r);
+							if (projectData.getEventData().containsKey(point)) {
+								minT = t<minT?t:minT;
+								minR = r<minR?r:minR;
+								copied.put(point,projectData.getEventData().get(point));
+							}
+						}
+					}
+					Map<Point,ControlEvent> normalized= new HashMap<>();
+					for (Point point : copied.keySet()) {
+						normalized.put(new Point(point.x-minT,point.y-minR), 
+								copied.get(point));
+					}
+					eventClipboard.putAll(normalized);
+					
+				} else {
+					CanvasConfig canvas= projectData.getCanvases().getCanvases().get(p.a-1);
+										
+					Map<InstrumentDataKey,String> copied = new HashMap<>();
+					int minT = Integer.MAX_VALUE;
+					int minR = Integer.MAX_VALUE;
+					for (int t = tMin; t <= tMax; t++) {
+						for (int r = rowMin; r <=rowMax; r++) {
+							InstrumentDataKey dk = new InstrumentDataKey(canvas.getName(),t,r);
+							if (projectData.getInstrumentData().containsKey(dk)) {
+								minT = t<minT?t:minT;
+								minR = r<minR?r:minR;
+								copied.put(dk,projectData.getInstrumentData().get(dk));
+							}
+						}
+					}
+					Map<InstrumentDataKey,String> normalized= new HashMap<>();
+					for (InstrumentDataKey dk : copied.keySet()) {
+						normalized.put(new InstrumentDataKey(dk.getInstrumentName(),dk.getTime()-minT,dk.getRow()-minR), 
+								copied.get(dk));												
+					}
+					instrumentClipboard.putAll(normalized);
+				}
 			}
 			
 			isSelectionMode.set(false);
+			repaint();
 		}
 		
 		void ctrlX() {
-			instrumentClipboard.clear();
-			eventClipboard.clear();
-
-			if (isSelectionMode.get()) {
-				
+			ctrlC();
+			
+			Pair<Integer,Integer> p = getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
+			
+			int tMin = Math.min(projectData.getCursorT().get(),lassoT0);
+			int tMax = Math.max(projectData.getCursorT().get(),lassoT0);
+			int rowMin = Math.min(lassoRow0, p.b);
+			int rowMax = Math.max(lassoRow0, p.b);
+			for (int t = tMin; t <= tMax; t++) {
+				for (int r = rowMin; r <=rowMax; r++) {
+					if (lassoCanvasNumber == 0) {
+						projectData.getEventData().remove(new Point(t,r));
+					} else {
+						CanvasConfig canvas= projectData.getCanvases().getCanvases().get(p.a-1);
+						InstrumentDataKey dk = new InstrumentDataKey(canvas.getName(),t,r);
+						
+						projectData.getInstrumentData().remove(dk);									
+					}
+				}
 			}
-
+			
+		
 			isSelectionMode.set(false);
+			repaint();
 		}
 		
 		void ctrlV() {
-			
+			Pair<Integer,Integer> p = getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
+			if (!isSelectionMode.get() && lassoCanvasNumber >= 0) {
+				if (p.a == 0) {
+					//then draw events if there are any
+					if (!eventClipboard.isEmpty()) {
+						
+					}
+				} else {
+					if (!instrumentClipboard.isEmpty()) {
+						CanvasConfig canvasConfig = projectData.getCanvases().getCanvases().get(p.a-1);
+						CanvasConfig lassoCanvasConfig = projectData.getCanvases().getCanvases().get(lassoCanvasNumber-1);
+						if (lassoCanvasConfig.getType() == canvasConfig.getType()) {
+							int yOffset = instrumentClipboard.keySet().stream().mapToInt(a->a.getRow()).max().getAsInt();
+
+							for (Entry<InstrumentDataKey, String> entry : instrumentClipboard.entrySet()) {
+
+								int t = entry.getKey().getTime()+projectData.getCursorT().get();
+								int r = entry.getKey().getRow()+p.b-yOffset;
+								
+								InstrumentDataKey dk = new InstrumentDataKey(entry.getKey().getInstrumentName(),t,r);
+								System.out.println(dk+" "+entry.getValue());
+								if (canvasConfig.willAccept(entry.getValue(), r)) {
+									projectData.getInstrumentData().put(dk, entry.getValue());
+								}
+
+							};								
+						}
+
+					}
+				}
+			}
+			repaint();
 		}
 		
 		public void toggleSelectionMode() {
-			
 			
 			isSelectionMode.set(!isSelectionMode.get());
 			if (isSelectionMode.get()) {
@@ -1154,6 +1253,7 @@ public class TabbyCat {
 				this.lassoCanvasNumber = p.a;
 				this.lassoT0 = projectData.getCursorT().get();
 				this.lassoRow0 = p.b;
+				//System.out.println("row0 is "+lassoRow0);
 
 				
 			} else {
@@ -1339,7 +1439,7 @@ public class TabbyCat {
 				break;
 			case RIGHT:
 				projectData.getCursorT().incrementAndGet();
-				System.out.printf("%s %s\n", projectData.getCursorT().get(), getMaxVisibleTime());
+				
 				if (projectData.getCursorT().get() >= getMaxVisibleTime()) {
 					projectData.getViewT().getAndIncrement();
 				}
@@ -1861,10 +1961,10 @@ public class TabbyCat {
 								String val = projectData.getInstrumentData().get(dataKey);
 								g.drawString(val,x+(rowHeight-gridMetrics.stringWidth(val))/2,
 										(int) (bounds.getMinY()+(row+1)*rowHeight-2));
-							}	
+							}
 						}
-					}
-					
+					}					
+						
 					g.setStroke(new BasicStroke(2));
 					g.setPaint(Color.getHSBColor(0.85f, 0.25f, 1f));
 					
@@ -1872,13 +1972,42 @@ public class TabbyCat {
 						g.draw(new Line2D.Double(
 								new Point2D.Double(x,bounds.getMinY()),
 								new Point2D.Double(x,bounds.getMaxY())));
-					}
-					
+					}				
 					x += cellWidth;
 				}
-				canvasNumber++;
-			}
+
 			
+			
+				if (!isSelectionMode.get() && lassoCanvasNumber >= 0) {
+					if (canvasNumber == 0) {
+						//then draw events if there are any
+						if (!eventClipboard.isEmpty()) {
+							
+						}
+					} else {
+						if (canvasNumber == canvasGridNum && !instrumentClipboard.isEmpty()) {
+							CanvasConfig canvasConfig = projectData.getCanvases().getCanvases().get(canvasNumber-1);
+							CanvasConfig lassoCanvasConfig = projectData.getCanvases().getCanvases().get(lassoCanvasNumber-1);
+							if (lassoCanvasConfig.getType() == canvasConfig.getType()) {
+								int yOffset = instrumentClipboard.keySet().stream().mapToInt(a->a.getRow()).max().getAsInt();
+								g.setPaint(Color.RED);
+								for (Entry<InstrumentDataKey, String> entry : instrumentClipboard.entrySet()) {
+									int x0 = (projectData.getCursorT().get()-projectData.getViewT().get())*cellWidth+(int)bounds.getMinX();					
+									int y0 = (relativeRow+1-yOffset)*rowHeight+(int)bounds.getMinY();
+									int x_ = entry.getKey().getTime()*cellWidth+x0;
+									int y_ = y0+entry.getKey().getRow()*rowHeight;
+									if (y_ > bounds.getMinY()) {
+										g.drawString(entry.getValue(),x_+(cellWidth-gridFontMetrics.stringWidth(entry.getValue()))/2,y_);
+									}
+								};								
+							}
+
+						}
+					}
+				}
+				canvasNumber++;
+
+			}		
 			
 			for (Rectangle2D measurePanel : measurePanels) {
 				x = 0;
