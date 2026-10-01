@@ -27,6 +27,13 @@
 		<additionalPitch token="D" steps="3.5"/>
 		<additionalPitch token="E" steps="4.5"/>
 	</stringCanvas>
+	<stringCanvas name="KiteUkelele" soundfontFile="sf2/Plok_Soundfont__V1.02a_.sf2" bank="0" program="5" maxFrets="20" ed2="41" fretStepSkip="2" baseFrequency="65.406">
+	<string steps="93"/>
+	<string steps="80"/>
+	<string steps="67"/>
+	<string steps="54"/>
+
+	</stringCanvas>
 	<stringCanvas name="KiteAcoustic" soundfontFile="sf2/SM64SF V2.sf2" bank="0" program="25" maxFrets="41" ed2="41" fretStepSkip="2" baseFrequency="65.406">
 		<string steps="78"/>	
 		<string steps="65"/>
