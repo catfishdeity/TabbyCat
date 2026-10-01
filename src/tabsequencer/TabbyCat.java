@@ -232,11 +232,15 @@ public class TabbyCat {
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
-			projectData.getPlaybackT().getAndUpdate(
+			int tBeforeIncrement = projectData.getPlaybackT().getAndUpdate(
 					i -> i + 1 == projectData.getRepeatT().get() ? projectData.getPlaybackStartT().get() : i + 1);
 			long bpm = projectData.getTempo().get();
 			long sixteenthNanos = Duration.ofMinutes(1).dividedBy(bpm).dividedBy(4).toNanos();
-			long nextIntendedNanos = intendedFireTimeNanos + sixteenthNanos;
+			double shuffleRatio = projectData.getShuffle().get() / 100.0;
+			long thisSixteenthNanos = tBeforeIncrement % 2 == 0
+					? (long)(sixteenthNanos * (1.0 + shuffleRatio))
+					: (long)(sixteenthNanos * (1.0 - shuffleRatio));
+			long nextIntendedNanos = intendedFireTimeNanos + thisSixteenthNanos;
 			// Hybrid: park until 2ms before target, then spin for sub-ms precision
 			long sleepNanos = nextIntendedNanos - System.nanoTime() - 2_000_000L;
 			if (sleepNanos > 0) {
@@ -921,7 +925,7 @@ public class TabbyCat {
 	class MainInterfacePanel extends JPanel {
 		
 		enum SequencePosition {
-			SAVE, LOAD, TEMPO, TAPPER, SETTINGS, HELP;
+			SAVE, LOAD, TEMPO, SHUFFLE, TAPPER, SETTINGS, HELP;
 		}
 		
 		SequencePosition sequencePosition = SequencePosition.TAPPER;		
@@ -1655,11 +1659,13 @@ public class TabbyCat {
 					if (projectData.getCursorT().get() == 0) {
 						projectData.getInitialTempo().set(projectData.getTempo().get());
 					}
+				} else if (sequencePosition == SequencePosition.SHUFFLE) {
+					projectData.getShuffle().updateAndGet(i -> Math.min(90, i + 1));
 				}
 			}
 			repaint();
 		}
-		
+
 		void down() {
 			if (isInGrid) {
 				handleGridMovement(CardinalDirection.DOWN);
@@ -1669,6 +1675,8 @@ public class TabbyCat {
 					if (projectData.getCursorT().get() == 0) {
 						projectData.getInitialTempo().set(projectData.getTempo().get());
 					}
+				} else if (sequencePosition == SequencePosition.SHUFFLE) {
+					projectData.getShuffle().updateAndGet(i -> Math.max(-90, i - 1));
 				}
 			}
 			repaint();
@@ -1797,7 +1805,15 @@ public class TabbyCat {
 			g.fill(tempoBounds);
 			iterateHue.run();
 			g.drawString(tempoString,(int) tempoBounds.getMinX(),(int) tempoBounds.getMaxY());
-			at.translate(tempoBounds.getWidth()+5,0);			
+			at.translate(tempoBounds.getWidth()+5,0);
+			String shuffleString = String.format("SHUFFLE %+d%%", projectData.getShuffle().get());
+			Rectangle2D shuffleBounds = topFontMetrics.getStringBounds(shuffleString, g);
+			shuffleBounds = at.createTransformedShape(shuffleBounds).getBounds2D();
+			g.setPaint(!isInGrid && sequencePosition==SequencePosition.SHUFFLE?Color.GRAY:Color.BLACK);
+			g.fill(shuffleBounds);
+			iterateHue.run();
+			g.drawString(shuffleString,(int) shuffleBounds.getMinX(),(int) shuffleBounds.getMaxY());
+			at.translate(shuffleBounds.getWidth()+5,0);
 			String tapString = "TAP!";
 			Rectangle2D tapBounds = topFontMetrics.getStringBounds(tapString, g);
 			tapBounds = at.createTransformedShape(tapBounds).getBounds2D();
