@@ -39,7 +39,7 @@ public class ProjectFileData {
 		this.playbackStartT = new AtomicInteger(0);
 		this.selectedRow = new AtomicInteger(0);
 		this.selectedCanvas = new AtomicInteger(0);
-		this.viewT = new AtomicInteger(-4);
+		this.viewT = new AtomicInteger(0);
 		this.tempo = new AtomicInteger(120);
 		this.initialTempo = new AtomicInteger(120);
 		this.playbackT = new AtomicInteger(0);
