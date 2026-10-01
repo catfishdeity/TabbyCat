@@ -1405,7 +1405,7 @@ public class TabbyCat {
 					&& projectData.getViewT().get() > 0) {
 				projectData.getViewT().getAndDecrement();
 			}
-			
+			repaint();
 		}
 
 		public void playTToNextMeasure() {
@@ -1418,7 +1418,7 @@ public class TabbyCat {
 			while (projectData.getPlaybackT().get() > getMaxVisibleTime() - scrollTimeMargin) {
 				projectData.getViewT().getAndIncrement();
 			}
-			
+			repaint();
 		}
 		
 		enum CardinalDirection {
