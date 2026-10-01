@@ -47,10 +47,12 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -147,7 +149,12 @@ public class TabbyCat {
 	final TreeMap<Integer, Integer> cachedMeasurePositions = new TreeMap<>();
 	final HashSet<Integer> cachedBeatMarkerPositions = new HashSet<>();
 
-	final ScheduledExecutorService playbackDaemon = Executors.newSingleThreadScheduledExecutor();
+	final ExecutorService playbackDaemon = Executors.newSingleThreadExecutor(r -> {
+		Thread t = new Thread(r, "playback-daemon");
+		t.setPriority(Thread.MAX_PRIORITY);
+		t.setDaemon(true);
+		return t;
+	});
 	final ScheduledExecutorService midiDaemon = Executors.newSingleThreadScheduledExecutor();
 
 	final JFrame frame = new JFrame("TabbyCat");
@@ -204,37 +211,39 @@ public class TabbyCat {
 
 	
 
-	void playbackDaemonFunction() {
-		// DO NOT CALL THIS ON MASTER THREAD
+	void playbackDaemonFunction(long intendedFireTimeNanos) {
+		// DO NOT CALL THIS ON MASTER THREAD — runs as a persistent loop
 		while (true) {
 			if (!isPlaying.get()) {
+				LockSupport.parkNanos(1_000_000L); // 1ms nap — don't spin 100%
 				continue;
-			} else {				
-				try {
-					if (projectData.getPlaybackT().get() == 0) {
-						projectData.getTempo().set(projectData.getInitialTempo().get());
-					}
-					Future<?> midiFuture = midiDaemon.submit(() -> {
-						handleProgramEvents();
-					});
-					try { midiFuture.get(); } catch (Exception e) { e.printStackTrace(); }
-
-					SwingUtilities.invokeAndWait(() -> {
-						mainInterfacePanel.repaint();
-					});
-
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
-
-				projectData.getPlaybackT().getAndUpdate(
-						i -> i + 1 == projectData.getRepeatT().get() ? projectData.getPlaybackStartT().get() : i + 1);
-				long bpm = projectData.getTempo().get();
-				Duration sixteenth = Duration.ofMinutes(1).dividedBy(bpm).dividedBy(4);
-				playbackDaemon.schedule(() -> playbackDaemonFunction(), sixteenth.toMillis(), TimeUnit.MILLISECONDS);
-
-				return;
 			}
+			// Reset if stale — e.g. after a stop/resume
+			if (System.nanoTime() - intendedFireTimeNanos > 2_000_000_000L) {
+				intendedFireTimeNanos = System.nanoTime();
+			}
+			try {
+				if (projectData.getPlaybackT().get() == 0) {
+					projectData.getTempo().set(projectData.getInitialTempo().get());
+				}
+				Future<?> midiFuture = midiDaemon.submit(() -> handleProgramEvents());
+				try { midiFuture.get(); } catch (Exception e) { e.printStackTrace(); }
+				SwingUtilities.invokeLater(() -> mainInterfacePanel.repaint());
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+			projectData.getPlaybackT().getAndUpdate(
+					i -> i + 1 == projectData.getRepeatT().get() ? projectData.getPlaybackStartT().get() : i + 1);
+			long bpm = projectData.getTempo().get();
+			long sixteenthNanos = Duration.ofMinutes(1).dividedBy(bpm).dividedBy(4).toNanos();
+			long nextIntendedNanos = intendedFireTimeNanos + sixteenthNanos;
+			// Hybrid: park until 2ms before target, then spin for sub-ms precision
+			long sleepNanos = nextIntendedNanos - System.nanoTime() - 2_000_000L;
+			if (sleepNanos > 0) {
+				LockSupport.parkNanos(sleepNanos);
+			}
+			while (System.nanoTime() < nextIntendedNanos) { /* spin */ }
+			intendedFireTimeNanos = nextIntendedNanos;
 		}
 	}	
 	
@@ -441,7 +450,7 @@ public class TabbyCat {
 	void startPlayback() {
 		if (!playbackDaemonIsStarted.get()) {
 			playbackDaemonIsStarted.set(true);
-			playbackDaemon.schedule(() -> playbackDaemonFunction(), 0, TimeUnit.SECONDS);
+			playbackDaemon.submit(() -> playbackDaemonFunction(System.nanoTime()));
 		}
 		isPlaying.set(true);
 	}
