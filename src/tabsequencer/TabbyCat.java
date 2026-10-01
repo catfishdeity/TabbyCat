@@ -17,6 +17,8 @@ import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
 import java.awt.geom.Line2D;
@@ -923,6 +925,11 @@ public class TabbyCat {
 		int lassoCanvasNumber = -1;
 		int lassoT0 = -1;
 		int lassoRow0 = -1;
+
+		List<Shape> lastCanvasGrids = new ArrayList<>();
+		int lastVerticalTranslate = 0;
+		int lastCellWidth = 1;
+		int lastRowHeight = 1;
 		
 		public MainInterfacePanel() {
 			this.setFocusTraversalKeysEnabled(false);
@@ -1009,6 +1016,56 @@ public class TabbyCat {
 				inputMap.put(k,""+c);
 				actionMap.put(""+c, rToA(()->handleCharInput(c_)));
 			}
+
+			this.addMouseListener(new MouseAdapter() {
+				@Override
+				public void mouseClicked(MouseEvent e) {
+					double mx = e.getX();
+					double my = e.getY() - lastVerticalTranslate;
+					/*
+					//System.out.println(mx+" "+my);
+					//System.out.println(lastCanvasGrids);
+					for (int i = 0; i < lastCanvasGrids.size(); i++) {
+						Rectangle2D bounds = lastCanvasGrids.get(i).getBounds2D();
+						if (bounds.contains(mx,my)) {
+							System.out.println(bounds);
+							//System.out.print(projectData.getCanvases().getCanvases().get(i-1));
+							//lastCanvasGrids.get(i)	
+						}
+						
+					}
+					*/	
+					
+					for (int i = 0; i < lastCanvasGrids.size(); i++) {
+						Rectangle2D bounds = lastCanvasGrids.get(i).getBounds2D();
+						if (bounds.contains(mx, my)) {
+							int clickedT = projectData.getViewT().get()
+									+ (int) ((mx - bounds.getMinX()) / lastCellWidth);
+							int clickedRelativeRow = (int) ((my - bounds.getMinY()) / lastRowHeight);
+
+							int maxRelRow = (i == 0)
+									? numEventRows
+									: projectData.getCanvases().getCanvases().get(i - 1).getRowCount();
+							if (clickedRelativeRow < 0 || clickedRelativeRow >= maxRelRow) break;
+
+							int absoluteRow = (i == 0)
+									? clickedRelativeRow
+									: rowBreaks.get(i - 1) + 1 + clickedRelativeRow;
+
+							if ((e.getModifiersEx() & java.awt.event.InputEvent.META_DOWN_MASK) != 0) {
+								projectData.getPlaybackT().set(Math.max(0, clickedT));
+							} else {
+								projectData.getCursorT().set(Math.max(0, clickedT));
+								projectData.getSelectedRow().set(absoluteRow);
+								isInGrid = true;
+							}
+							repaint();
+							break;
+						}
+					}
+					
+				}
+			});
 		}
 		
 		void hyphen() {
@@ -1838,9 +1895,11 @@ public class TabbyCat {
 				at.translate(0,measuresPanel.getHeight());
 				
 			}
-			
-			
-			
+
+			lastCanvasGrids = new ArrayList<>(canvasGrids);
+			lastCellWidth = cellWidth;
+			lastRowHeight = rowHeight;
+
 			Rectangle2D selectedGridBounds = new Rectangle2D.Double(0,0,1,1);
 			Rectangle2D selectionRectangle = new Rectangle2D.Double(0,0,1,1);
 			Pair<Integer,Integer> pair = 
@@ -1859,7 +1918,8 @@ public class TabbyCat {
 				
 			}
 						
-			g.translate(0,Math.min(0,getBounds().getMaxY()-selectionRectangle.getMaxY()-rowHeight*2));
+			lastVerticalTranslate = (int) Math.min(0, getBounds().getMaxY()-selectionRectangle.getMaxY()-rowHeight*2);
+			g.translate(0, lastVerticalTranslate);
 			stringPositions.entrySet().forEach(entry -> {
 				g.drawString(entry.getKey(),(int) entry.getValue().getX(),(int) entry.getValue().getY());
 			});
