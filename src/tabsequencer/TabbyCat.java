@@ -460,7 +460,11 @@ public class TabbyCat {
 	}
 
 	void stopPlayback() {
-		isPlaying.set(false);		
+		isPlaying.set(false);
+		activeDrumNotes.forEach((channel, note) -> channel.noteOff(note));
+		activeDrumNotes.clear();
+		activeStringNotes.forEach((channel, note) -> channel.noteOff(note));
+		activeStringNotes.clear();
 	}
 	
 	public void updateMeasureLinePositions() {
