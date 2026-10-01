@@ -7,6 +7,8 @@ import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -28,6 +30,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -43,6 +46,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -109,9 +113,12 @@ public class TabbyCat {
 	static final String timeSignatureEventCardKey = "TIME SIGNATURE";
 	static final String tempoEventCardKey = "TEMPO EVENT";
 	static final String notesEventCardKey = "NEW NOTE";;
+	static final String helpCardKey = "HELP";
 	
-	static final double MIDDLE_C = 220.0 * Math.pow(2d, 3.0 / 12.0);	
+	static final double MIDDLE_C = 220.0 * Math.pow(2d, 3.0 / 12.0);
 	static final int numEventRows = 3;
+	static final int UI_SCALE = 2;
+	static final boolean IS_MAC = System.getProperty("os.name").toLowerCase().contains("mac");
 	
 	private ProjectFileData projectData = null;
 	private CanvasesConfig canvasesConfig = CanvasesConfig.getXMLInstance();
@@ -132,7 +139,7 @@ public class TabbyCat {
 	final AtomicReference<File> activeFile = new AtomicReference<>(null);
 	final AtomicBoolean fileHasBeenModified = new AtomicBoolean(false);
 		
-	final AtomicBoolean isPlaying = new AtomicBoolean(false);	
+	final AtomicBoolean isPlaying = new AtomicBoolean(false);
 	final AtomicBoolean playbackDaemonIsStarted = new AtomicBoolean(false);
 
 	final TreeMap<Integer, Integer> cachedMeasurePositions = new TreeMap<>();
@@ -151,6 +158,7 @@ public class TabbyCat {
 	private LoadProjectPanel loadProjectPanel;
 	private NewProjectPanel newProjectPanel;
 	private MainInterfacePanel mainInterfacePanel;
+	private HelpPanel helpPanel;
 	private SaveProjectPanel saveProjectPanel;
 	
 	private CardLayout cardLayout;
@@ -173,8 +181,10 @@ public class TabbyCat {
 	
 	KeyStroke k_CtrlUp = KeyStroke.getKeyStroke("ctrl UP");
 	KeyStroke k_CtrlDown = KeyStroke.getKeyStroke("ctrl DOWN");
-	KeyStroke k_CtrlLeft = KeyStroke.getKeyStroke("ctrl LEFT");
-	KeyStroke k_CtrlRight = KeyStroke.getKeyStroke("ctrl RIGHT");
+	KeyStroke k_CtrlLeft = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " LEFT");
+	KeyStroke k_CtrlRight = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " RIGHT");
+	KeyStroke k_PlayPrevMeasure = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl alt") + " shift LEFT");
+	KeyStroke k_PlayNextMeasure = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl alt") + " shift RIGHT");
 	
 	KeyStroke k_Enter = KeyStroke.getKeyStroke("ENTER");
 	KeyStroke k_Backspace = KeyStroke.getKeyStroke("BACK_SPACE");
@@ -202,9 +212,10 @@ public class TabbyCat {
 					if (projectData.getPlaybackT().get() == 0) {
 						projectData.getTempo().set(projectData.getInitialTempo().get());
 					}
-					midiDaemon.execute(() -> {
+					Future<?> midiFuture = midiDaemon.submit(() -> {
 						handleProgramEvents();
 					});
+					try { midiFuture.get(); } catch (Exception e) { e.printStackTrace(); }
 
 					SwingUtilities.invokeAndWait(() -> {
 						mainInterfacePanel.repaint();
@@ -335,7 +346,7 @@ public class TabbyCat {
 			Synthesizer synth = MidiSystem.getSynthesizer();
 			if (!synth.isOpen()) {
 				synth.open();
-			}			
+			}
 			if (config.getSoundfontFile().isPresent()) {
 				File file = config.getSoundfontFile().get();
 				Soundbank soundbank;
@@ -352,7 +363,7 @@ public class TabbyCat {
 							config.getProgram()) {
 						synth.loadInstrument(instrument);
 						for (int i : new int[] {0,1,2,3,4,5,6,7,8,10,11,12,13,14,15}) {
-							synth.getChannels()[i].programChange(config.getBank(),config.getProgram());							
+							synth.getChannels()[i].programChange(config.getBank(),config.getProgram());
 						}
 					}
 				}
@@ -369,7 +380,7 @@ public class TabbyCat {
 			Synthesizer synth = MidiSystem.getSynthesizer();
 			if (!synth.isOpen()) {
 				synth.open();
-			}			
+			}
 			if (config.getSoundfontFile().isPresent()) {
 				File file = config.getSoundfontFile().get();
 				Soundbank soundbank;
@@ -386,10 +397,10 @@ public class TabbyCat {
 							config.getProgram()) {
 						synth.loadInstrument(instrument);
 						synth.getChannels()[9].programChange(config.getBank(),config.getProgram());
-					}							
-				}			
+					}
+				}
 			}
-			
+
 			drumSynths.put(config,synth);
 			return synth;
 		}
@@ -508,11 +519,15 @@ public class TabbyCat {
 		cardPanel.add(tempoEventPanel,tempoEventCardKey);
 		notesEventPanel = new NotesEventPanel();
 		cardPanel.add(notesEventPanel,notesEventCardKey);
+		helpPanel = new HelpPanel();
+		cardPanel.add(helpPanel,helpCardKey);
 		frame.getContentPane().add(cardPanel,BorderLayout.CENTER);
 		frame.pack();
+		Rectangle screenBounds = GraphicsEnvironment.getLocalGraphicsEnvironment()
+				.getDefaultScreenDevice().getDefaultConfiguration().getBounds();
 		frame.setSize(new Dimension(
-				(int) Math.min(1000, Toolkit.getDefaultToolkit().getScreenSize().getWidth()),
-				(int) Math.min(500, Toolkit.getDefaultToolkit().getScreenSize().getHeight())));
+				(int) Math.min(1000, screenBounds.getWidth()),
+				(int) Math.min(500, screenBounds.getHeight())));
 				
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		frame.setVisible(true);
@@ -895,7 +910,7 @@ public class TabbyCat {
 	class MainInterfacePanel extends JPanel {
 		
 		enum SequencePosition {
-			SAVE, LOAD, TEMPO, TAPPER, SETTINGS;  
+			SAVE, LOAD, TEMPO, TAPPER, SETTINGS, HELP;
 		}
 		
 		SequencePosition sequencePosition = SequencePosition.TAPPER;		
@@ -949,6 +964,10 @@ public class TabbyCat {
 			actionMap.put("ctrlshiftleft", rToA(this::ctrlShiftLeft));
 			inputMap.put(k_CtrlShiftRight,"ctrlshiftright");
 			actionMap.put("ctrlshiftright", rToA(this::ctrlShiftRight));
+			inputMap.put(k_PlayPrevMeasure,"playprevmeasure");
+			actionMap.put("playprevmeasure", rToA(this::playTToPreviousMeasure));
+			inputMap.put(k_PlayNextMeasure,"playnextmeasure");
+			actionMap.put("playnextmeasure", rToA(this::playTToNextMeasure));
 			
 			inputMap.put(k_CtrlL,"ctrll");
 			actionMap.put("ctrll", rToA(this::ctrlL));
@@ -1288,7 +1307,7 @@ public class TabbyCat {
 				handleGridMovement(CardinalDirection.CTRL_RIGHT);
 			}
 		}
-		
+
 		void shiftUp() {
 			if (isInGrid) {
 				handleGridMovement(CardinalDirection.SHIFT_UP);
@@ -1355,7 +1374,8 @@ public class TabbyCat {
 				Entry<Integer, Integer> last = headMap.lastEntry();
 				projectData.getCursorT().set(last.getKey());
 			}
-			while (projectData.getCursorT().get() < projectData.getViewT().get() + scrollTimeMargin) {
+			while (projectData.getCursorT().get() < projectData.getViewT().get() + scrollTimeMargin
+					&& projectData.getViewT().get() > 0) {
 				projectData.getViewT().getAndDecrement();
 			}
 
@@ -1381,7 +1401,8 @@ public class TabbyCat {
 				Entry<Integer, Integer> last = headMap.lastEntry();
 				projectData.getPlaybackT().set(last.getKey());
 			}
-			while (projectData.getPlaybackT().get() < projectData.getViewT().get() + scrollTimeMargin) {
+			while (projectData.getPlaybackT().get() < projectData.getViewT().get() + scrollTimeMargin
+					&& projectData.getViewT().get() > 0) {
 				projectData.getViewT().getAndDecrement();
 			}
 			
@@ -1432,7 +1453,8 @@ public class TabbyCat {
 				break;
 			case LEFT:
 				projectData.getCursorT().updateAndGet(i->Math.max(0, i-1));
-				if (projectData.getCursorT().get() < projectData.getViewT().get() + scrollTimeMargin) {
+				if (projectData.getCursorT().get() < projectData.getViewT().get() + scrollTimeMargin
+						&& projectData.getViewT().get() > 0) {
 					projectData.getViewT().getAndDecrement();
 				}
 				repaint();
@@ -1481,7 +1503,7 @@ public class TabbyCat {
 				break;
 			case CTRL_SHIFT_LEFT:
 				projectData.getCursorT().set(0);
-				projectData.getViewT().set(-4);
+				projectData.getViewT().set(0);
 				repaint();
 				break;
 			case CTRL_SHIFT_RIGHT:
@@ -1527,6 +1549,9 @@ public class TabbyCat {
 						/1000000000d;
 						
 				projectData.getTempo().set((int) (60.0/secs));
+				if (projectData.getCursorT().get() == 0) {
+					projectData.getInitialTempo().set(projectData.getTempo().get());
+				}
 				//projectData.getTempo().set(110);//(int) bpm);
 				
 			}
@@ -1541,6 +1566,9 @@ public class TabbyCat {
 				break;
 			case SETTINGS:
 				break;
+			case HELP:
+				cardLayout.show(cardPanel, helpCardKey);
+				break;
 			case TAPPER:
 				handleTapperTap();
 				break;
@@ -1552,15 +1580,18 @@ public class TabbyCat {
 			repaint();
 		}
 				 
-		void up() {			
+		void up() {
 			if (isInGrid) {
 				handleGridMovement(CardinalDirection.UP);
 			} else {
 				if (sequencePosition == SequencePosition.TEMPO) {
 					projectData.getTempo().incrementAndGet();
+					if (projectData.getCursorT().get() == 0) {
+						projectData.getInitialTempo().set(projectData.getTempo().get());
+					}
 				}
 			}
-			repaint();			
+			repaint();
 		}
 		
 		void down() {
@@ -1569,6 +1600,9 @@ public class TabbyCat {
 			} else {
 				if (sequencePosition == SequencePosition.TEMPO) {
 					projectData.getTempo().decrementAndGet();
+					if (projectData.getCursorT().get() == 0) {
+						projectData.getInitialTempo().set(projectData.getTempo().get());
+					}
 				}
 			}
 			repaint();
@@ -1617,7 +1651,8 @@ public class TabbyCat {
 
 		public void decrementPlayT() {
 			projectData.getPlaybackT().getAndUpdate(i -> Math.max(0, i - 1));
-			while (projectData.getPlaybackT().get() < projectData.getViewT().get() + scrollTimeMargin) {
+			while (projectData.getPlaybackT().get() < projectData.getViewT().get() + scrollTimeMargin
+					&& projectData.getViewT().get() > 0) {
 				projectData.getViewT().getAndDecrement();
 			}
 			
@@ -1652,7 +1687,8 @@ public class TabbyCat {
 			calculateRowBreaks();
 			Graphics2D g = (Graphics2D) g_;
 			g.setTransform(new AffineTransform());
-			Font gridFont = new Font("Monospaced",Font.BOLD,12);			
+			g.scale(UI_SCALE, UI_SCALE);
+			Font gridFont = new Font("Monospaced",Font.BOLD,12);
 			FontMetrics gridMetrics = g.getFontMetrics(gridFont);
 			Font topFont = new Font("SansSerif",Font.PLAIN,14);			
 			FontMetrics topFontMetrics = g.getFontMetrics(topFont);			
@@ -1711,7 +1747,14 @@ public class TabbyCat {
 			g.fill(settingsBounds);
 			iterateHue.run();
 			g.drawString(settingsString,(int) settingsBounds.getMinX(),(int) settingsBounds.getMaxY());
-			//at.translate(settingsBounds.getWidth()+5,0);
+			at.translate(settingsBounds.getWidth()+5,0);
+			String helpString = "HELP";
+			Rectangle2D helpBounds = topFontMetrics.getStringBounds(helpString, g);
+			helpBounds = at.createTransformedShape(helpBounds).getBounds2D();
+			g.setPaint(!isInGrid && sequencePosition==SequencePosition.HELP?Color.GRAY:Color.BLACK);
+			g.fill(helpBounds);
+			iterateHue.run();
+			g.drawString(helpString,(int) helpBounds.getMinX(),(int) helpBounds.getMaxY());
 			
 			at.setToIdentity();
 			
@@ -1826,7 +1869,7 @@ public class TabbyCat {
 				int playbackX = (projectData.getPlaybackT().get()-projectData.getViewT().get())*cellWidth;
 				g.setPaint(new Color(110,110,50));
 				g.fill(new Rectangle2D.Double(playbackX, bounds.getMinY(), cellWidth, bounds.getHeight()));
-				
+
 			}
 			if (isSelectionMode.get() && lassoCanvasNumber == canvasGridNum) {
 				
@@ -2393,7 +2436,111 @@ public class TabbyCat {
 			g.setPaint(Color.WHITE);
 			g.setFont(textFont);
 			g.drawString(note.toString(), 2, textFontMetrics.getMaxAscent());
-			
+
+		}
+	}
+
+	class HelpPanel extends JPanel {
+
+		private static final Color HEADER_COLOR = new Color(255, 220, 80);
+		private static final Color ENTRY_COLOR  = new Color(200, 200, 200);
+		private static final Color KEY_COLOR    = new Color(120, 200, 255);
+
+		private static final List<Pair<String,Color>> LINES;
+		static {
+			List<Pair<String,Color>> l = new ArrayList<>();
+			Runnable h = () -> {}; // placeholder — we build below
+			l.add(new Pair<>("MENU BAR  (press , from grid to enter menu)", HEADER_COLOR));
+			l.add(new Pair<>("  Left / Right          Navigate menu items", ENTRY_COLOR));
+			l.add(new Pair<>("  Up / Down             Adjust tempo (when TEMPO selected)", ENTRY_COLOR));
+			l.add(new Pair<>("  Enter                 Activate selected item", ENTRY_COLOR));
+			l.add(new Pair<>("  Space                 Play / Pause", ENTRY_COLOR));
+			l.add(new Pair<>("  ,                     Return to grid", ENTRY_COLOR));
+			l.add(new Pair<>("", ENTRY_COLOR));
+			l.add(new Pair<>("GRID  (press , from menu to enter grid)", HEADER_COLOR));
+			l.add(new Pair<>("  Arrow keys            Move cursor", ENTRY_COLOR));
+			l.add(new Pair<>("  Shift Left / Right    Jump to prev / next measure", ENTRY_COLOR));
+			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " Left / Right          Move playback position", ENTRY_COLOR));
+			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl+Alt") + " Shift Left / Right  Jump playback by measure", ENTRY_COLOR));
+			l.add(new Pair<>("  Ctrl Shift Left/Right Jump to start / end of sequence", ENTRY_COLOR));
+			l.add(new Pair<>("  Ctrl Shift Up / Down  Jump to first / last row", ENTRY_COLOR));
+			l.add(new Pair<>("  A-Z, 0-9              Enter note at cursor", ENTRY_COLOR));
+			l.add(new Pair<>("  - (hyphen)            Insert slide (string grids)", ENTRY_COLOR));
+			l.add(new Pair<>("  Backspace             Delete note at cursor", ENTRY_COLOR));
+			l.add(new Pair<>("  Ctrl R                Set / clear repeat point", ENTRY_COLOR));
+			l.add(new Pair<>("  Space                 Play / Pause", ENTRY_COLOR));
+			l.add(new Pair<>("  ,                     Exit to menu bar", ENTRY_COLOR));
+			l.add(new Pair<>("", ENTRY_COLOR));
+			l.add(new Pair<>("SELECTION  (Ctrl+L to begin)", HEADER_COLOR));
+			l.add(new Pair<>("  Ctrl L                Start / end selection", ENTRY_COLOR));
+			l.add(new Pair<>("  Ctrl C                Copy selection", ENTRY_COLOR));
+			l.add(new Pair<>("  Ctrl X                Cut selection", ENTRY_COLOR));
+			l.add(new Pair<>("  Ctrl V                Paste", ENTRY_COLOR));
+			l.add(new Pair<>("", ENTRY_COLOR));
+			l.add(new Pair<>("NEW PROJECT SCREEN", HEADER_COLOR));
+			l.add(new Pair<>("  Up / Down             Navigate fields", ENTRY_COLOR));
+			l.add(new Pair<>("  A-Z                   Type song / artist name", ENTRY_COLOR));
+			l.add(new Pair<>("  0-9                   Set canvas quantity", ENTRY_COLOR));
+			l.add(new Pair<>("  Backspace             Delete character", ENTRY_COLOR));
+			l.add(new Pair<>("  Enter                 Confirm (on last row)", ENTRY_COLOR));
+			LINES = Collections.unmodifiableList(l);
+		}
+
+		private int scrollOffset = 0;
+
+		public HelpPanel() {
+			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap actionMap = this.getActionMap();
+			inputMap.put(k_Up,    "up");
+			actionMap.put("up",   rToA(this::up));
+			inputMap.put(k_Down,  "down");
+			actionMap.put("down", rToA(this::down));
+			inputMap.put(k_Enter, "back");
+			actionMap.put("back", rToA(this::back));
+			inputMap.put(k_Comma, "back2");
+			actionMap.put("back2",rToA(this::back));
+		}
+
+		void up()   { if (scrollOffset > 0) { scrollOffset--; repaint(); } }
+		void down() { if (scrollOffset < LINES.size()-1) { scrollOffset++; repaint(); } }
+		void back() {
+			scrollOffset = 0;
+			cardLayout.show(cardPanel, mainInterfaceCardKey);
+		}
+
+		@Override
+		public void paint(Graphics g_) {
+			Graphics2D g = (Graphics2D) g_;
+			g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+			g.setFont(textFont);
+			g.setPaint(Color.BLACK);
+			g.fill(getBounds());
+
+			int lineH = textFontMetrics.getMaxAscent();
+			int y = lineH;
+
+			// title bar
+			g.setPaint(new Color(60, 60, 60));
+			g.fillRect(0, 0, getWidth(), lineH + 4);
+			g.setPaint(Color.WHITE);
+			String title = "TABBYCAT  \u2014  HELP     (Enter or , to close)";
+			g.drawString(title, 4, lineH);
+			y += lineH + 4;
+
+			for (int i = scrollOffset; i < LINES.size(); i++) {
+				if (y + lineH > getHeight()) break;
+				Pair<String,Color> line = LINES.get(i);
+				g.setPaint(line.b);
+				g.drawString(line.a, 4, y);
+				y += lineH;
+			}
+
+			// scroll hint
+			if (scrollOffset > 0 || scrollOffset + (getHeight() / lineH) < LINES.size()) {
+				g.setPaint(new Color(100, 100, 100));
+				String hint = "\u2191\u2193 scroll";
+				g.drawString(hint, getWidth() - textFontMetrics.stringWidth(hint) - 4, lineH);
+			}
 		}
 	}
 }
