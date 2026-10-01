@@ -25,7 +25,7 @@ public class ProjectFileData {
 	private final CanvasesConfig canvases;
 	private final Map<Point, ControlEvent> eventData;
 	private final Map<InstrumentDataKey, String> instrumentData;
-	private final AtomicInteger cursorT, repeatT, playbackStartT, selectedRow, selectedCanvas, viewT,tempo,playbackT,initialTempo;
+	private final AtomicInteger cursorT, repeatT, playbackStartT, selectedRow, selectedCanvas, viewT,tempo,playbackT,initialTempo,shuffle;
 		
 	private String songName = "Untitled";
 	private String artistName = "Unknown Artist";
@@ -43,6 +43,7 @@ public class ProjectFileData {
 		this.tempo = new AtomicInteger(120);
 		this.initialTempo = new AtomicInteger(120);
 		this.playbackT = new AtomicInteger(0);
+		this.shuffle = new AtomicInteger(0);
 	}
 	
 	public Optional<CanvasConfig> getCanvasConfig(String name) {
@@ -98,6 +99,7 @@ public class ProjectFileData {
 		e.setAttribute("selectedRow",selectedRow.get()+"");
 		e.setAttribute("selectedCanvas",selectedCanvas.get()+"");
 		e.setAttribute("tempo",tempo.get()+"");
+		e.setAttribute("shuffle",shuffle.get()+"");
 		e.appendChild(canvases.toXMLElement(doc, "canvases"));
 		Element eventTabData = doc.createElement("eventTabData");
 		e.appendChild(eventTabData);
@@ -190,6 +192,10 @@ public class ProjectFileData {
 		projectData.selectedCanvas.set(Integer.parseInt(e.getAttribute("selectedCanvas")));
 		projectData.getViewT().set(Integer.parseInt(e.getAttribute("viewT")));
 		projectData.tempo.set(Integer.parseInt(e.getAttribute("tempo")));
+		String shuffleAttr = e.getAttribute("shuffle");
+		if (!shuffleAttr.isEmpty()) {
+			projectData.shuffle.set(Integer.parseInt(shuffleAttr));
+		}
 		projectData.songName = e.getAttribute("songName");
 		projectData.artistName = e.getAttribute("artistName");
 		
@@ -230,6 +236,10 @@ public class ProjectFileData {
 
 	public AtomicInteger getTempo() {
 		return tempo;
+	}
+
+	public AtomicInteger getShuffle() {
+		return shuffle;
 	}
 
 	public AtomicInteger getPlaybackT() {
