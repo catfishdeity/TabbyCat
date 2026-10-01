@@ -17,6 +17,8 @@ import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
 import java.awt.geom.Line2D;
@@ -913,9 +915,22 @@ public class TabbyCat {
 			SAVE, LOAD, TEMPO, TAPPER, SETTINGS, HELP;
 		}
 		
-		SequencePosition sequencePosition = SequencePosition.TAPPER;		
+		SequencePosition sequencePosition = SequencePosition.TAPPER;
 		boolean isInGrid = false;
 		AtomicBoolean isSelectionMode = new AtomicBoolean(false);
+
+		// Hit areas updated each paint — used by mouse listener
+		Rectangle2D hitSave = new Rectangle2D.Double();
+		Rectangle2D hitLoad = new Rectangle2D.Double();
+		Rectangle2D hitTempo = new Rectangle2D.Double();
+		Rectangle2D hitTap = new Rectangle2D.Double();
+		Rectangle2D hitSettings = new Rectangle2D.Double();
+		Rectangle2D hitHelp = new Rectangle2D.Double();
+		List<Rectangle2D> hitCanvasGrids = new ArrayList<>();
+		int hitCellWidth = 1;
+		int hitRowHeight = 1;
+		int hitViewT = 0;
+		double hitGridScrollY = 0;
 		
 		final Map<InstrumentDataKey, String> instrumentClipboard = new HashMap<>();
 		final Map<Point, ControlEvent> eventClipboard = new HashMap<>();
@@ -1009,6 +1024,44 @@ public class TabbyCat {
 				inputMap.put(k,""+c);
 				actionMap.put(""+c, rToA(()->handleCharInput(c_)));
 			}
+
+			addMouseListener(new MouseAdapter() {
+				@Override
+				public void mouseClicked(MouseEvent e) {
+					if (e.getButton() != MouseEvent.BUTTON1) return;
+					double lx = e.getX() / (double) UI_SCALE;
+					double ly = e.getY() / (double) UI_SCALE;
+					if (hitSave.contains(lx, ly)) {
+						isInGrid = false; sequencePosition = SequencePosition.SAVE; enter();
+					} else if (hitLoad.contains(lx, ly)) {
+						isInGrid = false; sequencePosition = SequencePosition.LOAD; enter();
+					} else if (hitTempo.contains(lx, ly)) {
+						isInGrid = false; sequencePosition = SequencePosition.TEMPO; repaint();
+					} else if (hitTap.contains(lx, ly)) {
+						isInGrid = false; sequencePosition = SequencePosition.TAPPER; enter();
+					} else if (hitSettings.contains(lx, ly)) {
+						isInGrid = false; sequencePosition = SequencePosition.SETTINGS; enter();
+					} else if (hitHelp.contains(lx, ly)) {
+						isInGrid = false; sequencePosition = SequencePosition.HELP; enter();
+					} else {
+						double adjustedLy = ly - hitGridScrollY;
+						for (int i = 0; i < hitCanvasGrids.size(); i++) {
+							Rectangle2D gridBounds = hitCanvasGrids.get(i);
+							if (gridBounds.contains(lx, adjustedLy)) {
+								int col = (int)((lx - gridBounds.getMinX()) / hitCellWidth);
+								int t = hitViewT + col;
+								int relRow = (int)((adjustedLy - gridBounds.getMinY()) / hitRowHeight);
+								int startRow = i == 0 ? 0 : rowBreaks.get(i - 1) + 1;
+								projectData.getCursorT().set(t);
+								projectData.getSelectedRow().set(startRow + relRow);
+								isInGrid = true;
+								repaint();
+								break;
+							}
+						}
+					}
+				}
+			});
 		}
 		
 		void hyphen() {
@@ -1707,8 +1760,9 @@ public class TabbyCat {
 			
 			AffineTransform at = new AffineTransform();
 			at.translate(0, topBarHeight);
-			Rectangle2D saveBounds = topFontMetrics.getStringBounds("SAVE", g);			
+			Rectangle2D saveBounds = topFontMetrics.getStringBounds("SAVE", g);
 			saveBounds = at.createTransformedShape(saveBounds).getBounds2D();
+			hitSave = saveBounds;
 			at.translate(saveBounds.getWidth()+5,0);
 			//g.draw(saveBounds);
 			g.setPaint(!isInGrid && sequencePosition==SequencePosition.SAVE?Color.GRAY:Color.BLACK);
@@ -1718,7 +1772,7 @@ public class TabbyCat {
 			iterateHue.run();
 			Rectangle2D loadBounds = topFontMetrics.getStringBounds("LOAD", g);
 			loadBounds = at.createTransformedShape(loadBounds).getBounds2D();
-			
+			hitLoad = loadBounds;
 			g.setPaint(!isInGrid && sequencePosition==SequencePosition.LOAD?Color.GRAY:Color.BLACK);
 			g.fill(loadBounds);
 			iterateHue.run();
@@ -1727,14 +1781,16 @@ public class TabbyCat {
 			String tempoString = String.format("TEMPO %03d",projectData.getTempo().get());
 			Rectangle2D tempoBounds = topFontMetrics.getStringBounds(tempoString, g);
 			tempoBounds = at.createTransformedShape(tempoBounds).getBounds2D();
+			hitTempo = tempoBounds;
 			g.setPaint(!isInGrid && sequencePosition==SequencePosition.TEMPO?Color.GRAY:Color.BLACK);
 			g.fill(tempoBounds);
 			iterateHue.run();
 			g.drawString(tempoString,(int) tempoBounds.getMinX(),(int) tempoBounds.getMaxY());
-			at.translate(tempoBounds.getWidth()+5,0);			
+			at.translate(tempoBounds.getWidth()+5,0);
 			String tapString = "TAP!";
 			Rectangle2D tapBounds = topFontMetrics.getStringBounds(tapString, g);
 			tapBounds = at.createTransformedShape(tapBounds).getBounds2D();
+			hitTap = tapBounds;
 			g.setPaint(!isInGrid && sequencePosition==SequencePosition.TAPPER?Color.GRAY:Color.BLACK);
 			g.fill(tapBounds);
 			iterateHue.run();
@@ -1743,6 +1799,7 @@ public class TabbyCat {
 			String settingsString = "SETTINGS";
 			Rectangle2D settingsBounds = topFontMetrics.getStringBounds(settingsString, g);
 			settingsBounds = at.createTransformedShape(settingsBounds).getBounds2D();
+			hitSettings = settingsBounds;
 			g.setPaint(!isInGrid && sequencePosition==SequencePosition.SETTINGS?Color.GRAY:Color.BLACK);
 			g.fill(settingsBounds);
 			iterateHue.run();
@@ -1751,6 +1808,7 @@ public class TabbyCat {
 			String helpString = "HELP";
 			Rectangle2D helpBounds = topFontMetrics.getStringBounds(helpString, g);
 			helpBounds = at.createTransformedShape(helpBounds).getBounds2D();
+			hitHelp = helpBounds;
 			g.setPaint(!isInGrid && sequencePosition==SequencePosition.HELP?Color.GRAY:Color.BLACK);
 			g.fill(helpBounds);
 			iterateHue.run();
@@ -1767,12 +1825,14 @@ public class TabbyCat {
 			clip.subtract(new Area(new Rectangle2D.Double(0,0,getWidth(),topBarHeight+5)));
 			g.setClip(clip);
 			List<Shape> canvasGrids= new ArrayList<>();
+			hitCanvasGrids.clear();
 			Map<String,Point2D> stringPositions = new HashMap<>();
 			List<Rectangle2D> measurePanels = new ArrayList<>();
 			Path2D.Double eventP2D = new Path2D.Double();
 			int cellWidth = (int) getCellWidth();
 			int rowHeight = gridMetrics.getMaxAscent()+4;
 			int t0 = projectData.getViewT().get();
+			hitCellWidth = cellWidth; hitRowHeight = rowHeight; hitViewT = t0;
 			int tDelta = (int) (getWidth()/cellWidth);
 			int t1 = t0+tDelta;
 			int x = 0;
@@ -1798,7 +1858,9 @@ public class TabbyCat {
 			at.translate(0,rowHeight);
 
 
-			canvasGrids.add(at.createTransformedShape(eventP2D));			
+			Shape eventGrid = at.createTransformedShape(eventP2D);
+			canvasGrids.add(eventGrid);
+			hitCanvasGrids.add(eventGrid.getBounds2D());
 			at.translate(0,eventP2D.getBounds2D().getHeight());
 			
 			Rectangle2D eventMeasuresPanel = new Rectangle2D.Double(0, 0, getWidth(), rowHeight);
@@ -1831,7 +1893,9 @@ public class TabbyCat {
 							new Point2D.Double(getWidth(),y)),false);
 				}
 
-				canvasGrids.add(at.createTransformedShape(p2d));			
+				Shape canvasGrid = at.createTransformedShape(p2d);
+				canvasGrids.add(canvasGrid);
+				hitCanvasGrids.add(canvasGrid.getBounds2D());
 				at.translate(0,p2d.getBounds2D().getHeight());
 				Rectangle2D measuresPanel = new Rectangle2D.Double(0, 0, getWidth(), rowHeight);
 				measurePanels.add(at.createTransformedShape(measuresPanel).getBounds2D());
@@ -1859,7 +1923,8 @@ public class TabbyCat {
 				
 			}
 						
-			g.translate(0,Math.min(0,getBounds().getMaxY()-selectionRectangle.getMaxY()-rowHeight*2));
+			hitGridScrollY = Math.min(0, getBounds().getMaxY()-selectionRectangle.getMaxY()-rowHeight*2);
+			g.translate(0, hitGridScrollY);
 			stringPositions.entrySet().forEach(entry -> {
 				g.drawString(entry.getKey(),(int) entry.getValue().getX(),(int) entry.getValue().getY());
 			});
