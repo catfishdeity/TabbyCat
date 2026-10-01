@@ -2537,13 +2537,15 @@ public class TabbyCat {
 			Runnable h = () -> {}; // placeholder — we build below
 			l.add(new Pair<>("MENU BAR  (press , from grid to enter menu)", HEADER_COLOR));
 			l.add(new Pair<>("  Left / Right          Navigate menu items", ENTRY_COLOR));
-			l.add(new Pair<>("  Up / Down             Adjust tempo (when TEMPO selected)", ENTRY_COLOR));
+			l.add(new Pair<>("  Up / Down             Adjust value (TEMPO or SHUFFLE selected)", ENTRY_COLOR));
 			l.add(new Pair<>("  Enter                 Activate selected item", ENTRY_COLOR));
 			l.add(new Pair<>("  Space                 Play / Pause", ENTRY_COLOR));
 			l.add(new Pair<>("  ,                     Return to grid", ENTRY_COLOR));
 			l.add(new Pair<>("", ENTRY_COLOR));
 			l.add(new Pair<>("GRID  (press , from menu to enter grid)", HEADER_COLOR));
 			l.add(new Pair<>("  Arrow keys            Move cursor", ENTRY_COLOR));
+			l.add(new Pair<>("  Click                 Move cursor to cell", ENTRY_COLOR));
+			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " Click              Move playback position to cell", ENTRY_COLOR));
 			l.add(new Pair<>("  Shift Left / Right    Jump to prev / next measure", ENTRY_COLOR));
 			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " Left / Right          Move playback position", ENTRY_COLOR));
 			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl+Alt") + " Shift Left / Right  Jump playback by measure", ENTRY_COLOR));
