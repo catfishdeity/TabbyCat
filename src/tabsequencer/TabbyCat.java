@@ -477,7 +477,12 @@ public class TabbyCat {
 	}
 	
 
+	long lastStopTimeMs = 0;
+
 	void startPlayback() {
+		if (System.currentTimeMillis() - lastStopTimeMs > 30_000) {
+			flushSynths();
+		}
 		if (!playbackDaemonIsStarted.get()) {
 			playbackDaemonIsStarted.set(true);
 			playbackDaemon.submit(() -> playbackDaemonFunction(System.nanoTime()));
@@ -487,10 +492,53 @@ public class TabbyCat {
 
 	void stopPlayback() {
 		isPlaying.set(false);
+		lastStopTimeMs = System.currentTimeMillis();
 		activeDrumNotes.forEach((channel, note) -> channel.noteOff(note));
 		activeDrumNotes.clear();
 		activeStringNotes.forEach((channel, note) -> channel.noteOff(note));
 		activeStringNotes.clear();
+	}
+
+	void flushSynths() {
+		stringSynths.forEach((key, synth) -> {
+			try {
+				synth.close();
+				synth.open();
+				StringCanvasConfig config = key.a;
+				if (config.getSoundfontFile().isPresent()) {
+					Soundbank soundbank = loadedSoundbanks.get(config.getSoundfontFile().get());
+					if (soundbank != null) {
+						for (Instrument instrument : soundbank.getInstruments()) {
+							if (instrument.getPatch().getBank() == config.getBank() &&
+									instrument.getPatch().getProgram() == config.getProgram()) {
+								synth.loadInstrument(instrument);
+								for (int i : new int[]{0,1,2,3,4,5,6,7,8,10,11,12,13,14,15}) {
+									synth.getChannels()[i].programChange(config.getBank(), config.getProgram());
+								}
+							}
+						}
+					}
+				}
+			} catch (Exception ignored) {}
+		});
+		drumSynths.forEach((config, synth) -> {
+			try {
+				synth.close();
+				synth.open();
+				if (config.getSoundfontFile().isPresent()) {
+					Soundbank soundbank = loadedSoundbanks.get(config.getSoundfontFile().get());
+					if (soundbank != null) {
+						for (Instrument instrument : soundbank.getInstruments()) {
+							if (instrument.getPatch().getBank() == config.getBank() &&
+									instrument.getPatch().getProgram() == config.getProgram()) {
+								synth.loadInstrument(instrument);
+								synth.getChannels()[9].programChange(config.getBank(), config.getProgram());
+							}
+						}
+					}
+				}
+			} catch (Exception ignored) {}
+		});
 	}
 	
 	public void updateMeasureLinePositions() {
