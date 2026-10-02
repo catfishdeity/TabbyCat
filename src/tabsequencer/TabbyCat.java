@@ -105,7 +105,29 @@ import tabsequencer.events.TimeSignatureEvent;
 public class TabbyCat {
 
 	public static void main(String[] args) {
+		copyConfigToEtc();
 		TabbyCat.getInstance();
+	}
+
+	static void copyConfigToEtc() {
+		File etcDir = new File("etc");
+		if (!etcDir.exists()) {
+			etcDir.mkdir();
+		}
+		File configDir = new File("config");
+		File[] configFiles = configDir.listFiles();
+		if (configFiles == null) return;
+		for (File src : configFiles) {
+			File dest = new File(etcDir, src.getName());
+			if (!dest.exists()) {
+				try {
+					java.nio.file.Files.copy(src.toPath(), dest.toPath());
+					System.out.println("Copied " + src.getPath() + " -> " + dest.getPath());
+				} catch (Exception e) {
+					System.err.println("Failed to copy " + src.getName() + " to etc/: " + e.getMessage());
+				}
+			}
+		}
 	}
 
 	private static TabbyCat instance;
