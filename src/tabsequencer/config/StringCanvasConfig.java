@@ -146,6 +146,9 @@ public class StringCanvasConfig extends CanvasConfig {
 		if (getAdditionalPitchMap().keySet().contains(token)) {
 			return true;
 		}
+		if (token.equals("-")) {
+			return true;
+		}
 		return false;
 		
 	}
