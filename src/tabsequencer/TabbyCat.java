@@ -140,6 +140,7 @@ public class TabbyCat {
 	static final String tempoEventCardKey = "TEMPO EVENT";
 	static final String notesEventCardKey = "NEW NOTE";;
 	static final String helpCardKey = "HELP";
+	static final String unsavedChangesCardKey = "UNSAVED CHANGES";
 	
 	static final double MIDDLE_C = 220.0 * Math.pow(2d, 3.0 / 12.0);
 	static final int numEventRows = 3;
@@ -156,7 +157,8 @@ public class TabbyCat {
 	final int scrollTimeMargin = 4;	
 
 	FileFilter fileFilter = new FileNameExtensionFilter(".meow files (.meow)", "meow");
-	final File defaultProjectPath = new File("scores");	
+	final File defaultProjectPath = new File("scores");
+	final File lastProjectTokenFile = new File("lastproject.txt");
 	
 	Map<File,Soundbank> loadedSoundbanks = new HashMap<>();
 	Map<DrumCanvasConfig,Synthesizer> drumSynths = new HashMap<>();
@@ -191,6 +193,8 @@ public class TabbyCat {
 	private MainInterfacePanel mainInterfacePanel;
 	private HelpPanel helpPanel;
 	private SaveProjectPanel saveProjectPanel;
+	private UnsavedChangesPanel unsavedChangesPanel;
+	final AtomicBoolean exitAfterSave = new AtomicBoolean(false);
 	
 	private CardLayout cardLayout;
 	private JPanel cardPanel;
@@ -218,6 +222,7 @@ public class TabbyCat {
 	KeyStroke k_PlayNextMeasure = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl alt") + " shift RIGHT");
 	
 	KeyStroke k_Enter = KeyStroke.getKeyStroke("ENTER");
+	KeyStroke k_Escape = KeyStroke.getKeyStroke("ESCAPE");
 	KeyStroke k_Backspace = KeyStroke.getKeyStroke("BACK_SPACE");
 	KeyStroke k_Comma = KeyStroke.getKeyStroke("COMMA");
 	KeyStroke k_Hyphen= KeyStroke.getKeyStroke('-');
@@ -446,21 +451,20 @@ public class TabbyCat {
 
 	void updateWindowTitle() {
 		StringBuilder sb = new StringBuilder();
-		sb.append("KiteTabSequencer2000");
-		if (activeFile.get() == null) {
-			if (fileHasBeenModified.get()) {
-				sb.append(" (unsaved)");
+		sb.append("TabbyCat");
+		if (activeFile.get() != null) {
+			String name = activeFile.get().getName();
+			if (name.endsWith(".meow")) {
+				name = name.substring(0, name.length() - 5);
 			}
-		} else {
 			sb.append(" (");
-			sb.append(activeFile.get().getName());
+			sb.append(name);
 			if (fileHasBeenModified.get()) {
-				sb.append(" * ");
+				sb.append(" *");
 			}
 			sb.append(")");
 		}
 		frame.setTitle(sb.toString());
-
 	}
 	
 
@@ -562,6 +566,8 @@ public class TabbyCat {
 		cardPanel.add(notesEventPanel,notesEventCardKey);
 		helpPanel = new HelpPanel();
 		cardPanel.add(helpPanel,helpCardKey);
+		unsavedChangesPanel = new UnsavedChangesPanel();
+		cardPanel.add(unsavedChangesPanel,unsavedChangesCardKey);
 		frame.getContentPane().add(cardPanel,BorderLayout.CENTER);
 		frame.pack();
 		Rectangle screenBounds = GraphicsEnvironment.getLocalGraphicsEnvironment()
@@ -569,8 +575,52 @@ public class TabbyCat {
 		frame.setSize(new Dimension(
 				(int) Math.min(1000, screenBounds.getWidth()),
 				(int) Math.min(500, screenBounds.getHeight())));
-				
-		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+
+		frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+		frame.addWindowListener(new java.awt.event.WindowAdapter() {
+			@Override
+			public void windowClosing(java.awt.event.WindowEvent e) {
+				if (unsavedChangesPanel.isShowing()) {
+					System.exit(0);
+				} else if (fileHasBeenModified.get()) {
+					cardLayout.show(cardPanel, unsavedChangesCardKey);
+				} else {
+					System.exit(0);
+				}
+			}
+		});
+
+		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+			File f = activeFile.get();
+			try {
+				if (f != null) {
+					java.nio.file.Files.writeString(lastProjectTokenFile.toPath(), f.getAbsolutePath());
+				} else {
+					lastProjectTokenFile.delete();
+				}
+			} catch (Exception ignored) {}
+		}));
+
+		if (lastProjectTokenFile.exists()) {
+			try {
+				String path = java.nio.file.Files.readString(lastProjectTokenFile.toPath()).trim();
+				File last = new File(path);
+				if (last.exists()) {
+					loadXML(last);
+					activeFile.set(last);
+					fileHasBeenModified.set(false);
+					updateWindowTitle();
+					cardLayout.show(cardPanel, mainInterfaceCardKey);
+					Rectangle lastProjScreenBounds = GraphicsEnvironment.getLocalGraphicsEnvironment()
+							.getDefaultScreenDevice().getDefaultConfiguration().getBounds();
+					frame.pack();
+					frame.setSize(new Dimension(
+							(int) lastProjScreenBounds.getWidth(),
+							(int) Math.min(lastProjScreenBounds.getHeight(), mainInterfacePanel.computeNeededHeight())));
+				}
+			} catch (Exception ignored) {}
+		}
+
 		frame.setVisible(true);
 	}
 	
@@ -636,6 +686,8 @@ public class TabbyCat {
 		public NewProjectPanel() {
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
 			ActionMap actionMap = this.getActionMap();
+			inputMap.put(k_Escape,"esc");
+			actionMap.put("esc", rToA(()->{ if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
 			inputMap.put(k_Up,"up");
 			actionMap.put("up", rToA(this::up));
 			inputMap.put(k_Down,"down");
@@ -839,14 +891,15 @@ public class TabbyCat {
 			}
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
 			ActionMap actionMap = this.getActionMap();
-
+			inputMap.put(k_Escape,"esc");
+			actionMap.put("esc", rToA(()->{ if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
 			inputMap.put(k_Up,"up");
 			actionMap.put("up", rToA(this::up));
 			inputMap.put(k_Down,"down");
 			actionMap.put("down", rToA(this::down));
 			inputMap.put(k_Enter,"enter");
 			actionMap.put("enter", rToA(this::enter));
-			
+
 		}
 		
 		private void up() {
@@ -899,12 +952,19 @@ public class TabbyCat {
 					try {
 						loadXML(files.get(selectedIndex-2));
 						activeFile.set(files.get(selectedIndex-2));
+						fileHasBeenModified.set(false);
+						updateWindowTitle();
 					} catch (Exception e) {
 
 						e.printStackTrace();
 					} finally {
 						cardLayout.show(cardPanel, mainInterfaceCardKey);
-					}					
+						Rectangle screenBounds = GraphicsEnvironment.getLocalGraphicsEnvironment()
+								.getDefaultScreenDevice().getDefaultConfiguration().getBounds();
+						frame.setSize(new Dimension(
+								(int) screenBounds.getWidth(),
+								(int) Math.min(screenBounds.getHeight(), mainInterfacePanel.computeNeededHeight())));
+					}
 				}
 					
 			}
@@ -948,6 +1008,89 @@ public class TabbyCat {
 		}
 	}
 	
+	class UnsavedChangesPanel extends JPanel {
+		private int selectedIndex = 0;
+
+		private static final List<Pair<String,Color>> OPTIONS = List.of(
+			new Pair<>("Yes  — save and close",   new Color(180, 255, 180)),
+			new Pair<>("No   — close without saving", new Color(255, 180, 180)),
+			new Pair<>("Cancel",                   new Color(180, 180, 255))
+		);
+
+		public UnsavedChangesPanel() {
+			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap actionMap = this.getActionMap();
+			inputMap.put(k_Escape,"esc");
+			actionMap.put("esc", rToA(()->cardLayout.show(cardPanel, mainInterfaceCardKey)));
+			inputMap.put(k_Up,   "up");
+			actionMap.put("up",   rToA(this::up));
+			inputMap.put(k_Down, "down");
+			actionMap.put("down", rToA(this::down));
+			inputMap.put(k_Enter,"enter");
+			actionMap.put("enter",rToA(this::enter));
+		}
+
+		private void up() {
+			selectedIndex = (selectedIndex == 0) ? OPTIONS.size()-1 : selectedIndex-1;
+			repaint();
+		}
+
+		private void down() {
+			selectedIndex = (selectedIndex == OPTIONS.size()-1) ? 0 : selectedIndex+1;
+			repaint();
+		}
+
+		private void enter() {
+			switch (selectedIndex) {
+				case 0 -> { // Yes
+					if (activeFile.get() != null) {
+						try {
+							saveXML(activeFile.get());
+						} catch (Exception ex) {
+							javax.swing.JOptionPane.showMessageDialog(frame, ex.toString(), "Save Failed", javax.swing.JOptionPane.ERROR_MESSAGE);
+							return;
+						}
+						fileHasBeenModified.set(false);
+						System.exit(0);
+					} else {
+						exitAfterSave.set(true);
+						saveProjectPanel.setFileName(
+								String.format("%s.meow",
+										java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
+												.format(java.time.LocalDateTime.now(java.time.ZoneId.of("Z")))));
+						cardLayout.show(cardPanel, saveProjectCardKey);
+					}
+				}
+				case 1 -> System.exit(0); // No
+				case 2 -> cardLayout.show(cardPanel, mainInterfaceCardKey); // Cancel
+			}
+		}
+
+		@Override
+		public void paint(Graphics g_) {
+			Graphics2D g = (Graphics2D) g_;
+			g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+			g.setFont(textFont);
+			g.setPaint(Color.BLACK);
+			g.fill(this.getBounds());
+
+			int y = textFontMetrics.getMaxAscent();
+			g.setPaint(new Color(255, 200, 80));
+			g.drawString("YOUR PROJECT HAS UNSAVED CHANGES", 2, y);
+			y += textFontMetrics.getMaxAscent();
+
+			int w = OPTIONS.stream().mapToInt(p -> textFontMetrics.stringWidth(p.a)).max().getAsInt();
+			for (int i = 0; i < OPTIONS.size(); i++) {
+				Pair<String,Color> p = OPTIONS.get(i);
+				g.setPaint(selectedIndex == i ? Color.DARK_GRAY : Color.BLACK);
+				g.fillRect(0, y - textFontMetrics.getMaxAscent(), w, textFontMetrics.getMaxAscent());
+				g.setPaint(p.b);
+				g.drawString(p.a, 2, y);
+				y += textFontMetrics.getMaxAscent();
+			}
+		}
+	}
+
 	class MainInterfacePanel extends JPanel {
 		
 		enum SequencePosition {
@@ -1452,8 +1595,21 @@ public class TabbyCat {
 			}
 		}
 		
-		double getCellWidth() {			
+		double getCellWidth() {
 			return gridFontMetrics.stringWidth("88.");
+		}
+
+		int computeNeededHeight() {
+			FontMetrics topMetrics = new Canvas().getFontMetrics(new Font("SansSerif", Font.PLAIN, 14));
+			FontMetrics gridMetrics = new Canvas().getFontMetrics(new Font("Monospaced", Font.BOLD, 12));
+			int topBarHeight = topMetrics.getMaxAscent();
+			int rowHeight = gridMetrics.getMaxAscent() + 4;
+			int unscaled = topBarHeight * 3 + 5
+					+ rowHeight * (2 + numEventRows);
+			for (CanvasConfig canvas : projectData.getCanvases().getCanvases()) {
+				unscaled += rowHeight * (3 + canvas.getRowCount());
+			}
+			return unscaled * UI_SCALE + frame.getInsets().top + frame.getInsets().bottom;
 		}
 		
 		public final int getMaxVisibleTime() {
@@ -1655,7 +1811,7 @@ public class TabbyCat {
 		void enter() {
 			switch (sequencePosition) {
 			case LOAD:
-				
+				cardLayout.show(cardPanel, projectData == null ? newProjectCardKey : loadProjectCardKey);
 				break;
 			case SAVE:				
 				mainInterfacePanel.ctrlS();
@@ -2188,6 +2344,8 @@ public class TabbyCat {
 		public SaveProjectPanel() {
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
 			ActionMap actionMap = this.getActionMap();
+			inputMap.put(k_Escape,"esc");
+			actionMap.put("esc", rToA(()->{ if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
 			inputMap.put(k_Up,"up");
 			actionMap.put("up", rToA(this::up));
 			inputMap.put(k_Down,"down");
@@ -2275,18 +2433,25 @@ public class TabbyCat {
 				try {
 					saveXML(f);
 				} catch (Exception ex) {
-					ex.printStackTrace();					
+					if (exitAfterSave.getAndSet(false)) {
+						javax.swing.JOptionPane.showMessageDialog(frame, ex.toString(), "Save Failed", javax.swing.JOptionPane.ERROR_MESSAGE);
+						return;
+					}
+					ex.printStackTrace();
 				}
 				activeFile.set(f);
 				fileHasBeenModified.set(false);
 				updateWindowTitle();
+				if (exitAfterSave.getAndSet(false)) {
+					System.exit(0);
+				}
 				cardLayout.show(cardPanel, mainInterfaceCardKey);
 				//cardLayout.show(cardPanel, newProjectCardKey);
 			} else if (selectedIndex == 1) {
 				this.workingDir = new File(workingDir.getAbsolutePath()).getParentFile();
 				repaint();
 			} else {
-				List<File> files = 
+				List<File> files =
 						Arrays.asList(workingDir.listFiles()).stream().filter(a->a.isDirectory() || fileFilter.accept(a))
 						.toList();
 				if (files.get(selectedIndex-2).isDirectory()) {
@@ -2298,15 +2463,22 @@ public class TabbyCat {
 					try {
 						saveXML(f);
 					} catch (Exception ex) {
-						ex.printStackTrace();					
-					}					
+						if (exitAfterSave.getAndSet(false)) {
+							javax.swing.JOptionPane.showMessageDialog(frame, ex.toString(), "Save Failed", javax.swing.JOptionPane.ERROR_MESSAGE);
+							return;
+						}
+						ex.printStackTrace();
+					}
 					activeFile.set(f);
 					fileHasBeenModified.set(false);
 					updateWindowTitle();
+					if (exitAfterSave.getAndSet(false)) {
+						System.exit(0);
+					}
 					cardLayout.show(cardPanel, mainInterfaceCardKey);
-					
+
 				}
-					
+
 			}
 			
 		}
@@ -2356,6 +2528,8 @@ public class TabbyCat {
 		public TimeSignatureEventPanel() {
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
 			ActionMap actionMap = this.getActionMap();
+			inputMap.put(k_Escape,"esc");
+			actionMap.put("esc", rToA(()->{ if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
 			inputMap.put(k_Left,"left");
 			actionMap.put("left", rToA(this::left));
 			inputMap.put(k_Right,"right");
@@ -2455,6 +2629,8 @@ public class TabbyCat {
 		public TempoEventPanel() {
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
 			ActionMap actionMap = this.getActionMap();
+			inputMap.put(k_Escape,"esc");
+			actionMap.put("esc", rToA(()->{ if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
 			inputMap.put(k_Up,"up");
 			actionMap.put("up", rToA(this::up));
 			inputMap.put(k_Down,"down");
@@ -2495,6 +2671,8 @@ public class TabbyCat {
 		public NotesEventPanel() {
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
 			ActionMap actionMap = this.getActionMap();
+			inputMap.put(k_Escape,"esc");
+			actionMap.put("esc", rToA(()->{ if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
 			inputMap.put(k_Enter,"enter");
 			actionMap.put("enter", rToA(this::enter));
 			inputMap.put(k_Backspace,"backspace");
@@ -2604,6 +2782,8 @@ public class TabbyCat {
 		public HelpPanel() {
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
 			ActionMap actionMap = this.getActionMap();
+			inputMap.put(k_Escape,"esc");
+			actionMap.put("esc", rToA(()->{ if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
 			inputMap.put(k_Up,    "up");
 			actionMap.put("up",   rToA(this::up));
 			inputMap.put(k_Down,  "down");

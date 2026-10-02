@@ -18,6 +18,7 @@
 		<xsd:attribute name="selectedRow" type="xsd:nonNegativeInteger" default="0"/>
 		<xsd:attribute name="selectedCanvas" type="xsd:nonNegativeInteger" default="0"/>
 		<xsd:attribute name="tempo" type="xsd:positiveInteger" default="110"/>
+		<xsd:attribute name="shuffle" type="xsd:integer" default="0"/>
  	</xsd:complexType>
 	
 	<xsd:complexType name="TabData">

@@ -108,6 +108,7 @@ public class ProjectFileData {
 			eventE.setAttribute("t", entry.getKey().x+"");
 			eventE.setAttribute("r", entry.getKey().y+"");
 			eventE.appendChild(entry.getValue().toXMLElement(doc));
+			eventTabData.appendChild(eventE);
 		});
 		
 		Map<String, List<Entry<InstrumentDataKey, String>>> grouped = 
