@@ -35,6 +35,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -233,6 +234,7 @@ public class TabbyCat {
 	KeyStroke k_CtrlX = KeyStroke.getKeyStroke("ctrl X");
 	KeyStroke k_CtrlR = KeyStroke.getKeyStroke("ctrl R");
 	KeyStroke k_CtrlS = KeyStroke.getKeyStroke("ctrl S");
+	KeyStroke k_CtrlShiftS = KeyStroke.getKeyStroke("ctrl shift S");
 	
 	KeyStroke k_Space = KeyStroke.getKeyStroke("SPACE");
 
@@ -450,15 +452,18 @@ public class TabbyCat {
 
 
 	void updateWindowTitle() {
-		StringBuilder sb = new StringBuilder();
-		sb.append("TabbyCat");
-		if (activeFile.get() != null) {
-			String name = activeFile.get().getName();
-			if (name.endsWith(".meow")) {
-				name = name.substring(0, name.length() - 5);
-			}
+		StringBuilder sb = new StringBuilder("TabbyCat");
+		if (projectData != null) {
 			sb.append(" (");
-			sb.append(name);
+			if (activeFile.get() != null) {
+				String name = activeFile.get().getName();
+				if (name.endsWith(".meow")) {
+					name = name.substring(0, name.length() - 5);
+				}
+				sb.append(name);
+			} else {
+				sb.append("untitled");
+			}
 			if (fileHasBeenModified.get()) {
 				sb.append(" *");
 			}
@@ -668,6 +673,9 @@ public class TabbyCat {
 				}
 			} catch (Exception ignored) {}
 		}
+		if (projectData == null) {
+			cardLayout.show(cardPanel, newProjectCardKey);
+		}
 
 		frame.setVisible(true);
 	}
@@ -853,8 +861,11 @@ public class TabbyCat {
 							indexMap.entrySet().stream().map(a->new Pair<>(a.getKey(),a.getValue()))
 							.sorted(cmp1.thenComparing(cmp2)).map(a->a.a).toList());
 				projectData = new ProjectFileData(config);
+				activeFile.set(null);
+				fileHasBeenModified.set(false);
+				updateWindowTitle();
 				cardLayout.show(cardPanel, mainInterfaceCardKey);
-				updateMeasureLinePositions();								
+				updateMeasureLinePositions();
 			}
 		}
 		
@@ -957,15 +968,15 @@ public class TabbyCat {
 					numFiles++;
 				}
 			}
-			
+
 			if (selectedIndex==0) {
-				selectedIndex = 1+numFiles;				
+				selectedIndex = numFiles;
 			} else {
 				selectedIndex-=1;
 			}
 			repaint();
 		}
-		
+
 		private void down() {
 			int numFiles = 0;
 			for (File f : workingDir.listFiles()) {
@@ -974,32 +985,30 @@ public class TabbyCat {
 				}
 			}
 			selectedIndex+=1;
-			if (selectedIndex == 2+numFiles) {
+			if (selectedIndex == 1+numFiles) {
 				selectedIndex = 0;
 			}
 			repaint();
-			
+
 		}
-		
+
 		private void enter() {
 			if (selectedIndex == 0) {
-				cardLayout.show(cardPanel, newProjectCardKey);
-			} else if (selectedIndex == 1) {
 				this.workingDir = new File(workingDir.getAbsolutePath()).getParentFile();
 				repaint();
 			} else {
-				List<File> files = 
+				List<File> files =
 						Arrays.asList(workingDir.listFiles()).stream().filter(a->a.isDirectory() || fileFilter.accept(a))
 						.toList();
-				if (files.get(selectedIndex-2).isDirectory()) {
-					workingDir = new File(workingDir.getAbsolutePath()+"/"+files.get(selectedIndex-2).getName());
-					selectedIndex= 1;
+				if (files.get(selectedIndex-1).isDirectory()) {
+					workingDir = new File(workingDir.getAbsolutePath()+"/"+files.get(selectedIndex-1).getName());
+					selectedIndex = 0;
 					repaint();
 				} else {
 
 					try {
-						loadXML(files.get(selectedIndex-2));
-						activeFile.set(files.get(selectedIndex-2));
+						loadXML(files.get(selectedIndex-1));
+						activeFile.set(files.get(selectedIndex-1));
 						fileHasBeenModified.set(false);
 						updateWindowTitle();
 					} catch (Exception e) {
@@ -1014,7 +1023,7 @@ public class TabbyCat {
 								(int) Math.min(screenBounds.getHeight(), mainInterfacePanel.computeNeededHeight())));
 					}
 				}
-					
+
 			}
 		}
 		
@@ -1031,7 +1040,6 @@ public class TabbyCat {
 			g.drawString(workingDir.getAbsolutePath(),getWidth()-textFontMetrics.stringWidth(workingDir.getAbsolutePath())-2, y);
 
 			List<Pair<String,Color>> strings= new ArrayList<>();
-			strings.add(new Pair<>("<New Project>",new Color(180,180,255)));
 			strings.add(new Pair<>("..",new Color(255,255,180)));
 			if (workingDir == null) {
 				return;
@@ -1142,7 +1150,7 @@ public class TabbyCat {
 	class MainInterfacePanel extends JPanel {
 		
 		enum SequencePosition {
-			SAVE, LOAD, TEMPO, SHUFFLE, TAPPER, SETTINGS, HELP;
+			NEW, OPEN, SAVE, SAVE_AS, TEMPO, SHUFFLE, TAPPER, SETTINGS, HELP;
 		}
 		
 		SequencePosition sequencePosition = SequencePosition.TAPPER;		
@@ -1160,6 +1168,8 @@ public class TabbyCat {
 		int lastVerticalTranslate = 0;
 		int lastCellWidth = 1;
 		int lastRowHeight = 1;
+		Map<SequencePosition, Rectangle2D> menuItemBounds = new EnumMap<>(SequencePosition.class);
+		int lastTopBarHeight = 0;
 		
 		public MainInterfacePanel() {
 			this.setFocusTraversalKeysEnabled(false);
@@ -1218,6 +1228,8 @@ public class TabbyCat {
 			actionMap.put("ctrlr", rToA(this::ctrlR));
 			inputMap.put(k_CtrlS,"ctrls");
 			actionMap.put("ctrls", rToA(this::ctrlS));
+			inputMap.put(k_CtrlShiftS,"ctrlshifts");
+			actionMap.put("ctrlshifts", rToA(this::showSaveAs));
 			
 			inputMap.put(k_Enter,"enter");
 			actionMap.put("enter", rToA(this::enter));
@@ -1250,6 +1262,19 @@ public class TabbyCat {
 			this.addMouseListener(new MouseAdapter() {
 				@Override
 				public void mouseClicked(MouseEvent e) {
+					double scaledX = e.getX() / (double) UI_SCALE;
+					double scaledY = e.getY() / (double) UI_SCALE;
+					if (scaledY <= lastTopBarHeight + 5) {
+						for (Map.Entry<SequencePosition, Rectangle2D> entry : menuItemBounds.entrySet()) {
+							if (entry.getValue().contains(scaledX, scaledY)) {
+								sequencePosition = entry.getKey();
+								isInGrid = false;
+								enter();
+								return;
+							}
+						}
+						return;
+					}
 					double mx = e.getX();
 					double my = e.getY() - lastVerticalTranslate;
 					/*
@@ -1331,10 +1356,7 @@ public class TabbyCat {
 		
 		void ctrlS() {
 			if (activeFile.get() == null) {
-				saveProjectPanel.setFileName(
-							String.format("%s.meow",
-									DateTimeFormatter.ofPattern("yyyyMMdd_HHmm").format(LocalDateTime.now(ZoneId.of("Z")))));
-				cardLayout.show(cardPanel, saveProjectCardKey);
+				showSaveAs();
 			} else {
 				if (fileHasBeenModified.get()) {
 					try {
@@ -1342,12 +1364,21 @@ public class TabbyCat {
 						fileHasBeenModified.set(false);
 						updateWindowTitle();
 					} catch (Exception ex) {
-						ex.printStackTrace();						
+						ex.printStackTrace();
 					}
 				}
 			}
 		}
-		
+
+		void showSaveAs() {
+			saveProjectPanel.setFileName(
+				activeFile.get() != null
+					? activeFile.get().getName()
+					: String.format("%s.meow",
+						DateTimeFormatter.ofPattern("yyyyMMdd_HHmm").format(LocalDateTime.now(ZoneId.of("Z")))));
+			cardLayout.show(cardPanel, saveProjectCardKey);
+		}
+
 		void backspace() {
 			if (!fileHasBeenModified.get()) {				
 				fileHasBeenModified.set(true);
@@ -1858,11 +1889,17 @@ public class TabbyCat {
 		}
 		void enter() {
 			switch (sequencePosition) {
-			case LOAD:
-				cardLayout.show(cardPanel, projectData == null ? newProjectCardKey : loadProjectCardKey);
+			case NEW:
+				cardLayout.show(cardPanel, newProjectCardKey);
 				break;
-			case SAVE:				
+			case OPEN:
+				cardLayout.show(cardPanel, loadProjectCardKey);
+				break;
+			case SAVE:
 				mainInterfacePanel.ctrlS();
+				break;
+			case SAVE_AS:
+				mainInterfacePanel.showSaveAs();
 				break;
 			case SETTINGS:
 				break;
@@ -1998,6 +2035,8 @@ public class TabbyCat {
 			FontMetrics topFontMetrics = g.getFontMetrics(topFont);			
 			g.setFont(topFont);
 			int topBarHeight = topFontMetrics.getMaxAscent();
+			lastTopBarHeight = topBarHeight;
+			menuItemBounds.clear();
 			Iterator<Double> hueIterator = DoubleStream.iterate(0f, i->i+0.07).iterator();
 			Runnable iterateHue = () -> {
 				g.setPaint(Color.getHSBColor(hueIterator.next().floatValue(),0.5f,1f));
@@ -2011,26 +2050,46 @@ public class TabbyCat {
 			
 			AffineTransform at = new AffineTransform();
 			at.translate(0, topBarHeight);
-			Rectangle2D saveBounds = topFontMetrics.getStringBounds("SAVE", g);			
+			Rectangle2D newBounds = topFontMetrics.getStringBounds("NEW", g);
+			newBounds = at.createTransformedShape(newBounds).getBounds2D();
+			menuItemBounds.put(SequencePosition.NEW, newBounds);
+			at.translate(newBounds.getWidth()+5,0);
+			g.setPaint(!isInGrid && sequencePosition==SequencePosition.NEW?Color.GRAY:Color.BLACK);
+			g.fill(newBounds);
+			iterateHue.run();
+			g.drawString("NEW",(int) newBounds.getMinX(),(int) newBounds.getMaxY());
+			iterateHue.run();
+			Rectangle2D openBounds = topFontMetrics.getStringBounds("OPEN", g);
+			openBounds = at.createTransformedShape(openBounds).getBounds2D();
+			menuItemBounds.put(SequencePosition.OPEN, openBounds);
+			at.translate(openBounds.getWidth()+5,0);
+			g.setPaint(!isInGrid && sequencePosition==SequencePosition.OPEN?Color.GRAY:Color.BLACK);
+			g.fill(openBounds);
+			iterateHue.run();
+			g.drawString("OPEN",(int) openBounds.getMinX(),(int) openBounds.getMaxY());
+			iterateHue.run();
+			Rectangle2D saveBounds = topFontMetrics.getStringBounds("SAVE", g);
 			saveBounds = at.createTransformedShape(saveBounds).getBounds2D();
+			menuItemBounds.put(SequencePosition.SAVE, saveBounds);
 			at.translate(saveBounds.getWidth()+5,0);
-			//g.draw(saveBounds);
 			g.setPaint(!isInGrid && sequencePosition==SequencePosition.SAVE?Color.GRAY:Color.BLACK);
 			g.fill(saveBounds);
 			iterateHue.run();
 			g.drawString("SAVE",(int) saveBounds.getMinX(),(int) saveBounds.getMaxY());
 			iterateHue.run();
-			Rectangle2D loadBounds = topFontMetrics.getStringBounds("LOAD", g);
-			loadBounds = at.createTransformedShape(loadBounds).getBounds2D();
-			
-			g.setPaint(!isInGrid && sequencePosition==SequencePosition.LOAD?Color.GRAY:Color.BLACK);
-			g.fill(loadBounds);
+			Rectangle2D saveAsBounds = topFontMetrics.getStringBounds("SAVE AS", g);
+			saveAsBounds = at.createTransformedShape(saveAsBounds).getBounds2D();
+			menuItemBounds.put(SequencePosition.SAVE_AS, saveAsBounds);
+			at.translate(saveAsBounds.getWidth()+5,0);
+			g.setPaint(!isInGrid && sequencePosition==SequencePosition.SAVE_AS?Color.GRAY:Color.BLACK);
+			g.fill(saveAsBounds);
 			iterateHue.run();
-			g.drawString("LOAD",(int) loadBounds.getMinX(),(int) loadBounds.getMaxY());
-			at.translate(loadBounds.getWidth()+5,0);
+			g.drawString("SAVE AS",(int) saveAsBounds.getMinX(),(int) saveAsBounds.getMaxY());
+			iterateHue.run();
 			String tempoString = String.format("TEMPO %03d",projectData.getTempo().get());
 			Rectangle2D tempoBounds = topFontMetrics.getStringBounds(tempoString, g);
 			tempoBounds = at.createTransformedShape(tempoBounds).getBounds2D();
+			menuItemBounds.put(SequencePosition.TEMPO, tempoBounds);
 			g.setPaint(!isInGrid && sequencePosition==SequencePosition.TEMPO?Color.GRAY:Color.BLACK);
 			g.fill(tempoBounds);
 			iterateHue.run();
@@ -2039,6 +2098,7 @@ public class TabbyCat {
 			String shuffleString = String.format("SHUFFLE %+d%%", projectData.getShuffle().get());
 			Rectangle2D shuffleBounds = topFontMetrics.getStringBounds(shuffleString, g);
 			shuffleBounds = at.createTransformedShape(shuffleBounds).getBounds2D();
+			menuItemBounds.put(SequencePosition.SHUFFLE, shuffleBounds);
 			g.setPaint(!isInGrid && sequencePosition==SequencePosition.SHUFFLE?Color.GRAY:Color.BLACK);
 			g.fill(shuffleBounds);
 			iterateHue.run();
@@ -2047,6 +2107,7 @@ public class TabbyCat {
 			String tapString = "TAP!";
 			Rectangle2D tapBounds = topFontMetrics.getStringBounds(tapString, g);
 			tapBounds = at.createTransformedShape(tapBounds).getBounds2D();
+			menuItemBounds.put(SequencePosition.TAPPER, tapBounds);
 			g.setPaint(!isInGrid && sequencePosition==SequencePosition.TAPPER?Color.GRAY:Color.BLACK);
 			g.fill(tapBounds);
 			iterateHue.run();
@@ -2055,6 +2116,7 @@ public class TabbyCat {
 			String settingsString = "SETTINGS";
 			Rectangle2D settingsBounds = topFontMetrics.getStringBounds(settingsString, g);
 			settingsBounds = at.createTransformedShape(settingsBounds).getBounds2D();
+			menuItemBounds.put(SequencePosition.SETTINGS, settingsBounds);
 			g.setPaint(!isInGrid && sequencePosition==SequencePosition.SETTINGS?Color.GRAY:Color.BLACK);
 			g.fill(settingsBounds);
 			iterateHue.run();
@@ -2063,6 +2125,7 @@ public class TabbyCat {
 			String helpString = "HELP";
 			Rectangle2D helpBounds = topFontMetrics.getStringBounds(helpString, g);
 			helpBounds = at.createTransformedShape(helpBounds).getBounds2D();
+			menuItemBounds.put(SequencePosition.HELP, helpBounds);
 			g.setPaint(!isInGrid && sequencePosition==SequencePosition.HELP?Color.GRAY:Color.BLACK);
 			g.fill(helpBounds);
 			iterateHue.run();
