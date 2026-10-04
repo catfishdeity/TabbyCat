@@ -215,12 +215,10 @@ public class TabbyCat {
 	KeyStroke k_CtrlShiftLeft = KeyStroke.getKeyStroke("ctrl shift LEFT");
 	KeyStroke k_CtrlShiftRight = KeyStroke.getKeyStroke("ctrl shift RIGHT");
 	
-	KeyStroke k_CtrlUp = KeyStroke.getKeyStroke("ctrl UP");
-	KeyStroke k_CtrlDown = KeyStroke.getKeyStroke("ctrl DOWN");
-	KeyStroke k_CtrlLeft = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " LEFT");
-	KeyStroke k_CtrlRight = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " RIGHT");
-	KeyStroke k_PlayPrevMeasure = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl alt") + " shift LEFT");
-	KeyStroke k_PlayNextMeasure = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl alt") + " shift RIGHT");
+	KeyStroke k_CtrlLeft = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "alt") + " LEFT");
+	KeyStroke k_CtrlRight = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "alt") + " RIGHT");
+	KeyStroke k_PlayPrevMeasure = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "alt") + " shift LEFT");
+	KeyStroke k_PlayNextMeasure = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "alt") + " shift RIGHT");
 	
 	KeyStroke k_Enter = KeyStroke.getKeyStroke("ENTER");
 	KeyStroke k_Escape = KeyStroke.getKeyStroke("ESCAPE");
@@ -228,13 +226,13 @@ public class TabbyCat {
 	KeyStroke k_Comma = KeyStroke.getKeyStroke("COMMA");
 	KeyStroke k_Hyphen= KeyStroke.getKeyStroke('-');
 	
-	KeyStroke k_CtrlL = KeyStroke.getKeyStroke("ctrl L");
-	KeyStroke k_CtrlC = KeyStroke.getKeyStroke("ctrl C");
-	KeyStroke k_CtrlV = KeyStroke.getKeyStroke("ctrl V");
-	KeyStroke k_CtrlX = KeyStroke.getKeyStroke("ctrl X");
-	KeyStroke k_CtrlR = KeyStroke.getKeyStroke("ctrl R");
-	KeyStroke k_CtrlS = KeyStroke.getKeyStroke("ctrl S");
-	KeyStroke k_CtrlShiftS = KeyStroke.getKeyStroke("ctrl shift S");
+	KeyStroke k_CtrlL = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " L");
+	KeyStroke k_CtrlC = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " C");
+	KeyStroke k_CtrlV = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " V");
+	KeyStroke k_CtrlX = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " X");
+	KeyStroke k_CtrlR = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " R");
+	KeyStroke k_CtrlS = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " S");
+	KeyStroke k_CtrlShiftS = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " shift S");
 	
 	KeyStroke k_Space = KeyStroke.getKeyStroke("SPACE");
 
@@ -1194,10 +1192,6 @@ public class TabbyCat {
 			inputMap.put(k_ShiftRight,"shiftright");
 			actionMap.put("shiftright", rToA(this::shiftRight));
 			
-			inputMap.put(k_CtrlUp,"ctrlup");
-			actionMap.put("ctrlup", rToA(this::ctrlUp));
-			inputMap.put(k_CtrlDown,"ctrldown");
-			actionMap.put("ctrldown", rToA(this::ctrlDown));
 			inputMap.put(k_CtrlLeft,"ctrlleft");
 			actionMap.put("ctrlleft", rToA(this::ctrlLeft));
 			inputMap.put(k_CtrlRight,"ctrlright");
@@ -1261,9 +1255,11 @@ public class TabbyCat {
 
 			this.addMouseListener(new MouseAdapter() {
 				@Override
-				public void mouseClicked(MouseEvent e) {
-					double scaledX = e.getX() / (double) UI_SCALE;
-					double scaledY = e.getY() / (double) UI_SCALE;
+				public void mousePressed(MouseEvent e) {
+					requestFocusInWindow();
+					double deviceScale = getGraphicsConfiguration().getDefaultTransform().getScaleX();
+					double scaledX = e.getX() * deviceScale / (double) UI_SCALE;
+					double scaledY = e.getY() * deviceScale / (double) UI_SCALE;
 					if (scaledY <= lastTopBarHeight + 5) {
 						for (Map.Entry<SequencePosition, Rectangle2D> entry : menuItemBounds.entrySet()) {
 							if (entry.getValue().contains(scaledX, scaledY)) {
@@ -1275,8 +1271,8 @@ public class TabbyCat {
 						}
 						return;
 					}
-					double mx = e.getX();
-					double my = e.getY() - lastVerticalTranslate;
+					double mx = scaledX;
+					double my = scaledY - lastVerticalTranslate;
 					/*
 					//System.out.println(mx+" "+my);
 					//System.out.println(lastCanvasGrids);
@@ -1602,18 +1598,6 @@ public class TabbyCat {
 			repaint();
 		
 		}
-		void ctrlUp() {
-			if (isInGrid) {
-				handleGridMovement(CardinalDirection.CTRL_UP);
-			}
-		}
-		
-		void ctrlDown() {
-			if (isInGrid) {
-				handleGridMovement(CardinalDirection.CTRL_DOWN);
-			}
-		}
-		
 		void ctrlLeft() {
 			if (isInGrid) {
 				handleGridMovement(CardinalDirection.CTRL_LEFT);
@@ -1753,9 +1737,9 @@ public class TabbyCat {
 		}
 		
 		enum CardinalDirection {
-			RIGHT, LEFT, UP, DOWN, 
+			RIGHT, LEFT, UP, DOWN,
 			SHIFT_RIGHT, SHIFT_LEFT, SHIFT_UP, SHIFT_DOWN,
-			CTRL_RIGHT, CTRL_LEFT, CTRL_UP, CTRL_DOWN,
+			CTRL_RIGHT, CTRL_LEFT,
 			CTRL_SHIFT_LEFT, CTRL_SHIFT_RIGHT, CTRL_SHIFT_UP, CTRL_SHIFT_DOWN;
 		}
 		
@@ -1812,9 +1796,13 @@ public class TabbyCat {
 				}
 				repaint();
 				break;
-			case SHIFT_UP:				
+			case SHIFT_UP:
+				projectData.getSelectedRow().set(0);
+				repaint();
 				break;
-			case SHIFT_DOWN:				
+			case SHIFT_DOWN:
+				projectData.getSelectedRow().set(maxRow-1);
+				repaint();
 				break;
 			case SHIFT_LEFT:
 				cursorTToPrevMeasure();
@@ -1841,8 +1829,6 @@ public class TabbyCat {
 				this.advanceCursorToFinalEvent();
 				repaint();				
 				break;
-			case CTRL_DOWN:
-				break;
 			case CTRL_LEFT:
 				decrementPlayT();
 				repaint();
@@ -1851,9 +1837,6 @@ public class TabbyCat {
 				incrementPlayT();
 				repaint();
 				break;
-			case CTRL_UP:
-				break;
-
 			}
 		}
 		
@@ -2035,7 +2018,7 @@ public class TabbyCat {
 			FontMetrics topFontMetrics = g.getFontMetrics(topFont);			
 			g.setFont(topFont);
 			int topBarHeight = topFontMetrics.getMaxAscent();
-			lastTopBarHeight = topBarHeight;
+			lastTopBarHeight = topBarHeight + topFontMetrics.getMaxDescent();
 			menuItemBounds.clear();
 			Iterator<Double> hueIterator = DoubleStream.iterate(0f, i->i+0.07).iterator();
 			Runnable iterateHue = () -> {
@@ -2862,22 +2845,22 @@ public class TabbyCat {
 			l.add(new Pair<>("  Click                 Move cursor to cell", ENTRY_COLOR));
 			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " Click              Move playback position to cell", ENTRY_COLOR));
 			l.add(new Pair<>("  Shift Left / Right    Jump to prev / next measure", ENTRY_COLOR));
-			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " Left / Right          Move playback position", ENTRY_COLOR));
-			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl+Alt") + " Shift Left / Right  Jump playback by measure", ENTRY_COLOR));
+			l.add(new Pair<>("  Shift Up / Down       Jump to first / last row", ENTRY_COLOR));
 			l.add(new Pair<>("  Ctrl Shift Left/Right Jump to start / end of sequence", ENTRY_COLOR));
-			l.add(new Pair<>("  Ctrl Shift Up / Down  Jump to first / last row", ENTRY_COLOR));
+			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Alt") + " Left / Right          Move playback position", ENTRY_COLOR));
+			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Alt") + " Shift Left / Right    Jump playback by measure", ENTRY_COLOR));
 			l.add(new Pair<>("  A-Z, 0-9              Enter note at cursor", ENTRY_COLOR));
 			l.add(new Pair<>("  - (hyphen)            Insert slide (string grids)", ENTRY_COLOR));
 			l.add(new Pair<>("  Backspace             Delete note at cursor", ENTRY_COLOR));
-			l.add(new Pair<>("  Ctrl R                Set / clear repeat point", ENTRY_COLOR));
+			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " R                Set / clear repeat point", ENTRY_COLOR));
 			l.add(new Pair<>("  Space                 Play / Pause", ENTRY_COLOR));
 			l.add(new Pair<>("  ,                     Exit to menu bar", ENTRY_COLOR));
 			l.add(new Pair<>("", ENTRY_COLOR));
-			l.add(new Pair<>("SELECTION  (Ctrl+L to begin)", HEADER_COLOR));
-			l.add(new Pair<>("  Ctrl L                Start / end selection", ENTRY_COLOR));
-			l.add(new Pair<>("  Ctrl C                Copy selection", ENTRY_COLOR));
-			l.add(new Pair<>("  Ctrl X                Cut selection", ENTRY_COLOR));
-			l.add(new Pair<>("  Ctrl V                Paste", ENTRY_COLOR));
+			l.add(new Pair<>("SELECTION  (" + (IS_MAC ? "Cmd" : "Ctrl") + "+L to begin)", HEADER_COLOR));
+			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " L                Start / end selection", ENTRY_COLOR));
+			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " C                Copy selection", ENTRY_COLOR));
+			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " X                Cut selection", ENTRY_COLOR));
+			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " V                Paste", ENTRY_COLOR));
 			l.add(new Pair<>("", ENTRY_COLOR));
 			l.add(new Pair<>("NEW PROJECT SCREEN", HEADER_COLOR));
 			l.add(new Pair<>("  Up / Down             Navigate fields", ENTRY_COLOR));
@@ -2891,6 +2874,7 @@ public class TabbyCat {
 		private int scrollOffset = 0;
 
 		public HelpPanel() {
+			this.setFocusTraversalKeysEnabled(false);
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
 			ActionMap actionMap = this.getActionMap();
 			inputMap.put(k_Escape,"esc");
