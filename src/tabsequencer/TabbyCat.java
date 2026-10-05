@@ -1161,6 +1161,7 @@ public class TabbyCat {
 		int lassoCanvasNumber = -1;
 		int lassoT0 = -1;
 		int lassoRow0 = -1;
+		boolean isMouseLasso = false;
 
 		List<Shape> lastCanvasGrids = new ArrayList<>();
 		int lastVerticalTranslate = 0;
@@ -1210,6 +1211,8 @@ public class TabbyCat {
 			inputMap.put(k_PlayNextMeasure,"playnextmeasure");
 			actionMap.put("playnextmeasure", rToA(this::playTToNextMeasure));
 			
+			inputMap.put(k_Escape,"escape");
+			actionMap.put("escape", rToA(this::cancelSelectionMode));
 			inputMap.put(k_CtrlL,"ctrll");
 			actionMap.put("ctrll", rToA(this::ctrlL));
 			inputMap.put(k_CtrlC,"ctrlc");
@@ -1303,7 +1306,15 @@ public class TabbyCat {
 									? clickedRelativeRow
 									: rowBreaks.get(i - 1) + 1 + clickedRelativeRow;
 
-							if ((e.getModifiersEx() & java.awt.event.InputEvent.META_DOWN_MASK) != 0) {
+							if (e.isShiftDown()) {
+								projectData.getCursorT().set(Math.max(0, clickedT));
+								projectData.getSelectedRow().set(absoluteRow);
+								isInGrid = true;
+								if (!isSelectionMode.get()) {
+									isMouseLasso = true;
+									toggleSelectionMode();
+								}
+							} else if ((e.getModifiersEx() & java.awt.event.InputEvent.META_DOWN_MASK) != 0) {
 								projectData.getPlaybackT().set(Math.max(0, clickedT));
 							} else {
 								projectData.getCursorT().set(Math.max(0, clickedT));
@@ -1314,7 +1325,46 @@ public class TabbyCat {
 							break;
 						}
 					}
-					
+
+				}
+				@Override
+				public void mouseReleased(MouseEvent e) {
+					if (!isMouseLasso) return;
+					isMouseLasso = false;
+					double deviceScale = getGraphicsConfiguration().getDefaultTransform().getScaleX();
+					double scaledX = e.getX() * deviceScale / (double) UI_SCALE;
+					double scaledY = e.getY() * deviceScale / (double) UI_SCALE;
+					Pair<Integer,Integer> coords = gridCoordsFromMouse(scaledX, scaledY);
+					if (coords != null) {
+						projectData.getCursorT().set(Math.max(0, coords.a));
+						projectData.getSelectedRow().set(coords.b);
+					}
+					if (e.isMetaDown()) {
+						ctrlX();
+					} else {
+						ctrlC();
+					}
+				}
+			});
+			this.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+				@Override
+				public void mouseDragged(MouseEvent e) {
+					double deviceScale = getGraphicsConfiguration().getDefaultTransform().getScaleX();
+					double scaledX = e.getX() * deviceScale / (double) UI_SCALE;
+					double scaledY = e.getY() * deviceScale / (double) UI_SCALE;
+					Pair<Integer,Integer> coords = gridCoordsFromMouse(scaledX, scaledY);
+					if (coords != null) {
+						if (isMouseLasso) {
+							projectData.getCursorT().set(Math.max(0, coords.a));
+							projectData.getSelectedRow().set(coords.b);
+							repaint();
+						} else if (!isSelectionMode.get()) {
+							projectData.getCursorT().set(Math.max(0, coords.a));
+							projectData.getSelectedRow().set(coords.b);
+							isInGrid = true;
+							repaint();
+						}
+					}
 				}
 			});
 		}
@@ -1578,6 +1628,45 @@ public class TabbyCat {
 			repaint();
 		}
 		
+		private Pair<Integer,Integer> gridCoordsFromMouse(double scaledX, double scaledY) {
+			if (scaledY <= lastTopBarHeight + 5) return null;
+			double mx = scaledX;
+			double my = scaledY - lastVerticalTranslate;
+			for (int i = 0; i < lastCanvasGrids.size(); i++) {
+				Rectangle2D bounds = lastCanvasGrids.get(i).getBounds2D();
+				if (bounds.contains(mx, my)) {
+					int clickedT = projectData.getViewT().get()
+							+ (int) ((mx - bounds.getMinX()) / lastCellWidth);
+					int clickedRelativeRow = (int) ((my - bounds.getMinY()) / lastRowHeight);
+					int maxRelRow = (i == 0)
+							? numEventRows
+							: projectData.getCanvases().getCanvases().get(i - 1).getRowCount();
+					if (clickedRelativeRow < 0 || clickedRelativeRow >= maxRelRow) return null;
+					int absoluteRow = (i == 0)
+							? clickedRelativeRow
+							: rowBreaks.get(i - 1) + 1 + clickedRelativeRow;
+					return new Pair<>(clickedT, absoluteRow);
+				}
+			}
+			return null;
+		}
+
+		void cancelSelectionMode() {
+			if (isSelectionMode.get()) {
+				isSelectionMode.set(false);
+				lassoCanvasNumber = -1;
+				lassoT0 = -1;
+				lassoRow0 = -1;
+				isMouseLasso = false;
+				repaint();
+			} else if (!instrumentClipboard.isEmpty() || !eventClipboard.isEmpty()) {
+				instrumentClipboard.clear();
+				eventClipboard.clear();
+				lassoCanvasNumber = -1;
+				repaint();
+			}
+		}
+
 		public void toggleSelectionMode() {
 			
 			isSelectionMode.set(!isSelectionMode.get());
