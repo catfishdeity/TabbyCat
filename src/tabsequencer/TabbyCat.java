@@ -1163,6 +1163,10 @@ public class TabbyCat {
 		int lassoRow0 = -1;
 		boolean isMouseLasso = false;
 
+		double horizScrollAccum = 0.0;
+		double vertScrollAccum  = 0.0;
+		int viewY = 0;
+
 		List<Shape> lastCanvasGrids = new ArrayList<>();
 		int lastVerticalTranslate = 0;
 		int lastCellWidth = 1;
@@ -1367,8 +1371,28 @@ public class TabbyCat {
 					}
 				}
 			});
+			this.addMouseWheelListener(e -> {
+				double delta = e.getPreciseWheelRotation();
+				if (e.isShiftDown()) {
+					horizScrollAccum += delta;
+					int ticks = (int) horizScrollAccum;
+					if (ticks != 0) {
+						horizScrollAccum -= ticks;
+						projectData.getViewT().set(Math.max(0, projectData.getViewT().get() + ticks));
+						repaint();
+					}
+				} else {
+					vertScrollAccum += delta;
+					int px = (int) vertScrollAccum;
+					if (px != 0) {
+						vertScrollAccum -= px;
+						viewY = Math.max(0, viewY + px);
+						repaint();
+					}
+				}
+			});
 		}
-		
+
 		void hyphen() {
 			if (isInGrid) {
 				Pair<Integer,Integer> pair = 
@@ -2308,7 +2332,7 @@ public class TabbyCat {
 				
 			}
 						
-			lastVerticalTranslate = (int) Math.min(0, getBounds().getMaxY()-selectionRectangle.getMaxY()-rowHeight*2);
+			lastVerticalTranslate = (int) Math.min(0, getBounds().getMaxY()-selectionRectangle.getMaxY()-rowHeight*2) - viewY;
 			g.translate(0, lastVerticalTranslate);
 			stringPositions.entrySet().forEach(entry -> {
 				g.drawString(entry.getKey(),(int) entry.getValue().getX(),(int) entry.getValue().getY());
