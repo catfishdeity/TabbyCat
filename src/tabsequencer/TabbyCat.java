@@ -1504,9 +1504,13 @@ public class TabbyCat {
 		}
 
 		void backspace() {
-			if (!fileHasBeenModified.get()) {				
+			if (!instrumentClipboard.isEmpty() || !eventClipboard.isEmpty()) {
+				ctrlC();
+				return;
+			}
+			if (!fileHasBeenModified.get()) {
 				fileHasBeenModified.set(true);
-				updateWindowTitle();				
+				updateWindowTitle();
 			}
 			Pair<Integer,Integer> pair = 
 					getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
@@ -2041,6 +2045,12 @@ public class TabbyCat {
 			}
 		}
 		void enter() {
+			if (isInGrid) {
+				if (!instrumentClipboard.isEmpty() || !eventClipboard.isEmpty()) {
+					ctrlV();
+				}
+				return;
+			}
 			switch (sequencePosition) {
 			case NEW:
 				cardLayout.show(cardPanel, newProjectCardKey);
