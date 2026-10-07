@@ -29,6 +29,7 @@ public class ProjectFileData {
 		
 	private String songName = "Untitled";
 	private String artistName = "Unknown Artist";
+	private double uiScale = -1.0; // -1 means "use app default"
 
 	public ProjectFileData(CanvasesConfig canvases) {
 		this.canvases = canvases;
@@ -78,6 +79,14 @@ public class ProjectFileData {
 		this.artistName = artistName;
 	}
 
+	public double getUiScale() {
+		return uiScale;
+	}
+
+	public void setUiScale(double uiScale) {
+		this.uiScale = uiScale;
+	}
+
 
 
 	public void handleCharInput(char c) {
@@ -100,6 +109,7 @@ public class ProjectFileData {
 		e.setAttribute("selectedCanvas",selectedCanvas.get()+"");
 		e.setAttribute("tempo",tempo.get()+"");
 		e.setAttribute("shuffle",shuffle.get()+"");
+		if (uiScale > 0) e.setAttribute("uiScale", String.format("%.1f", uiScale));
 		e.appendChild(canvases.toXMLElement(doc, "canvases"));
 		Element eventTabData = doc.createElement("eventTabData");
 		e.appendChild(eventTabData);
@@ -199,7 +209,11 @@ public class ProjectFileData {
 		}
 		projectData.songName = e.getAttribute("songName");
 		projectData.artistName = e.getAttribute("artistName");
-		
+		String uiScaleAttr = e.getAttribute("uiScale");
+		if (!uiScaleAttr.isEmpty()) {
+			projectData.uiScale = Double.parseDouble(uiScaleAttr);
+		}
+
 		return projectData;
 	}
 
