@@ -148,6 +148,8 @@ public class TabbyCat {
 	static final String helpCardKey = "HELP";
 	static final String unsavedChangesCardKey = "UNSAVED CHANGES";
 	static final String settingsCardKey = "SETTINGS";
+	static final String audioOutputCardKey = "AUDIO OUTPUT";
+	static final String instrumentSettingsCardKey = "INSTRUMENT SETTINGS EDITOR";
 	
 	static final double MIDDLE_C = 220.0 * Math.pow(2d, 3.0 / 12.0);
 	static final int numEventRows = 3;
@@ -172,6 +174,8 @@ public class TabbyCat {
 	Map<DrumCanvasConfig,Synthesizer> drumSynths = new HashMap<>();
 	Map<Pair<StringCanvasConfig,Integer>,Synthesizer> stringSynths = new HashMap<>();
 	volatile Mixer.Info selectedAudioMixerInfo = null;
+	MidiChannel lastPreviewChannel = null;
+	int lastPreviewNote = -1;
 	
 	final AtomicReference<File> activeFile = new AtomicReference<>(null);
 	final AtomicBoolean fileHasBeenModified = new AtomicBoolean(false);
@@ -204,6 +208,8 @@ public class TabbyCat {
 	private SaveProjectPanel saveProjectPanel;
 	private UnsavedChangesPanel unsavedChangesPanel;
 	private SettingsPanel settingsPanel;
+	private AudioOutputPanel audioOutputPanel;
+	private InstrumentSettingsPanel instrumentSettingsPanel;
 	final AtomicBoolean exitAfterSave = new AtomicBoolean(false);
 	
 	private CardLayout cardLayout;
@@ -242,6 +248,7 @@ public class TabbyCat {
 	KeyStroke k_CtrlR = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " R");
 	KeyStroke k_CtrlS = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " S");
 	KeyStroke k_CtrlShiftS = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " shift S");
+	KeyStroke k_CtrlI = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " I");
 	
 	KeyStroke k_Space = KeyStroke.getKeyStroke("SPACE");
 
@@ -591,6 +598,59 @@ public class TabbyCat {
 		drumSynths.forEach((config, synth) -> { try { synth.close(); } catch (Exception ignored) {} });
 		drumSynths.clear();
 	}
+
+	void playPreviewNote(CanvasConfig canvasConfig, String token, int row) {
+		if (lastPreviewChannel != null && lastPreviewNote >= 0) {
+			lastPreviewChannel.noteOff(lastPreviewNote);
+			lastPreviewChannel = null;
+			lastPreviewNote = -1;
+		}
+		try {
+			if (canvasConfig instanceof StringCanvasConfig) {
+				StringCanvasConfig stringCanvas = (StringCanvasConfig) canvasConfig;
+				stringCanvas.getFrequency(token, row).ifPresent(freq -> {
+					try {
+						int channelNum = row % 15 >= 9 ? row % 15 + 1 : row % 15;
+						Synthesizer synth = getSynth(stringCanvas, row);
+						MidiChannel channel = synth.getChannels()[channelNum];
+						double n = 12 * Math.log(freq / 440.0) / Math.log(2) + 69;
+						int midiNote = (int) Math.round(n);
+						double bendRatio = (n - midiNote) / 2.0;
+						int pitchBend = Math.max(0, Math.min(16383, 8192 + (int)(bendRatio * 8192)));
+						ShortMessage pb = new ShortMessage();
+						pb.setMessage(ShortMessage.PITCH_BEND, channelNum, pitchBend & 0x7F, (pitchBend >> 7) & 0x7F);
+						synth.getReceiver().send(pb, -1);
+						channel.noteOn(midiNote, 90);
+						lastPreviewChannel = channel;
+						lastPreviewNote = midiNote;
+						Thread t = new Thread(() -> {
+							try { Thread.sleep(350); } catch (InterruptedException ignored) {}
+							channel.noteOff(midiNote);
+						});
+						t.setDaemon(true);
+						t.start();
+					} catch (Exception ex) { ex.printStackTrace(); }
+				});
+			} else if (canvasConfig instanceof DrumCanvasConfig) {
+				DrumCanvasConfig drumConfig = (DrumCanvasConfig) canvasConfig;
+				drumConfig.getMidiNumber(token).ifPresent(midiNumber -> {
+					try {
+						Synthesizer synth = getSynth(drumConfig);
+						MidiChannel channel = synth.getChannels()[9];
+						channel.noteOn(midiNumber, 90);
+						lastPreviewChannel = channel;
+						lastPreviewNote = midiNumber;
+						Thread t = new Thread(() -> {
+							try { Thread.sleep(350); } catch (InterruptedException ignored) {}
+							channel.noteOff(midiNumber);
+						});
+						t.setDaemon(true);
+						t.start();
+					} catch (Exception ex) { ex.printStackTrace(); }
+				});
+			}
+		} catch (Exception ex) { ex.printStackTrace(); }
+	}
 	
 	public void updateMeasureLinePositions() {
 		AtomicReference<TimeSignatureEvent> timeSignature = new AtomicReference<>(
@@ -668,6 +728,10 @@ public class TabbyCat {
 		cardPanel.add(unsavedChangesPanel,unsavedChangesCardKey);
 		settingsPanel = new SettingsPanel();
 		cardPanel.add(settingsPanel,settingsCardKey);
+		audioOutputPanel = new AudioOutputPanel();
+		cardPanel.add(audioOutputPanel,audioOutputCardKey);
+		instrumentSettingsPanel = new InstrumentSettingsPanel();
+		cardPanel.add(instrumentSettingsPanel,instrumentSettingsCardKey);
 		frame.getContentPane().add(cardPanel,BorderLayout.CENTER);
 		frame.pack();
 		Rectangle screenBounds = GraphicsEnvironment.getLocalGraphicsEnvironment()
@@ -1285,6 +1349,8 @@ public class TabbyCat {
 			actionMap.put("ctrls", rToA(this::ctrlS));
 			inputMap.put(k_CtrlShiftS,"ctrlshifts");
 			actionMap.put("ctrlshifts", rToA(this::showSaveAs));
+			inputMap.put(k_CtrlI,"ctrli");
+			actionMap.put("ctrli", rToA(this::ctrlI));
 			
 			inputMap.put(k_Enter,"enter");
 			actionMap.put("enter", rToA(this::enter));
@@ -1503,6 +1569,17 @@ public class TabbyCat {
 			cardLayout.show(cardPanel, saveProjectCardKey);
 		}
 
+		void ctrlI() {
+			if (projectData == null) return;
+			Pair<Integer,Integer> p = getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
+			int canvasNum = p.a;
+			if (canvasNum < 1 || canvasNum > projectData.getCanvases().getCanvases().size()) return;
+			CanvasConfig canvas = projectData.getCanvases().getCanvases().get(canvasNum - 1);
+			if (!(canvas instanceof StringCanvasConfig)) return;
+			instrumentSettingsPanel.prepare((StringCanvasConfig) canvas);
+			cardLayout.show(cardPanel, instrumentSettingsCardKey);
+		}
+
 		void backspace() {
 			if (!instrumentClipboard.isEmpty() || !eventClipboard.isEmpty()) {
 				ctrlC();
@@ -1561,7 +1638,7 @@ public class TabbyCat {
 				String token1 = token0+c;
 				if (canvasConfig.willAccept(token1,row)) {
 					projectData.getInstrumentData().put(dataKey, token1);
-					
+					playPreviewNote(canvasConfig, token1, row);
 					repaint();
 				}
 			}
@@ -2065,7 +2142,6 @@ public class TabbyCat {
 				mainInterfacePanel.showSaveAs();
 				break;
 			case SETTINGS:
-				settingsPanel.refreshMixers();
 				cardLayout.show(cardPanel, settingsCardKey);
 				break;
 			case HELP:
@@ -2948,9 +3024,7 @@ public class TabbyCat {
 	
 	class SettingsPanel extends JPanel {
 		double uiScaleValue = UI_SCALE;
-		int settingsFocus = 0; // 0 = UI Scale, 1 = Audio Output
-		List<Mixer.Info> mixerInfos = new ArrayList<>();
-		int audioDeviceCursor = 0; // 0 = Default, 1+ = index into mixerInfos
+		int settingsFocus = 0; // 0 = UI Scale, 1 = Output Device
 
 		public SettingsPanel() {
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
@@ -2962,56 +3036,46 @@ public class TabbyCat {
 			inputMap.put(k_Down, "down");
 			actionMap.put("down", rToA(this::down));
 			inputMap.put(k_Left, "left");
-			actionMap.put("left", rToA(() -> { settingsFocus = 0; repaint(); }));
+			actionMap.put("left", rToA(this::adjustLeft));
 			inputMap.put(k_Right, "right");
-			actionMap.put("right", rToA(() -> { settingsFocus = 1; repaint(); }));
+			actionMap.put("right", rToA(this::adjustRight));
 			inputMap.put(k_Enter, "enter");
 			actionMap.put("enter", rToA(this::enter));
 		}
 
-		void refreshMixers() {
-			mixerInfos = getOutputMixerInfos();
-			audioDeviceCursor = 0;
-			if (selectedAudioMixerInfo != null) {
-				for (int i = 0; i < mixerInfos.size(); i++) {
-					if (mixerInfos.get(i).getName().equals(selectedAudioMixerInfo.getName())) {
-						audioDeviceCursor = i + 1;
-						break;
-					}
-				}
-			}
-		}
-
 		void up() {
-			if (settingsFocus == 0) {
-				uiScaleValue = Math.min(10.0, Math.round((uiScaleValue + 0.1) * 10.0) / 10.0);
-				displayScale = uiScaleValue;
-				if (projectData != null) projectData.setUiScale(uiScaleValue);
-			} else {
-				int total = mixerInfos.size() + 1;
-				audioDeviceCursor = (audioDeviceCursor - 1 + total) % total;
-			}
+			settingsFocus = 0;
 			repaint();
 		}
 
 		void down() {
+			settingsFocus = 1;
+			repaint();
+		}
+
+		void adjustLeft() {
 			if (settingsFocus == 0) {
 				uiScaleValue = Math.max(0.1, Math.round((uiScaleValue - 0.1) * 10.0) / 10.0);
 				displayScale = uiScaleValue;
 				if (projectData != null) projectData.setUiScale(uiScaleValue);
-			} else {
-				int total = mixerInfos.size() + 1;
-				audioDeviceCursor = (audioDeviceCursor + 1) % total;
+				repaint();
 			}
-			repaint();
+		}
+
+		void adjustRight() {
+			if (settingsFocus == 0) {
+				uiScaleValue = Math.min(10.0, Math.round((uiScaleValue + 0.1) * 10.0) / 10.0);
+				displayScale = uiScaleValue;
+				if (projectData != null) projectData.setUiScale(uiScaleValue);
+				repaint();
+			}
 		}
 
 		void enter() {
 			if (settingsFocus == 1) {
-				selectedAudioMixerInfo = (audioDeviceCursor == 0) ? null : mixerInfos.get(audioDeviceCursor - 1);
-				resetSynths();
+				audioOutputPanel.refresh();
+				cardLayout.show(cardPanel, audioOutputCardKey);
 			}
-			cardLayout.show(cardPanel, mainInterfaceCardKey);
 		}
 
 		@Override
@@ -3043,17 +3107,101 @@ public class TabbyCat {
 			g.setPaint(uiFocused ? new Color(255, 255, 100) : Color.GRAY);
 			g.drawString(uiVal, valX, y);
 
-			// --- Audio Output section ---
+			// --- Output Device row ---
 			y += lineH + 8;
 			boolean audioFocused = settingsFocus == 1;
+			String deviceLabel = "Output Device:";
+			String deviceName = (selectedAudioMixerInfo == null) ? "Default (system)" : selectedAudioMixerInfo.getName();
+			int deviceLabelW = fm.stringWidth(deviceLabel);
+
 			g.setPaint(audioFocused ? Color.WHITE : Color.DARK_GRAY);
-			g.drawString("Audio Output:", x, y);
+			g.drawString(deviceLabel, x, y);
+			g.setPaint(audioFocused ? new Color(255, 255, 100) : Color.GRAY);
+			g.drawString(" " + deviceName, x + deviceLabelW, y);
+
+			// --- Nav hint ---
+			y += lineH * 2;
+			g.setPaint(new Color(70, 70, 70));
+			if (uiFocused) {
+				g.drawString("UP/DOWN: navigate   LEFT/RIGHT: adjust   ESC: back", x, y);
+			} else {
+				g.drawString("UP/DOWN: navigate   ENTER: open   ESC: back", x, y);
+			}
+		}
+	}
+
+	class AudioOutputPanel extends JPanel {
+		List<Mixer.Info> mixerInfos = new ArrayList<>();
+		int audioDeviceCursor = 0; // 0 = Default, 1+ = index into mixerInfos
+
+		public AudioOutputPanel() {
+			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap actionMap = this.getActionMap();
+			inputMap.put(k_Escape, "esc");
+			actionMap.put("esc", rToA(() -> { cardLayout.show(cardPanel, settingsCardKey); }));
+			inputMap.put(k_Up, "up");
+			actionMap.put("up", rToA(this::up));
+			inputMap.put(k_Down, "down");
+			actionMap.put("down", rToA(this::down));
+			inputMap.put(k_Enter, "enter");
+			actionMap.put("enter", rToA(this::enter));
+		}
+
+		void refresh() {
+			mixerInfos = getOutputMixerInfos();
+			audioDeviceCursor = 0;
+			if (selectedAudioMixerInfo != null) {
+				for (int i = 0; i < mixerInfos.size(); i++) {
+					if (mixerInfos.get(i).getName().equals(selectedAudioMixerInfo.getName())) {
+						audioDeviceCursor = i + 1;
+						break;
+					}
+				}
+			}
+		}
+
+		void up() {
+			int total = mixerInfos.size() + 1;
+			audioDeviceCursor = (audioDeviceCursor - 1 + total) % total;
+			repaint();
+		}
+
+		void down() {
+			int total = mixerInfos.size() + 1;
+			audioDeviceCursor = (audioDeviceCursor + 1) % total;
+			repaint();
+		}
+
+		void enter() {
+			selectedAudioMixerInfo = (audioDeviceCursor == 0) ? null : mixerInfos.get(audioDeviceCursor - 1);
+			resetSynths();
+			cardLayout.show(cardPanel, settingsCardKey);
+			settingsPanel.repaint();
+		}
+
+		@Override
+		public void paint(Graphics g_) {
+			Graphics2D g = (Graphics2D) g_;
+			g.setPaint(Color.black);
+			g.fill(getBounds());
+
+			double uiScaleValue = settingsPanel.uiScaleValue;
+			Font scaledFont = textFont.deriveFont((float)(textFont.getSize() * uiScaleValue / UI_SCALE));
+			FontMetrics fm = getFontMetrics(scaledFont);
+			g.setFont(scaledFont);
+
+			int lineH = fm.getHeight();
+			int x = 10;
+			int y = lineH;
+
+			g.setPaint(Color.WHITE);
+			g.drawString("Output Device:", x, y);
 
 			int indent = x + 12;
 			for (int i = 0; i <= mixerInfos.size(); i++) {
 				y += lineH;
 				String name = (i == 0) ? "Default (system)" : mixerInfos.get(i - 1).getName();
-				boolean isCursor = audioFocused && audioDeviceCursor == i;
+				boolean isCursor = audioDeviceCursor == i;
 				boolean isActive = (selectedAudioMixerInfo == null && i == 0)
 						|| (selectedAudioMixerInfo != null && i > 0
 								&& selectedAudioMixerInfo.getName().equals(mixerInfos.get(i - 1).getName()));
@@ -3070,10 +3218,155 @@ public class TabbyCat {
 				}
 			}
 
-			// --- Nav hint ---
 			y += lineH * 2;
 			g.setPaint(new Color(70, 70, 70));
-			g.drawString("LEFT/RIGHT: switch section   UP/DOWN: adjust   ENTER: confirm   ESC: back", x, y);
+			g.drawString("UP/DOWN: navigate   ENTER: select   ESC: back", x, y);
+		}
+	}
+
+	class InstrumentSettingsPanel extends JPanel {
+		StringCanvasConfig targetCanvas = null;
+		int menuFocus = 0; // 0 = Soundfont File, 1 = Bank, 2 = Instrument
+
+		public InstrumentSettingsPanel() {
+			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap actionMap = this.getActionMap();
+			inputMap.put(k_Escape, "esc");
+			actionMap.put("esc", rToA(this::esc));
+			inputMap.put(k_Up, "up");
+			actionMap.put("up", rToA(this::up));
+			inputMap.put(k_Down, "down");
+			actionMap.put("down", rToA(this::down));
+			inputMap.put(k_Left, "left");
+			actionMap.put("left", rToA(this::left));
+			inputMap.put(k_Right, "right");
+			actionMap.put("right", rToA(this::right));
+			inputMap.put(k_Enter, "enter");
+			actionMap.put("enter", rToA(this::enter));
+		}
+
+		void prepare(StringCanvasConfig canvas) {
+			targetCanvas = canvas;
+			menuFocus = 0;
+		}
+
+		void esc() {
+			if (targetCanvas != null) resetSynths();
+			cardLayout.show(cardPanel, mainInterfaceCardKey);
+		}
+
+		void up() {
+			menuFocus = Math.max(0, menuFocus - 1);
+			repaint();
+		}
+
+		void down() {
+			menuFocus = Math.min(2, menuFocus + 1);
+			repaint();
+		}
+
+		void left() {
+			if (targetCanvas == null) return;
+			if (menuFocus == 1) {
+				targetCanvas.setBank(Math.max(0, targetCanvas.getBank() - 1));
+				playPreview();
+				repaint();
+			} else if (menuFocus == 2) {
+				targetCanvas.setProgram(Math.max(0, targetCanvas.getProgram() - 1));
+				playPreview();
+				repaint();
+			}
+		}
+
+		void right() {
+			if (targetCanvas == null) return;
+			if (menuFocus == 1) {
+				targetCanvas.setBank(targetCanvas.getBank() + 1);
+				playPreview();
+				repaint();
+			} else if (menuFocus == 2) {
+				targetCanvas.setProgram(targetCanvas.getProgram() + 1);
+				playPreview();
+				repaint();
+			}
+		}
+
+		void enter() {
+			// Soundfont File (0) is a no-op for now; Bank (1) and Instrument (2) adjusted live
+		}
+
+		void playPreview() {
+			resetSynths();
+			try {
+				Synthesizer synth = getSynth(targetCanvas, 0);
+				MidiChannel channel = synth.getChannels()[0];
+				channel.noteOn(60, 90);
+				Thread t = new Thread(() -> {
+					try { Thread.sleep(400); } catch (InterruptedException ignored) {}
+					channel.noteOff(60);
+				});
+				t.setDaemon(true);
+				t.start();
+			} catch (Exception ex) {
+				ex.printStackTrace();
+			}
+		}
+
+		@Override
+		public void paint(Graphics g_) {
+			if (targetCanvas == null) return;
+			Graphics2D g = (Graphics2D) g_;
+			g.setPaint(Color.black);
+			g.fill(getBounds());
+
+			double uiScaleValue = settingsPanel.uiScaleValue;
+			Font scaledFont = textFont.deriveFont((float)(textFont.getSize() * uiScaleValue / UI_SCALE));
+			FontMetrics fm = getFontMetrics(scaledFont);
+			g.setFont(scaledFont);
+
+			int lineH = fm.getHeight();
+			int x = 10;
+			int y = lineH;
+
+			String title = "Instrument Settings: " + targetCanvas.getName();
+			g.setPaint(Color.WHITE);
+			g.drawString(title, x, y);
+
+			y += lineH + 4;
+
+			// Soundfont File row
+			drawRow(g, fm, x, y, 0, "Soundfont File:",
+				targetCanvas.getSoundfontFile().map(File::getName).orElse("Default"));
+
+			y += lineH + 8;
+
+			// Bank row (LEFT/RIGHT adjustable)
+			drawRow(g, fm, x, y, 1, "Bank:",
+				String.valueOf(targetCanvas.getBank()));
+
+			y += lineH + 8;
+
+			// Instrument row
+			drawRow(g, fm, x, y, 2, "Instrument:",
+				String.valueOf(targetCanvas.getProgram()));
+
+			y += lineH * 2;
+			g.setPaint(new Color(70, 70, 70));
+			if (menuFocus == 1 || menuFocus == 2) {
+				g.drawString("UP/DOWN: navigate   LEFT/RIGHT: adjust   ESC: apply & back", x, y);
+			} else {
+				g.drawString("UP/DOWN: navigate   ESC: apply & back", x, y);
+			}
+		}
+
+		private void drawRow(Graphics2D g, FontMetrics fm, int x, int y, int itemIndex,
+				String label, String value) {
+			boolean focused = menuFocus == itemIndex;
+			int labelW = fm.stringWidth(label);
+			g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+			g.drawString(label, x, y);
+			g.setPaint(focused ? new Color(255, 255, 100) : Color.GRAY);
+			g.drawString(" " + value, x + labelW, y);
 		}
 	}
 

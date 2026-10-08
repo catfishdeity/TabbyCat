@@ -9,7 +9,7 @@ import org.w3c.dom.Element;
 public abstract class CanvasConfig {
 	public abstract CanvasType getType();
 	protected final File soundfontFile;
-	protected final int bank, program;
+	protected int bank, program;
 	protected final String name;
 	
 	protected CanvasConfig(String name, File soundfontFile, int bank, int program) {
@@ -35,8 +35,16 @@ public abstract class CanvasConfig {
 		return bank;
 	}
 
+	public final void setBank(int bank) {
+		this.bank = bank;
+	}
+
 	public final int getProgram() {
 		return program;
+	}
+
+	public final void setProgram(int program) {
+		this.program = program;
 	}
 
 	public abstract boolean willAccept(String token, int row);
