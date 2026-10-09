@@ -253,6 +253,12 @@ public class TabbyCat {
 	
 	KeyStroke k_Space = KeyStroke.getKeyStroke("SPACE");
 
+	KeyStroke k_Delete   = KeyStroke.getKeyStroke("DELETE");
+	KeyStroke k_Home     = KeyStroke.getKeyStroke("HOME");
+	KeyStroke k_End      = KeyStroke.getKeyStroke("END");
+	KeyStroke k_PageUp   = KeyStroke.getKeyStroke("PAGE_UP");
+	KeyStroke k_PageDown = KeyStroke.getKeyStroke("PAGE_DOWN");
+
 	
 
 	void playbackDaemonFunction(long intendedFireTimeNanos) {
@@ -1375,6 +1381,17 @@ public class TabbyCat {
 			
 			inputMap.put(k_Hyphen,"hyphen");
 			actionMap.put("hyphen", rToA(this::hyphen));
+
+			inputMap.put(k_Delete,   "delete");
+			actionMap.put("delete",  rToA(this::delete));
+			inputMap.put(k_Home,     "home");
+			actionMap.put("home",    rToA(this::home));
+			inputMap.put(k_End,      "end");
+			actionMap.put("end",     rToA(this::end));
+			inputMap.put(k_PageUp,   "pageup");
+			actionMap.put("pageup",  rToA(this::pageUp));
+			inputMap.put(k_PageDown, "pagedown");
+			actionMap.put("pagedown",rToA(this::pageDown));
 			
 			for (char c = 'A'; c <= 'Z'; c++) {
 				char c_ = c;
@@ -1393,6 +1410,10 @@ public class TabbyCat {
 				@Override
 				public void mousePressed(MouseEvent e) {
 					requestFocusInWindow();
+					if (SwingUtilities.isRightMouseButton(e)) {
+						ctrlV();
+						return;
+					}
 					double deviceScale = getGraphicsConfiguration().getDefaultTransform().getScaleX();
 					double scaledX = e.getX() * deviceScale / displayScale;
 					double scaledY = e.getY() * deviceScale / displayScale;
@@ -1619,7 +1640,56 @@ public class TabbyCat {
 			updateMeasureLinePositions();
 			repaint();
 		}
-		
+
+		void delete() {
+			if (!isInGrid) return;
+			Pair<Integer,Integer> pair = getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
+			int canvasNumber = pair.a;
+			int row = pair.b;
+			if (canvasNumber == 0) {
+				projectData.getEventData().remove(new Point(projectData.getCursorT().get(), row));
+			} else {
+				String name = projectData.getCanvases().getCanvases().get(canvasNumber-1).getName();
+				projectData.getInstrumentData().remove(new InstrumentDataKey(name, projectData.getCursorT().get(), row));
+			}
+			if (!fileHasBeenModified.get()) {
+				fileHasBeenModified.set(true);
+				updateWindowTitle();
+			}
+			updateMeasureLinePositions();
+			repaint();
+		}
+
+		void home() {
+			if (!isInGrid) return;
+			projectData.getCursorT().set(0);
+			projectData.getViewT().set(0);
+			repaint();
+		}
+
+		void end() {
+			if (!isInGrid) return;
+			advanceCursorToFinalEvent();
+		}
+
+		void pageUp() {
+			if (!isInGrid) return;
+			double deviceScale = getGraphicsConfiguration().getDefaultTransform().getScaleX();
+			int page = (int)((getWidth() * deviceScale / displayScale / getCellWidth()) * 0.8);
+			projectData.getCursorT().updateAndGet(i -> Math.max(0, i - page));
+			projectData.getViewT().updateAndGet(i -> Math.max(0, i - page));
+			repaint();
+		}
+
+		void pageDown() {
+			if (!isInGrid) return;
+			double deviceScale = getGraphicsConfiguration().getDefaultTransform().getScaleX();
+			int page = (int)((getWidth() * deviceScale / displayScale / getCellWidth()) * 0.8);
+			projectData.getCursorT().getAndUpdate(i -> i + page);
+			projectData.getViewT().getAndUpdate(i -> i + page);
+			repaint();
+		}
+
 		void handleCharInput(char c) {
 			if (!fileHasBeenModified.get()) {				
 				fileHasBeenModified.set(true);
@@ -2220,7 +2290,18 @@ public class TabbyCat {
 		}
 		
 		public void advanceCursorToFinalEvent() {
-
+			int lastT = 0;
+			for (Point p : projectData.getEventData().keySet()) {
+				lastT = Math.max(lastT, p.x);
+			}
+			for (InstrumentDataKey k : projectData.getInstrumentData().keySet()) {
+				lastT = Math.max(lastT, k.getTime());
+			}
+			projectData.getCursorT().set(lastT);
+			double deviceScale = getGraphicsConfiguration().getDefaultTransform().getScaleX();
+			int visibleCols = (int)(getWidth() * deviceScale / displayScale / getCellWidth());
+			projectData.getViewT().set(Math.max(0, lastT - visibleCols + scrollTimeMargin));
+			repaint();
 		}
 		
 
@@ -3459,6 +3540,11 @@ public class TabbyCat {
 		l.add(new Pair<>("  A-Z, 0-9              Enter note at cursor", ENTRY_COLOR));
 		l.add(new Pair<>("  - (hyphen)            Insert slide (string grids)", ENTRY_COLOR));
 		l.add(new Pair<>("  Backspace             Delete note at cursor", ENTRY_COLOR));
+		l.add(new Pair<>("  Delete                Clear cell (always)", ENTRY_COLOR));
+		l.add(new Pair<>("  Home                  Jump to start", ENTRY_COLOR));
+		l.add(new Pair<>("  End                   Jump to last event", ENTRY_COLOR));
+		l.add(new Pair<>("  Page Up / Page Down   Scroll 80% of window", ENTRY_COLOR));
+		l.add(new Pair<>("  Right-click           Paste clipboard", ENTRY_COLOR));
 		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " R                Set / clear repeat point", ENTRY_COLOR));
 		l.add(new Pair<>("  Space                 Play / Pause", ENTRY_COLOR));
 		l.add(new Pair<>("  ,                     Exit to menu bar", ENTRY_COLOR));
