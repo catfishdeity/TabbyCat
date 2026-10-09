@@ -8,7 +8,7 @@ import org.w3c.dom.Element;
 
 public abstract class CanvasConfig {
 	public abstract CanvasType getType();
-	protected final File soundfontFile;
+	protected File soundfontFile;
 	protected int bank, program;
 	protected final String name;
 	
@@ -23,6 +23,10 @@ public abstract class CanvasConfig {
 	
 	public final Optional<File> getSoundfontFile() {
 		return Optional.ofNullable(soundfontFile);
+	}
+
+	public final void setSoundfontFile(File f) {
+		this.soundfontFile = f;
 	}
 	
 	public abstract Element toXMLElement(Document doc, String tagName);

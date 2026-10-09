@@ -177,6 +177,7 @@ public class TabbyCat {
 	final File defaultProjectPath = new File("scores");
 	final File recoveryFile = new File("recovery.meow");
 	
+	List<File> sf2Files = new ArrayList<>();
 	Map<File,Soundbank> loadedSoundbanks = new HashMap<>();
 	Map<DrumCanvasConfig,Synthesizer> drumSynths = new HashMap<>();
 	Map<Pair<StringCanvasConfig,Integer>,Synthesizer> stringSynths = new HashMap<>();
@@ -723,6 +724,12 @@ public class TabbyCat {
 	}
 
 	private TabbyCat() {
+		File sf2Dir = new File("sf2");
+		File[] sf2Array = sf2Dir.listFiles((d, n) -> n.toLowerCase().endsWith(".sf2"));
+		if (sf2Array != null) {
+			Arrays.sort(sf2Array);
+			for (File f : sf2Array) sf2Files.add(f);
+		}
 		createGui();
 	}
 	
@@ -3324,8 +3331,23 @@ public class TabbyCat {
 	class InstrumentSettingsPanel extends JPanel {
 		StringCanvasConfig targetCanvas = null;
 		int menuFocus = 0; // 0 = Soundfont File, 1 = Bank, 2 = Instrument, 3 = EDO, ...
+		int selectedSfIndex = 0; // 0 = Default, 1..sf2Files.size() = sf2Files entries
 		private final StringBuffer edoBuffer = new StringBuffer();
 		private final StringBuffer freqBuffer = new StringBuffer();
+
+		private int sfChoiceCount() { return sf2Files.size() + 1; }
+		private File sfChoiceFile(int idx) { return idx == 0 ? null : sf2Files.get(idx - 1); }
+		private String sfChoiceName(int idx) {
+			return idx == 0 ? "Default" : sf2Files.get(idx - 1).getName();
+		}
+		private int sfIndexForCanvas(StringCanvasConfig canvas) {
+			if (!canvas.getSoundfontFile().isPresent()) return 0;
+			File current = canvas.getSoundfontFile().get();
+			for (int i = 0; i < sf2Files.size(); i++) {
+				if (sf2Files.get(i).getName().equals(current.getName())) return i + 1;
+			}
+			return 0;
+		}
 
 		public InstrumentSettingsPanel() {
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
@@ -3393,6 +3415,7 @@ public class TabbyCat {
 		void prepare(StringCanvasConfig canvas) {
 			targetCanvas = canvas;
 			menuFocus = 0;
+			selectedSfIndex = sfIndexForCanvas(canvas);
 			edoBuffer.setLength(0);
 			edoBuffer.append(fmtFloat(canvas.getEd2()));
 			freqBuffer.setLength(0);
@@ -3462,7 +3485,10 @@ public class TabbyCat {
 
 		void left() {
 			if (targetCanvas == null) return;
-			if (menuFocus == 1) {
+			if (menuFocus == 0) {
+				selectedSfIndex = Math.max(0, selectedSfIndex - 1);
+				repaint();
+			} else if (menuFocus == 1) {
 				targetCanvas.setBank(Math.max(0, targetCanvas.getBank() - 1));
 				playPreview();
 				repaint();
@@ -3484,7 +3510,10 @@ public class TabbyCat {
 
 		void right() {
 			if (targetCanvas == null) return;
-			if (menuFocus == 1) {
+			if (menuFocus == 0) {
+				selectedSfIndex = Math.min(sfChoiceCount() - 1, selectedSfIndex + 1);
+				repaint();
+			} else if (menuFocus == 1) {
 				targetCanvas.setBank(targetCanvas.getBank() + 1);
 				playPreview();
 				repaint();
@@ -3505,7 +3534,16 @@ public class TabbyCat {
 		}
 
 		void enter() {
-			if (menuFocus == 8) {
+			if (menuFocus == 0 && targetCanvas != null) {
+				File chosen = sfChoiceFile(selectedSfIndex);
+				if (chosen != null && !loadedSoundbanks.containsKey(chosen)) {
+					try { loadedSoundbanks.put(chosen, MidiSystem.getSoundbank(chosen)); }
+					catch (Exception ignored) {}
+				}
+				targetCanvas.setSoundfontFile(chosen);
+				playPreview();
+				repaint();
+			} else if (menuFocus == 8) {
 				commitEdo(); commitFreq();
 				stringEditorPanel.prepare(targetCanvas);
 				cardLayout.show(cardPanel, stringEditorCardKey);
@@ -3556,8 +3594,23 @@ public class TabbyCat {
 			y += lineH + 4;
 
 			// Soundfont File row
-			drawRow(g, fm, x, y, 0, "Soundfont File:",
-				targetCanvas.getSoundfontFile().map(File::getName).orElse("Default"));
+			{
+				boolean focused = menuFocus == 0;
+				String label = "Soundfont File:";
+				String selected = sfChoiceName(selectedSfIndex);
+				int loadedIdx = sfIndexForCanvas(targetCanvas);
+				int labelW = fm.stringWidth(label);
+				int selectedW = fm.stringWidth(" " + selected);
+				g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+				g.drawString(label, x, y);
+				g.setPaint(focused ? new Color(255, 255, 100) : Color.GRAY);
+				g.drawString(" " + selected, x + labelW, y);
+				if (selectedSfIndex != loadedIdx) {
+					g.setPaint(new Color(100, 100, 100));
+					String loadedName = sfChoiceName(loadedIdx);
+					g.drawString("  (loaded: " + loadedName + "  ENTER to apply)", x + labelW + selectedW, y);
+				}
+			}
 
 			y += lineH + 8;
 
@@ -3638,7 +3691,7 @@ public class TabbyCat {
 
 			y += lineH * 2;
 			g.setPaint(new Color(70, 70, 70));
-			g.drawString("UP/DOWN: navigate   LEFT/RIGHT: adjust   ENTER: open editor   ESC: apply & back", x, y);
+			g.drawString("UP/DOWN: navigate   LEFT/RIGHT: adjust   ENTER: apply/open   ESC: apply & back", x, y);
 		}
 
 		private void drawRow(Graphics2D g, FontMetrics fm, int x, int y, int itemIndex,
