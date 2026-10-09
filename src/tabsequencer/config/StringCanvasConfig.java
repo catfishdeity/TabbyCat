@@ -58,7 +58,7 @@ public class StringCanvasConfig extends CanvasConfig {
 	private int maxFrets, maxHarmonic, fretStepSkip;
 	private double ed2, baseFrequency;
 	
-	private final Map<String,Double> additionalPitchMap;
+	private Map<String,Double> additionalPitchMap;
 	public StringCanvasConfig(double[] edoSteps, String name, int maxFrets, int maxHarmonic, double ed2, File soundfontFile,
 			int bank, int program, int fretStepSkip, double baseFrequency, Map<String,Double> additionalPitchMap) {
 		super(name,soundfontFile,bank,program);
@@ -101,6 +101,9 @@ public class StringCanvasConfig extends CanvasConfig {
 	}
 
 	public void setEdoSteps(double[] steps) { this.edoSteps = steps.length >= 1 ? steps : this.edoSteps; }
+	public void setAdditionalPitchMap(java.util.LinkedHashMap<String,Double> map) {
+		this.additionalPitchMap = Collections.unmodifiableMap(new java.util.LinkedHashMap<>(map));
+	}
 	public void setEd2(double v)           { this.ed2 = Math.max(1.0, v); }
 	public void setFretStepSkip(int v)     { this.fretStepSkip = Math.max(1, v); }
 	public void setMaxFrets(int v)         { this.maxFrets = Math.max(1, v); }

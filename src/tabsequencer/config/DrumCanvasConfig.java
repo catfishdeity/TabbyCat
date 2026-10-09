@@ -12,8 +12,8 @@ import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
 public class DrumCanvasConfig extends CanvasConfig {
-	private final List<PercToken> tokens;
-	private final List<PercRowType> rowTypes;
+	private List<PercToken> tokens;
+	private List<PercRowType> rowTypes;
 	
 	protected DrumCanvasConfig(String name, File soundfontFile, int bank, int program,List<PercRowType> rowTypes, List<PercToken> tokens) {
 		super(name, soundfontFile, bank, program);
@@ -26,6 +26,12 @@ public class DrumCanvasConfig extends CanvasConfig {
 	}
 	public List<PercToken> getTokens() {
 		return tokens;
+	}
+	public void setRowTypes(List<PercRowType> r) {
+		this.rowTypes = Collections.unmodifiableList(new java.util.ArrayList<>(r));
+	}
+	public void setTokens(List<PercToken> t) {
+		this.tokens = Collections.unmodifiableList(new java.util.ArrayList<>(t));
 	}
 	@Override
 	public CanvasType getType() {

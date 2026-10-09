@@ -1,6 +1,6 @@
 package tabsequencer.config;
 
-enum PercRowType {
+public enum PercRowType {
 	HAND, FOOT;
 	
 	public static PercRowType lookup(String token) {
