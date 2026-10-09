@@ -18,6 +18,7 @@ import tabsequencer.InstrumentDataKey;
 import tabsequencer.events.ControlEvent;
 import tabsequencer.events.ProgramChange;
 import tabsequencer.events.StickyNote;
+import tabsequencer.events.ShuffleEvent;
 import tabsequencer.events.TempoEvent;
 import tabsequencer.events.TimeSignatureEvent;
 
@@ -166,6 +167,11 @@ public class ProjectFileData {
 			IntStream.range(0, tempoNodes.getLength()).mapToObj(k -> (Element) tempoNodes.item(k))
 					.map(TempoEvent::fromXMLElement).forEach(tempo -> {
 						projectData.eventData.put(p, tempo);
+					});
+			NodeList shuffleNodes = eventNode.getElementsByTagName("shuffle");
+			IntStream.range(0, shuffleNodes.getLength()).mapToObj(k -> (Element) shuffleNodes.item(k))
+					.map(ShuffleEvent::fromXMLElement).forEach(s -> {
+						projectData.eventData.put(p, s);
 					});
 			NodeList programChangeNodes = eventNode.getElementsByTagName("programChange");
 			IntStream.range(0, programChangeNodes.getLength()).mapToObj(k -> (Element) programChangeNodes.item(k))

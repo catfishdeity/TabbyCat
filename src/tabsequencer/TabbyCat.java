@@ -105,6 +105,7 @@ import tabsequencer.config.StringCanvasConfig;
 import tabsequencer.events.ControlEvent;
 import tabsequencer.events.ControlEventType;
 import tabsequencer.events.StickyNote;
+import tabsequencer.events.ShuffleEvent;
 import tabsequencer.events.TempoEvent;
 import tabsequencer.events.TimeSignatureDenominator;
 import tabsequencer.events.TimeSignatureEvent;
@@ -145,9 +146,9 @@ public class TabbyCat {
 	static final String saveProjectCardKey = "SAVE PROJECT";
 	static final String timeSignatureEventCardKey = "TIME SIGNATURE";
 	static final String tempoEventCardKey = "TEMPO EVENT";
+	static final String shuffleEventCardKey = "SHUFFLE EVENT";
 	static final String notesEventCardKey = "NEW NOTE";;
 	static final String helpCardKey = "HELP";
-	static final String unsavedChangesCardKey = "UNSAVED CHANGES";
 	static final String settingsCardKey = "SETTINGS";
 	static final String audioOutputCardKey = "AUDIO OUTPUT";
 	static final String instrumentSettingsCardKey = "INSTRUMENT SETTINGS EDITOR";
@@ -169,7 +170,7 @@ public class TabbyCat {
 
 	FileFilter fileFilter = new FileNameExtensionFilter(".meow files (.meow)", "meow");
 	final File defaultProjectPath = new File("scores");
-	final File lastProjectTokenFile = new File("lastproject.txt");
+	final File recoveryFile = new File("recovery.meow");
 	
 	Map<File,Soundbank> loadedSoundbanks = new HashMap<>();
 	Map<DrumCanvasConfig,Synthesizer> drumSynths = new HashMap<>();
@@ -201,13 +202,13 @@ public class TabbyCat {
 
 	private TimeSignatureEventPanel timeSignatureEventPanel;
 	private TempoEventPanel tempoEventPanel;
-	private NotesEventPanel notesEventPanel;
+	private ShuffleEventPanel shuffleEventPanel;
+	private TextInputPanel notesEventPanel;
 	private LoadProjectPanel loadProjectPanel;
 	private NewProjectPanel newProjectPanel;
 	private MainInterfacePanel mainInterfacePanel;
 	private HelpPanel helpPanel;
 	private SaveProjectPanel saveProjectPanel;
-	private UnsavedChangesPanel unsavedChangesPanel;
 	private SettingsPanel settingsPanel;
 	private AudioOutputPanel audioOutputPanel;
 	private InstrumentSettingsPanel instrumentSettingsPanel;
@@ -316,8 +317,11 @@ public class TabbyCat {
 		.forEach(a -> {
 			switch (a.getType()) {			
 			case TEMPO:
-				projectData.getTempo().set(((TempoEvent) a).getTempo());				
-				break;			
+				projectData.getTempo().set(((TempoEvent) a).getTempo());
+				break;
+			case SHUFFLE:
+				projectData.getShuffle().set(((ShuffleEvent) a).getShuffle());
+				break;
 			default:
 				break;
 			}
@@ -727,12 +731,21 @@ public class TabbyCat {
 		cardPanel.add(timeSignatureEventPanel,timeSignatureEventCardKey);
 		tempoEventPanel = new TempoEventPanel();
 		cardPanel.add(tempoEventPanel,tempoEventCardKey);
-		notesEventPanel = new NotesEventPanel();
+		shuffleEventPanel = new ShuffleEventPanel();
+		cardPanel.add(shuffleEventPanel, shuffleEventCardKey);
+		notesEventPanel = new TextInputPanel(
+			"Add note:",
+			text -> {
+				projectData.getEventData().put(
+					new Point(projectData.getCursorT().get(), projectData.getSelectedRow().get()),
+					new StickyNote(text));
+				cardLayout.show(cardPanel, mainInterfaceCardKey);
+			},
+			() -> cardLayout.show(cardPanel, mainInterfaceCardKey)
+		);
 		cardPanel.add(notesEventPanel,notesEventCardKey);
 		helpPanel = new HelpPanel();
 		cardPanel.add(helpPanel,helpCardKey);
-		unsavedChangesPanel = new UnsavedChangesPanel();
-		cardPanel.add(unsavedChangesPanel,unsavedChangesCardKey);
 		settingsPanel = new SettingsPanel();
 		cardPanel.add(settingsPanel,settingsCardKey);
 		audioOutputPanel = new AudioOutputPanel();
@@ -751,44 +764,29 @@ public class TabbyCat {
 		frame.addWindowListener(new java.awt.event.WindowAdapter() {
 			@Override
 			public void windowClosing(java.awt.event.WindowEvent e) {
-				if (unsavedChangesPanel.isShowing()) {
-					System.exit(0);
-				} else if (fileHasBeenModified.get()) {
-					cardLayout.show(cardPanel, unsavedChangesCardKey);
-				} else {
-					System.exit(0);
-				}
+				System.exit(0);
 			}
 		});
 
-		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-			File f = activeFile.get();
-			try {
-				if (f != null) {
-					java.nio.file.Files.write(lastProjectTokenFile.toPath(), f.getAbsolutePath().getBytes(StandardCharsets.UTF_8));
-				} else {
-					lastProjectTokenFile.delete();
-				}
-			} catch (Exception ignored) {}
-		}));
+		Runtime.getRuntime().addShutdownHook(new Thread(this::saveRecovery));
 
-		if (lastProjectTokenFile.exists()) {
+		if (recoveryFile.exists()) {
 			try {
-				String path = new String(java.nio.file.Files.readAllBytes(lastProjectTokenFile.toPath()), StandardCharsets.UTF_8).trim();
-				File last = new File(path);
-				if (last.exists()) {
-					loadXML(last);
-					activeFile.set(last);
-					fileHasBeenModified.set(false);
-					updateWindowTitle();
-					cardLayout.show(cardPanel, mainInterfaceCardKey);
-					Rectangle lastProjScreenBounds = GraphicsEnvironment.getLocalGraphicsEnvironment()
-							.getDefaultScreenDevice().getDefaultConfiguration().getBounds();
-					frame.pack();
-					frame.setSize(new Dimension(
-							(int) lastProjScreenBounds.getWidth(),
-							(int) Math.min(lastProjScreenBounds.getHeight(), mainInterfacePanel.computeNeededHeight())));
+				Element root = loadXML(recoveryFile);
+				String afPath = root.getAttribute("activeFilePath");
+				if (afPath != null && !afPath.isEmpty()) {
+					activeFile.set(new File(afPath));
 				}
+				String wasModified = root.getAttribute("wasModified");
+				fileHasBeenModified.set("true".equals(wasModified));
+				updateWindowTitle();
+				cardLayout.show(cardPanel, mainInterfaceCardKey);
+				Rectangle lastProjScreenBounds = GraphicsEnvironment.getLocalGraphicsEnvironment()
+						.getDefaultScreenDevice().getDefaultConfiguration().getBounds();
+				frame.pack();
+				frame.setSize(new Dimension(
+						(int) lastProjScreenBounds.getWidth(),
+						(int) Math.min(lastProjScreenBounds.getHeight(), mainInterfacePanel.computeNeededHeight())));
 			} catch (Exception ignored) {}
 		}
 		if (projectData == null) {
@@ -799,9 +797,7 @@ public class TabbyCat {
 	}
 	
 
-	void loadXML(File file) throws Exception {
-		
-
+	Element loadXML(File file) throws Exception {
 		SchemaFactory schemaF = SchemaFactory.newInstance("http://www.w3.org/2001/XMLSchema");
 		Schema schema = schemaF.newSchema(new File("schemas/projectFiles.xsd"));
 		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
@@ -809,7 +805,8 @@ public class TabbyCat {
 		dbf.setSchema(schema);
 		DocumentBuilder db = dbf.newDocumentBuilder();
 		Document doc = db.parse(file);
-		ProjectFileData projectFileData = ProjectFileData.fromXMLElement(doc.getDocumentElement());
+		Element root = doc.getDocumentElement();
+		ProjectFileData projectFileData = ProjectFileData.fromXMLElement(root);
 		this.projectData = projectFileData;
 		if (projectFileData.getUiScale() > 0) {
 			displayScale = projectFileData.getUiScale();
@@ -817,19 +814,18 @@ public class TabbyCat {
 		}
 		updateMeasureLinePositions();
 		for (CanvasConfig canvasConfig : projectData.getCanvases().getCanvases()) {
-			if (canvasConfig instanceof StringCanvasConfig ) {
+			if (canvasConfig instanceof StringCanvasConfig) {
 				StringCanvasConfig a = (StringCanvasConfig) canvasConfig;
 				for (int row = 0; row < a.getRowCount(); row++) {
-					getSynth(a,row);
+					getSynth(a, row);
 				}
 			} else {
-				getSynth((DrumCanvasConfig)canvasConfig);
+				getSynth((DrumCanvasConfig) canvasConfig);
 			}
 		}
-		
+		return root;
 	}
 
-	
 	void saveXML(File file) throws Exception {
 		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
 		DocumentBuilder db = dbf.newDocumentBuilder();
@@ -837,12 +833,29 @@ public class TabbyCat {
 		Element root = projectData.toXMLElement(doc);
 		doc.appendChild(root);
 		TransformerFactory tf = TransformerFactory.newInstance();
-		Transformer t  = tf.newTransformer();
-		t.setOutputProperty(OutputKeys.INDENT,"yes");
-		t.setOutputProperty("{http://xml.apache.org/xslt}indent-amount","4");
+		Transformer t = tf.newTransformer();
+		t.setOutputProperty(OutputKeys.INDENT, "yes");
+		t.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "4");
 		t.transform(new DOMSource(doc), new StreamResult(file));
-		t.transform(new DOMSource(doc), new StreamResult(System.out));
-		
+	}
+
+	void saveRecovery() {
+		if (projectData == null) return;
+		try {
+			DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+			DocumentBuilder db = dbf.newDocumentBuilder();
+			Document doc = db.newDocument();
+			Element root = projectData.toXMLElement(doc);
+			File af = activeFile.get();
+			if (af != null) root.setAttribute("activeFilePath", af.getAbsolutePath());
+			root.setAttribute("wasModified", Boolean.toString(fileHasBeenModified.get()));
+			doc.appendChild(root);
+			TransformerFactory tf = TransformerFactory.newInstance();
+			Transformer t = tf.newTransformer();
+			t.setOutputProperty(OutputKeys.INDENT, "yes");
+			t.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "4");
+			t.transform(new DOMSource(doc), new StreamResult(recoveryFile));
+		} catch (Exception ignored) {}
 	}
 	AbstractAction rToA(Runnable r) {
 		return new AbstractAction() {
@@ -893,8 +906,13 @@ public class TabbyCat {
 				char c_ = c;
 				actionMap.put(String.valueOf(c),rToA(()->handleChar(c_)));
 			}
+			inputMap.put(k_Space, "space");
+			actionMap.put("space", rToA(() -> {
+				if (selectedIndex == 0) { songName.append(' '); repaint(); }
+				else if (selectedIndex == 1) { artistName.append(' '); repaint(); }
+			}));
 		}
-		
+
 		void handleChar(char c) {
 			
 			if (selectedIndex == 0) {
@@ -983,6 +1001,8 @@ public class TabbyCat {
 							indexMap.entrySet().stream().map(a->new Pair<>(a.getKey(),a.getValue()))
 							.sorted(cmp1.thenComparing(cmp2)).map(a->a.a).collect(Collectors.toList()));
 				projectData = new ProjectFileData(config);
+				projectData.setSongName(songName.toString());
+				projectData.setArtistName(artistName.toString());
 				projectData.setUiScale(displayScale);
 				activeFile.set(null);
 				fileHasBeenModified.set(false);
@@ -1014,7 +1034,7 @@ public class TabbyCat {
 			g.fillRect(textFieldX,y-rowHeight,textFieldWidth,rowHeight);
 			g.setPaint(Color.WHITE);
 			g.setClip(new Rectangle2D.Double(textFieldX,y-rowHeight,textFieldWidth,rowHeight));
-			g.drawString(songName.toString(),textFieldX,y);
+			g.drawString(songName.toString() + (selectedIndex == 0 ? "|" : ""),textFieldX,y);
 			g.setClip(null);
 			y+=rowHeight;
 			g.setPaint(Color.WHITE);
@@ -1023,7 +1043,7 @@ public class TabbyCat {
 			g.fillRect(textFieldX,y-rowHeight,textFieldWidth,rowHeight);
 			g.setPaint(Color.WHITE);
 			g.setClip(new Rectangle2D.Double(textFieldX,y-rowHeight,textFieldWidth,rowHeight));
-			g.drawString(artistName.toString(),textFieldX,y);
+			g.drawString(artistName.toString() + (selectedIndex == 1 ? "|" : ""),textFieldX,y);
 			g.setClip(null);
 			y+=rowHeight;
 			
@@ -1187,89 +1207,6 @@ public class TabbyCat {
 		}
 	}
 	
-	private static final List<Pair<String,Color>> UNSAVED_OPTIONS = Arrays.asList(
-		new Pair<>("Yes  — save and close",   new Color(180, 255, 180)),
-		new Pair<>("No   — close without saving", new Color(255, 180, 180)),
-		new Pair<>("Cancel",                   new Color(180, 180, 255))
-	);
-
-	class UnsavedChangesPanel extends JPanel {
-		private int selectedIndex = 0;
-
-		public UnsavedChangesPanel() {
-			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-			ActionMap actionMap = this.getActionMap();
-			inputMap.put(k_Escape,"esc");
-			actionMap.put("esc", rToA(()->cardLayout.show(cardPanel, mainInterfaceCardKey)));
-			inputMap.put(k_Up,   "up");
-			actionMap.put("up",   rToA(this::up));
-			inputMap.put(k_Down, "down");
-			actionMap.put("down", rToA(this::down));
-			inputMap.put(k_Enter,"enter");
-			actionMap.put("enter",rToA(this::enter));
-		}
-
-		private void up() {
-			selectedIndex = (selectedIndex == 0) ? UNSAVED_OPTIONS.size()-1 : selectedIndex-1;
-			repaint();
-		}
-
-		private void down() {
-			selectedIndex = (selectedIndex == UNSAVED_OPTIONS.size()-1) ? 0 : selectedIndex+1;
-			repaint();
-		}
-
-		private void enter() {
-			switch (selectedIndex) {
-				case 0: { // Yes
-					if (activeFile.get() != null) {
-						try {
-							saveXML(activeFile.get());
-						} catch (Exception ex) {
-							javax.swing.JOptionPane.showMessageDialog(frame, ex.toString(), "Save Failed", javax.swing.JOptionPane.ERROR_MESSAGE);
-							return;
-						}
-						fileHasBeenModified.set(false);
-						System.exit(0);
-					} else {
-						exitAfterSave.set(true);
-						saveProjectPanel.setFileName(
-								String.format("%s.meow",
-										java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
-												.format(java.time.LocalDateTime.now(java.time.ZoneId.of("Z")))));
-						cardLayout.show(cardPanel, saveProjectCardKey);
-					}
-					break;
-				}
-				case 1: System.exit(0); break; // No
-				case 2: cardLayout.show(cardPanel, mainInterfaceCardKey); break; // Cancel
-			}
-		}
-
-		@Override
-		public void paint(Graphics g_) {
-			Graphics2D g = (Graphics2D) g_;
-			g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-			g.setFont(textFont);
-			g.setPaint(Color.BLACK);
-			g.fill(this.getBounds());
-
-			int y = textFontMetrics.getMaxAscent();
-			g.setPaint(new Color(255, 200, 80));
-			g.drawString("YOUR PROJECT HAS UNSAVED CHANGES", 2, y);
-			y += textFontMetrics.getMaxAscent();
-
-			int w = UNSAVED_OPTIONS.stream().mapToInt(p -> textFontMetrics.stringWidth(p.a)).max().getAsInt();
-			for (int i = 0; i < UNSAVED_OPTIONS.size(); i++) {
-				Pair<String,Color> p = UNSAVED_OPTIONS.get(i);
-				g.setPaint(selectedIndex == i ? Color.DARK_GRAY : Color.BLACK);
-				g.fillRect(0, y - textFontMetrics.getMaxAscent(), w, textFontMetrics.getMaxAscent());
-				g.setPaint(p.b);
-				g.drawString(p.a, 2, y);
-				y += textFontMetrics.getMaxAscent();
-			}
-		}
-	}
 
 	enum SequencePosition {
 		NEW, OPEN, SAVE, SAVE_AS, TEMPO, SHUFFLE, TAPPER, SETTINGS, HELP;
@@ -1706,6 +1643,8 @@ public class TabbyCat {
 					cardLayout.show(cardPanel, timeSignatureEventCardKey);
 				} else if (c == 'S') {
 					cardLayout.show(cardPanel, tempoEventCardKey);
+				} else if (c == 'F') {
+					cardLayout.show(cardPanel, shuffleEventCardKey);
 				} else if (c == 'N') {
 					cardLayout.show(cardPanel, notesEventCardKey);
 				}
@@ -2690,10 +2629,19 @@ public class TabbyCat {
 											(int) (bounds.getMinY()+(row+1)*rowHeight-2));
 									g.setFont(gridFont);
 									break;
+								}
+								case SHUFFLE: {
+									g.setFont(gridFont.deriveFont(Font.ITALIC));
+									g.setPaint(new Color(100, 220, 255));
+									g.drawString(event.toString(),
+											x,
+											(int) (bounds.getMinY()+(row+1)*rowHeight-2));
+									g.setFont(gridFont);
+									break;
 								}								
 								case STICKY_NOTE: {
 									g.setFont(gridFont.deriveFont(Font.ITALIC));
-									g.setPaint(Color.BLUE);
+									g.setPaint(new Color(255, 220, 80));
 									String text = ((StickyNote) event).getText();
 									g.drawString(text,
 											x,
@@ -3104,6 +3052,38 @@ public class TabbyCat {
 		}
 	}
 	
+	class ShuffleEventPanel extends JPanel {
+		int shuffle = 0;
+		public ShuffleEventPanel() {
+			InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap am = getActionMap();
+			im.put(k_Escape, "esc");
+			am.put("esc",    rToA(() -> { if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
+			im.put(k_Up,    "up");    am.put("up",    rToA(this::up));
+			im.put(k_Down,  "down");  am.put("down",  rToA(this::down));
+			im.put(k_Enter, "enter"); am.put("enter", rToA(this::enter));
+		}
+		void enter() {
+			ShuffleEvent event = new ShuffleEvent(shuffle);
+			shuffle = 0;
+			projectData.getEventData().put(
+				new Point(projectData.getCursorT().get(), projectData.getSelectedRow().get()),
+				event);
+			cardLayout.show(cardPanel, mainInterfaceCardKey);
+		}
+		void up()   { shuffle = Math.min(90,  shuffle + 1); repaint(); }
+		void down() { shuffle = Math.max(-90, shuffle - 1); repaint(); }
+		@Override
+		public void paint(Graphics g_) {
+			Graphics2D g = (Graphics2D) g_;
+			g.setPaint(Color.BLACK);
+			g.fill(getBounds());
+			g.setPaint(Color.WHITE);
+			g.setFont(textFont);
+			g.drawString("SHUFFLE: " + shuffle, 2, textFontMetrics.getMaxAscent());
+		}
+	}
+
 	class SettingsPanel extends JPanel {
 		double uiScaleValue = UI_SCALE;
 		int settingsFocus = 0; // 0 = UI Scale, 1 = Output Device
@@ -3452,66 +3432,84 @@ public class TabbyCat {
 		}
 	}
 
-	class NotesEventPanel extends JPanel {
-		private StringBuffer note = new StringBuffer();
-		public NotesEventPanel() {
-			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-			ActionMap actionMap = this.getActionMap();
-			inputMap.put(k_Escape,"esc");
-			actionMap.put("esc", rToA(()->{ if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
-			inputMap.put(k_Enter,"enter");
-			actionMap.put("enter", rToA(this::enter));
-			inputMap.put(k_Backspace,"backspace");
-			actionMap.put("backspace", rToA(this::backspace));
+	class TextInputPanel extends JPanel {
+		private final String label;
+		private final java.util.function.Consumer<String> onConfirm;
+		private final Runnable onCancel;
+		private final StringBuffer buffer = new StringBuffer();
+
+		TextInputPanel(String label,
+		               java.util.function.Consumer<String> onConfirm,
+		               Runnable onCancel) {
+			this.label     = label;
+			this.onConfirm = onConfirm;
+			this.onCancel  = onCancel;
+
+			InputMap  im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap am = getActionMap();
+
+			im.put(k_Escape,    "esc");
+			am.put("esc",       rToA(() -> { reset(); onCancel.run(); }));
+			im.put(k_Enter,     "enter");
+			am.put("enter",     rToA(this::confirm));
+			im.put(k_Backspace, "backspace");
+			am.put("backspace", rToA(this::backspace));
+			im.put(k_Space,     "space");
+			am.put("space",     rToA(() -> append(' ')));
+
 			for (char c = 'A'; c <= 'Z'; c++) {
-				char c_ = c;
-				KeyStroke k = KeyStroke.getKeyStroke(""+c);
-				inputMap.put(k,"shift "+c);
-				actionMap.put(""+c, rToA(()->handleCharInput(c_)));
-				k = KeyStroke.getKeyStroke(""+c);
-				inputMap.put(k,""+c);
-				actionMap.put(""+c, rToA(()->handleCharInput((""+c_).toLowerCase().charAt(0))));
+				String upper = String.valueOf(c);
+				char   lower = upper.toLowerCase().charAt(0);
+				char   c_    = c;
+				im.put(KeyStroke.getKeyStroke(upper),            lower + "");
+				im.put(KeyStroke.getKeyStroke("shift " + upper), upper);
+				am.put(lower + "", rToA(() -> append(lower)));
+				am.put(upper,      rToA(() -> append(c_)));
 			}
 			for (char c = '0'; c <= '9'; c++) {
 				char c_ = c;
-				KeyStroke k = KeyStroke.getKeyStroke(""+c);
-				inputMap.put(k,""+c);
-				actionMap.put(""+c, rToA(()->handleCharInput(c_)));
-			}		
+				im.put(KeyStroke.getKeyStroke("" + c), "" + c);
+				am.put("" + c, rToA(() -> append(c_)));
+			}
+			for (char c : new char[]{'.', ',', '!', '?', '\'', '-', '_'}) {
+				char c_ = c;
+				im.put(KeyStroke.getKeyStroke(c), "" + c);
+				am.put("" + c, rToA(() -> append(c_)));
+			}
 		}
-		
-		
-		void backspace() {
-			note.deleteCharAt(note.length()-1);
-			repaint();
-		}
-		
-		void enter() {
-			StickyNote stickyNote = new StickyNote(note.toString());
-			projectData.getEventData().put(
-					new Point(projectData.getCursorT().get(),projectData.getSelectedRow().get()),
-					stickyNote);
-									
-			cardLayout.show(cardPanel, mainInterfaceCardKey);
-			note.delete(0, note.length()-1);
-		}
-		
-		void handleCharInput(char c) {
-			note.append(c);
-			repaint();
-		}
-		
 
-		
+		public void reset()            { buffer.setLength(0); repaint(); }
+		public void reset(String text) { buffer.setLength(0); buffer.append(text); repaint(); }
+		public String getText()        { return buffer.toString(); }
+
+		private void append(char c) { buffer.append(c); repaint(); }
+		private void backspace()    { if (buffer.length() > 0) { buffer.deleteCharAt(buffer.length()-1); repaint(); } }
+		private void confirm()      { String t = buffer.toString(); reset(); onConfirm.accept(t); }
+
 		@Override
 		public void paint(Graphics g_) {
 			Graphics2D g = (Graphics2D) g_;
-			g.setPaint(Color.black);
-			g.fill(getBounds());
-			g.setPaint(Color.WHITE);
+			g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 			g.setFont(textFont);
-			g.drawString(note.toString(), 2, textFontMetrics.getMaxAscent());
+			g.setPaint(Color.BLACK);
+			g.fill(getBounds());
 
+			int rowH = textFontMetrics.getMaxAscent();
+			int y = rowH;
+
+			g.setPaint(Color.WHITE);
+			g.drawString(label, 2, y);
+			y += rowH;
+
+			int fieldW = (int)(getBounds().getWidth() - 4);
+			g.setPaint(Color.DARK_GRAY);
+			g.fillRect(2, y - rowH, fieldW, rowH);
+			g.setPaint(new Color(220, 220, 255));
+			g.drawString(buffer.toString() + "|", 4, y);
+			y += rowH * 2;
+
+			g.setPaint(Color.GRAY);
+			g.drawString("Enter: confirm     Esc: cancel", 2, y);
 		}
 	}
 
