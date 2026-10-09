@@ -724,13 +724,18 @@ public class TabbyCat {
 	}
 
 	private TabbyCat() {
-		File sf2Dir = new File("sf2");
-		File[] sf2Array = sf2Dir.listFiles((d, n) -> n.toLowerCase().endsWith(".sf2"));
-		if (sf2Array != null) {
-			Arrays.sort(sf2Array);
-			for (File f : sf2Array) sf2Files.add(f);
-		}
+		scanSf2Dir(new File("sf2"));
+		Collections.sort(sf2Files);
 		createGui();
+	}
+
+	private void scanSf2Dir(File dir) {
+		File[] entries = dir.listFiles();
+		if (entries == null) return;
+		for (File f : entries) {
+			if (f.isDirectory()) scanSf2Dir(f);
+			else if (f.getName().toLowerCase().endsWith(".sf2")) sf2Files.add(f);
+		}
 	}
 	
 	void createGui() {
