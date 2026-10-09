@@ -38,7 +38,7 @@
 	
 	<xsd:complexType name="StringCanvas">
 		<xsd:sequence>			
-			<xsd:element name="string" type="PitchedString" minOccurs="1" maxOccurs="15"/>
+			<xsd:element name="string" type="PitchedString" minOccurs="1" maxOccurs="unbounded"/>
 			<xsd:element name="additionalPitch" type="AdditionalPitch" minOccurs="0" maxOccurs="unbounded"/>
 		</xsd:sequence>
 		<xsd:attribute name="name" type="NonEmptyString" default="unnamed"/>

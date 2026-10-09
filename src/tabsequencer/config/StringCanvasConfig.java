@@ -54,9 +54,9 @@ public class StringCanvasConfig extends CanvasConfig {
 		return new StringCanvasConfig(edoSteps,name,maxFrets,maxHarmonic,ed2,soundfontFile,bank,program,fretStepSkip,baseFrequency,additionalPitchMap);
 	}
 	
-	private final double[] edoSteps;	
-	private final int maxFrets, maxHarmonic, fretStepSkip;
-	private final double ed2, baseFrequency;
+	private double[] edoSteps;
+	private int maxFrets, maxHarmonic, fretStepSkip;
+	private double ed2, baseFrequency;
 	
 	private final Map<String,Double> additionalPitchMap;
 	public StringCanvasConfig(double[] edoSteps, String name, int maxFrets, int maxHarmonic, double ed2, File soundfontFile,
@@ -100,12 +100,25 @@ public class StringCanvasConfig extends CanvasConfig {
 		return maxHarmonic;
 	}
 
+	public void setEdoSteps(double[] steps) { this.edoSteps = steps.length >= 1 ? steps : this.edoSteps; }
+	public void setEd2(double v)           { this.ed2 = Math.max(1.0, v); }
+	public void setFretStepSkip(int v)     { this.fretStepSkip = Math.max(1, v); }
+	public void setMaxFrets(int v)         { this.maxFrets = Math.max(1, v); }
+	public void setMaxHarmonic(int v)      { this.maxHarmonic = Math.max(1, v); }
+	public void setBaseFrequency(double v) { this.baseFrequency = Math.max(0.001, v); }
+
 	@Override
 	public Element toXMLElement(Document doc, String tagName) {
 		Element e = doc.createElement(tagName);
 		for (double edoStep : edoSteps) {
 			Element e2 = doc.createElement("string");
 			e2.setAttribute("steps", String.format("%.3f",edoStep));
+			e.appendChild(e2);
+		}
+		for (Map.Entry<String,Double> entry : additionalPitchMap.entrySet()) {
+			Element e2 = doc.createElement("additionalPitch");
+			e2.setAttribute("token", entry.getKey());
+			e2.setAttribute("steps", String.format("%.3f", entry.getValue()));
 			e.appendChild(e2);
 		}
 		getSoundfontFile().ifPresent(f -> {
@@ -119,7 +132,7 @@ public class StringCanvasConfig extends CanvasConfig {
 		e.setAttribute("ed2", ed2+"");
 		e.setAttribute("fretStepSkip", fretStepSkip+"");
 		e.setAttribute("baseFrequency", baseFrequency+"");
-		return e;		
+		return e;
 	}
 
 	@Override
