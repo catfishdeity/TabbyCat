@@ -810,7 +810,7 @@ public class TabbyCat {
 		this.projectData = projectFileData;
 		if (projectFileData.getUiScale() > 0) {
 			displayScale = projectFileData.getUiScale();
-			settingsPanel.uiScaleValue = displayScale;
+			settingsPanel.refresh();
 		}
 		updateMeasureLinePositions();
 		for (CanvasConfig canvasConfig : projectData.getCanvases().getCanvases()) {
@@ -866,10 +866,119 @@ public class TabbyCat {
 		};
 	}	
 	
+	class IntSpinner {
+		private final String label;
+		private final int defaultValue;
+		private final int min, max;
+		private final int[] allowedValues;
+		private int value;
+
+		IntSpinner(String label, int defaultValue, int min, int max) {
+			this.label = label; this.defaultValue = defaultValue;
+			this.min = min; this.max = max; this.allowedValues = null;
+			this.value = defaultValue;
+		}
+		IntSpinner(String label, int defaultValue, int[] allowedValues) {
+			this.label = label; this.defaultValue = defaultValue;
+			this.min = 0; this.max = 0; this.allowedValues = allowedValues;
+			this.value = defaultValue;
+		}
+		void up() {
+			if (allowedValues != null) {
+				for (int i = 0; i < allowedValues.length; i++)
+					if (allowedValues[i] == value && i + 1 < allowedValues.length) { value = allowedValues[i+1]; return; }
+			} else { value = Math.min(max, value + 1); }
+		}
+		void down() {
+			if (allowedValues != null) {
+				for (int i = allowedValues.length - 1; i >= 0; i--)
+					if (allowedValues[i] == value && i - 1 >= 0) { value = allowedValues[i-1]; return; }
+			} else { value = Math.max(min, value - 1); }
+		}
+		void reset() { value = defaultValue; }
+		int getValue() { return value; }
+		int paint(Graphics2D g, int x, int y, boolean focused) {
+			g.setFont(textFont);
+			String labelStr = label + ":";
+			int labelW = textFontMetrics.stringWidth(labelStr);
+			int lineH  = textFontMetrics.getMaxAscent();
+			String maxStr = (allowedValues != null)
+				? String.valueOf(allowedValues[allowedValues.length - 1])
+				: String.valueOf(max);
+			int boxW = textFontMetrics.stringWidth(maxStr) + 8;
+			g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+			g.drawString(labelStr, x, y);
+			g.setPaint(focused ? Color.GRAY : new Color(50, 50, 50));
+			g.fillRect(x + labelW + 4, y - lineH, boxW, lineH);
+			g.setPaint(new Color(255, 255, 100));
+			g.drawString(value + "", x + labelW + 6, y);
+			return x + labelW + 4 + boxW;
+		}
+	}
+
+	class FloatSpinner {
+		private final String label;
+		private final double min, max, step;
+		private double value;
+
+		FloatSpinner(String label, double initialValue, double min, double max, double step) {
+			this.label = label; this.value = initialValue;
+			this.min = min; this.max = max; this.step = step;
+		}
+		void right() { value = Math.min(max, Math.round((value + step) * 10.0) / 10.0); }
+		void left()  { value = Math.max(min, Math.round((value - step) * 10.0) / 10.0); }
+		double getValue() { return value; }
+		void setValue(double v) { value = v; }
+		void paint(Graphics2D g, int x, int y, boolean focused) {
+			g.setFont(textFont);
+			String labelStr = label + ":";
+			int labelW = textFontMetrics.stringWidth(labelStr);
+			int lineH  = textFontMetrics.getMaxAscent();
+			int boxW   = textFontMetrics.stringWidth("00.0") + 8;
+			g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+			g.drawString(labelStr, x, y);
+			g.setPaint(focused ? Color.GRAY : new Color(50, 50, 50));
+			g.fillRect(x + labelW + 4, y - lineH, boxW, lineH);
+			g.setPaint(focused ? new Color(255, 255, 100) : Color.GRAY);
+			g.drawString(String.format("%.1f", value), x + labelW + 6, y);
+		}
+	}
+
+	class TextWidget {
+		private final String label;
+		private final StringBuffer buffer = new StringBuffer();
+
+		TextWidget(String label) { this.label = label; }
+		TextWidget(String label, String initial) { this.label = label; buffer.append(initial); }
+
+		void append(char c)  { buffer.append(c); }
+		void backspace()     { if (buffer.length() > 0) buffer.deleteCharAt(buffer.length() - 1); }
+		void reset()         { buffer.setLength(0); }
+		void reset(String s) { buffer.setLength(0); buffer.append(s); }
+		String getText()     { return buffer.toString(); }
+
+		int paint(Graphics2D g, int x, int y, int fieldWidth, boolean focused) {
+			g.setFont(textFont);
+			int lineH  = textFontMetrics.getMaxAscent();
+			String labelStr = label + ":";
+			int labelW = textFontMetrics.stringWidth(labelStr);
+			g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+			g.drawString(labelStr, x, y);
+			g.setPaint(focused ? Color.LIGHT_GRAY : Color.GRAY);
+			g.fillRect(x + labelW + 4, y - lineH, fieldWidth, lineH);
+			g.setPaint(Color.WHITE);
+			Shape oldClip = g.getClip();
+			g.setClip(new Rectangle2D.Double(x + labelW + 4, y - lineH, fieldWidth, lineH));
+			g.drawString(buffer.toString() + (focused ? "|" : ""), x + labelW + 6, y);
+			g.setClip(oldClip);
+			return y + lineH;
+		}
+	}
+
 	class NewProjectPanel extends JPanel {
-		
-		StringBuffer songName = new StringBuffer("New Song");
-		StringBuffer artistName = new StringBuffer("Artist");
+
+		TextWidget songField   = new TextWidget("Title",  "New Song");
+		TextWidget artistField = new TextWidget("Artist", "Artist");
 		int selectedIndex = 0;
 		
 		final int modulo = 1;
@@ -908,17 +1017,16 @@ public class TabbyCat {
 			}
 			inputMap.put(k_Space, "space");
 			actionMap.put("space", rToA(() -> {
-				if (selectedIndex == 0) { songName.append(' '); repaint(); }
-				else if (selectedIndex == 1) { artistName.append(' '); repaint(); }
+				if (selectedIndex == 0) { songField.append(' '); repaint(); }
+				else if (selectedIndex == 1) { artistField.append(' '); repaint(); }
 			}));
 		}
 
 		void handleChar(char c) {
-			
 			if (selectedIndex == 0) {
-				songName.append(c);
+				songField.append(c);
 			} else if (selectedIndex == 1) {
-				artistName.append(c);
+				artistField.append(c);
 			} else if (selectedIndex == canvasesConfig.getCanvases().size()+2) {
 				//do nothing
 				//System.out.println("hey");
@@ -955,10 +1063,10 @@ public class TabbyCat {
 		}
 		
 		void backspace() {
-			if (selectedIndex == 0 && songName.length() > 0) {
-				songName.deleteCharAt(songName.length()-1);				
-			} else if (selectedIndex == 1 && artistName.length() > 0) {
-				artistName.deleteCharAt(artistName.length()-1);
+			if (selectedIndex == 0) {
+				songField.backspace();
+			} else if (selectedIndex == 1) {
+				artistField.backspace();
 			} else if (selectedIndex == canvasesConfig.getCanvases().size()+2) {
 				//do nothing
 			} else {
@@ -1001,8 +1109,8 @@ public class TabbyCat {
 							indexMap.entrySet().stream().map(a->new Pair<>(a.getKey(),a.getValue()))
 							.sorted(cmp1.thenComparing(cmp2)).map(a->a.a).collect(Collectors.toList()));
 				projectData = new ProjectFileData(config);
-				projectData.setSongName(songName.toString());
-				projectData.setArtistName(artistName.toString());
+				projectData.setSongName(songField.getText());
+				projectData.setArtistName(artistField.getText());
 				projectData.setUiScale(displayScale);
 				activeFile.set(null);
 				fileHasBeenModified.set(false);
@@ -1019,33 +1127,13 @@ public class TabbyCat {
 			Graphics2D g = (Graphics2D) g_;
 			
 			g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-			g.setFont(textFont);			
+			g.setFont(textFont);
 			g.setPaint(Color.BLACK);
 			g.fill(this.getBounds());
-			int y = textFontMetrics.getMaxAscent();
 			int rowHeight = textFontMetrics.getMaxAscent();
-			String titleLabel = "Title:";
-			String artistLabel = "Artist:";
-			int textFieldX = Stream.of(titleLabel,artistLabel).mapToInt(a->(int) textFontMetrics.stringWidth(a)).max().getAsInt();
-			int textFieldWidth = textFontMetrics.stringWidth("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
-			g.setPaint(Color.WHITE);
-			g.drawString(titleLabel,2,y);
-			g.setPaint(selectedIndex==0?Color.LIGHT_GRAY:Color.GRAY);
-			g.fillRect(textFieldX,y-rowHeight,textFieldWidth,rowHeight);
-			g.setPaint(Color.WHITE);
-			g.setClip(new Rectangle2D.Double(textFieldX,y-rowHeight,textFieldWidth,rowHeight));
-			g.drawString(songName.toString() + (selectedIndex == 0 ? "|" : ""),textFieldX,y);
-			g.setClip(null);
-			y+=rowHeight;
-			g.setPaint(Color.WHITE);
-			g.drawString(artistLabel,2,y);
-			g.setPaint(selectedIndex==1?Color.LIGHT_GRAY:Color.GRAY);
-			g.fillRect(textFieldX,y-rowHeight,textFieldWidth,rowHeight);
-			g.setPaint(Color.WHITE);
-			g.setClip(new Rectangle2D.Double(textFieldX,y-rowHeight,textFieldWidth,rowHeight));
-			g.drawString(artistName.toString() + (selectedIndex == 1 ? "|" : ""),textFieldX,y);
-			g.setClip(null);
-			y+=rowHeight;
+			int fieldWidth = textFontMetrics.stringWidth("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+			int y = songField.paint(g, 2, rowHeight, fieldWidth, selectedIndex == 0);
+			y = artistField.paint(g, 2, y, fieldWidth, selectedIndex == 1);
 			
 			int yForInstruments = y;
 			int xForInstruments = 2;
@@ -2152,6 +2240,7 @@ public class TabbyCat {
 				mainInterfacePanel.showSaveAs();
 				break;
 			case SETTINGS:
+				settingsPanel.refresh();
 				cardLayout.show(cardPanel, settingsCardKey);
 				break;
 			case HELP:
@@ -2907,10 +2996,11 @@ public class TabbyCat {
 	}
 	
 	class TimeSignatureEventPanel extends JPanel {
-		
+
 		boolean flag = false;
-		int numerator = 4;
-		int denominator = 4;
+		IntSpinner numerator   = new IntSpinner("Numerator",   4, 1, 999);
+		IntSpinner denominator = new IntSpinner("Denominator", 4, new int[]{2, 4, 8, 16});
+
 		public TimeSignatureEventPanel() {
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
 			ActionMap actionMap = this.getActionMap();
@@ -2927,91 +3017,43 @@ public class TabbyCat {
 			inputMap.put(k_Enter,"enter");
 			actionMap.put("enter", rToA(this::enter));
 		}
-		
-		void up() {
-			if (!flag) {
-				numerator = Math.min(999, numerator+1);				
-			} else {
-				denominator = Math.min(16, denominator*2);
-			}
-			repaint();
-		}
-		
-		void down() {
-			if (!flag) {
-				numerator = Math.max(1, numerator-1);				
-			} else {
-				denominator = Math.max(2, denominator/2);
-			}
-			repaint();
-		}
-		
+
+		void up()    { (flag ? denominator : numerator).up();   repaint(); }
+		void down()  { (flag ? denominator : numerator).down(); repaint(); }
+		void left()  { flag = !flag; repaint(); }
+		void right() { flag = !flag; repaint(); }
+
 		void enter() {
-			
-			TimeSignatureDenominator tsd = 
-					TimeSignatureDenominator.fromInt(denominator).get();
-			TimeSignatureEvent tse = 
-					new TimeSignatureEvent(numerator,tsd);
+			TimeSignatureDenominator tsd =
+					TimeSignatureDenominator.fromInt(denominator.getValue()).get();
+			TimeSignatureEvent tse =
+					new TimeSignatureEvent(numerator.getValue(), tsd);
 			projectData.getEventData().put(
 					new Point(projectData.getCursorT().get(),
 							projectData.getSelectedRow().get()),
 					tse);
+			numerator.reset();
+			denominator.reset();
 			updateMeasureLinePositions();
 			mainInterfacePanel.repaint();
 			cardLayout.show(cardPanel, mainInterfaceCardKey);
-			
 		}
-		
-		void left() {
-			flag=!flag;
-			repaint();
-		}
-		void right() {
-			flag=!flag;
-			repaint();
-		}
-		
+
 		@Override
 		public void paint(Graphics g_) {
-			
 			Graphics2D g = (Graphics2D) g_;
 			g.setFont(textFont);
-			g.setPaint(Color.black);
+			g.setPaint(Color.BLACK);
 			g.fill(getBounds());
-			
-			String numerLabel = "Numerator:";
-			String denomLabel = "Denominator:";
-			
-			Rectangle2D numerLabelBounds = 
-					textFontMetrics.getStringBounds(numerLabel, g);
-			Rectangle2D numerBounds = 
-					textFontMetrics.getStringBounds("000", g);
-			Rectangle2D denomLabelBounds = 
-					textFontMetrics.getStringBounds(denomLabel, g);
-			Rectangle2D denomBounds = 
-					textFontMetrics.getStringBounds("16", g);
-			
-			g.translate(0, numerLabelBounds.getHeight());
-			g.setPaint(Color.WHITE);
-			g.drawString(numerLabel,(int) numerLabelBounds.getMinX(), (int) numerLabelBounds.getMaxY());
-			g.translate(numerLabelBounds.getWidth()+10,0);
-			g.setPaint(!flag?Color.GRAY:Color.DARK_GRAY);
-			g.fill(numerBounds);
-			g.setPaint(new Color(255,255,100));
-			g.drawString(numerator+"",(int) numerBounds.getMinX(), 0);
-			g.setPaint(Color.WHITE);
-			g.translate(numerBounds.getWidth()+10,0);
-			g.drawString(denomLabel,(int) denomLabelBounds.getMinX(), (int) denomLabelBounds.getMaxY());
-			g.translate(denomLabelBounds.getWidth()+10,0);
-			g.setPaint(flag?Color.GRAY:Color.DARK_GRAY);
-			g.fill(denomBounds);
-			g.setPaint(new Color(255,255,100));
-			g.drawString(denominator+"",(int) denomBounds.getMinX(), 0);
+			int y = textFontMetrics.getMaxAscent() * 2;
+			int x2 = numerator.paint(g, 2, y, !flag);
+			denominator.paint(g, x2 + 20, y, flag);
 		}
 	}
 	
 	class TempoEventPanel extends JPanel {
-		int tempo = 120;
+		IntSpinner tempo = new IntSpinner("TEMPO", 120, 20, 1000);
+
 		public TempoEventPanel() {
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
 			ActionMap actionMap = this.getActionMap();
@@ -3025,35 +3067,28 @@ public class TabbyCat {
 			actionMap.put("enter", rToA(this::enter));
 		}
 		void enter() {
-			TempoEvent tempoEvent = new TempoEvent(tempo);
-			tempo = 120;
+			TempoEvent tempoEvent = new TempoEvent(tempo.getValue());
+			tempo.reset();
 			projectData.getEventData().put(
 					new Point(projectData.getCursorT().get(),projectData.getSelectedRow().get()),
-					tempoEvent);									
-			cardLayout.show(cardPanel, mainInterfaceCardKey);		
+					tempoEvent);
+			cardLayout.show(cardPanel, mainInterfaceCardKey);
 		}
-		
-		void up() {
-			tempo = Math.min(1000, tempo+1);
-			repaint();
-		}		
-		void down() {
-			tempo = Math.max(20, tempo-1);
-			repaint();
-		}
+		void up()   { tempo.up();   repaint(); }
+		void down() { tempo.down(); repaint(); }
+
 		@Override
 		public void paint(Graphics g_) {
 			Graphics2D g = (Graphics2D) g_;
-			g.setPaint(Color.black);
+			g.setPaint(Color.BLACK);
 			g.fill(getBounds());
-			g.setPaint(Color.white);
-			g.setFont(textFont);
-			g.drawString("TEMPO: "+tempo,2, textFontMetrics.getMaxAscent());
+			tempo.paint(g, 2, textFontMetrics.getMaxAscent(), true);
 		}
 	}
 	
 	class ShuffleEventPanel extends JPanel {
-		int shuffle = 0;
+		IntSpinner shuffle = new IntSpinner("SHUFFLE", 0, -90, 90);
+
 		public ShuffleEventPanel() {
 			InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
 			ActionMap am = getActionMap();
@@ -3064,28 +3099,27 @@ public class TabbyCat {
 			im.put(k_Enter, "enter"); am.put("enter", rToA(this::enter));
 		}
 		void enter() {
-			ShuffleEvent event = new ShuffleEvent(shuffle);
-			shuffle = 0;
+			ShuffleEvent event = new ShuffleEvent(shuffle.getValue());
+			shuffle.reset();
 			projectData.getEventData().put(
 				new Point(projectData.getCursorT().get(), projectData.getSelectedRow().get()),
 				event);
 			cardLayout.show(cardPanel, mainInterfaceCardKey);
 		}
-		void up()   { shuffle = Math.min(90,  shuffle + 1); repaint(); }
-		void down() { shuffle = Math.max(-90, shuffle - 1); repaint(); }
+		void up()   { shuffle.up();   repaint(); }
+		void down() { shuffle.down(); repaint(); }
+
 		@Override
 		public void paint(Graphics g_) {
 			Graphics2D g = (Graphics2D) g_;
 			g.setPaint(Color.BLACK);
 			g.fill(getBounds());
-			g.setPaint(Color.WHITE);
-			g.setFont(textFont);
-			g.drawString("SHUFFLE: " + shuffle, 2, textFontMetrics.getMaxAscent());
+			shuffle.paint(g, 2, textFontMetrics.getMaxAscent(), true);
 		}
 	}
 
 	class SettingsPanel extends JPanel {
-		double uiScaleValue = UI_SCALE;
+		FloatSpinner uiScale = new FloatSpinner("UI Scale", UI_SCALE, 0.1, 10.0, 0.1);
 		int settingsFocus = 0; // 0 = UI Scale, 1 = Output Device
 
 		public SettingsPanel() {
@@ -3105,30 +3139,24 @@ public class TabbyCat {
 			actionMap.put("enter", rToA(this::enter));
 		}
 
-		void up() {
-			settingsFocus = 0;
-			repaint();
-		}
-
-		void down() {
-			settingsFocus = 1;
-			repaint();
-		}
+		void refresh() { uiScale.setValue(displayScale); repaint(); }
+		void up()   { settingsFocus = 0; repaint(); }
+		void down() { settingsFocus = 1; repaint(); }
 
 		void adjustLeft() {
 			if (settingsFocus == 0) {
-				uiScaleValue = Math.max(0.1, Math.round((uiScaleValue - 0.1) * 10.0) / 10.0);
-				displayScale = uiScaleValue;
-				if (projectData != null) projectData.setUiScale(uiScaleValue);
+				uiScale.left();
+				displayScale = uiScale.getValue();
+				if (projectData != null) projectData.setUiScale(uiScale.getValue());
 				repaint();
 			}
 		}
 
 		void adjustRight() {
 			if (settingsFocus == 0) {
-				uiScaleValue = Math.min(10.0, Math.round((uiScaleValue + 0.1) * 10.0) / 10.0);
-				displayScale = uiScaleValue;
-				if (projectData != null) projectData.setUiScale(uiScaleValue);
+				uiScale.right();
+				displayScale = uiScale.getValue();
+				if (projectData != null) projectData.setUiScale(uiScale.getValue());
 				repaint();
 			}
 		}
@@ -3143,38 +3171,23 @@ public class TabbyCat {
 		@Override
 		public void paint(Graphics g_) {
 			Graphics2D g = (Graphics2D) g_;
-			g.setPaint(Color.black);
+			g.setPaint(Color.BLACK);
 			g.fill(getBounds());
+			g.setFont(textFont);
 
-			Font scaledFont = textFont.deriveFont((float)(textFont.getSize() * uiScaleValue / UI_SCALE));
-			FontMetrics fm = getFontMetrics(scaledFont);
-			g.setFont(scaledFont);
-
-			int lineH = fm.getHeight();
+			int lineH = textFontMetrics.getHeight();
 			int x = 10;
 			int y = lineH;
 
 			// --- UI Scale row ---
-			boolean uiFocused = settingsFocus == 0;
-			String uiLabel = "UI Scale:";
-			String uiVal = String.format("%.1f", uiScaleValue);
-			int uiLabelW = fm.stringWidth(uiLabel);
-			Rectangle2D valBounds = fm.getStringBounds("00.0", g);
-
-			g.setPaint(uiFocused ? Color.WHITE : Color.DARK_GRAY);
-			g.drawString(uiLabel, x, y);
-			int valX = x + uiLabelW + 10;
-			g.setPaint(uiFocused ? Color.GRAY : new Color(50, 50, 50));
-			g.fillRect(valX, y + (int) valBounds.getMinY(), (int) valBounds.getWidth(), (int) valBounds.getHeight());
-			g.setPaint(uiFocused ? new Color(255, 255, 100) : Color.GRAY);
-			g.drawString(uiVal, valX, y);
+			uiScale.paint(g, x, y, settingsFocus == 0);
 
 			// --- Output Device row ---
 			y += lineH + 8;
 			boolean audioFocused = settingsFocus == 1;
 			String deviceLabel = "Output Device:";
 			String deviceName = (selectedAudioMixerInfo == null) ? "Default (system)" : selectedAudioMixerInfo.getName();
-			int deviceLabelW = fm.stringWidth(deviceLabel);
+			int deviceLabelW = textFontMetrics.stringWidth(deviceLabel);
 
 			g.setPaint(audioFocused ? Color.WHITE : Color.DARK_GRAY);
 			g.drawString(deviceLabel, x, y);
@@ -3184,7 +3197,7 @@ public class TabbyCat {
 			// --- Nav hint ---
 			y += lineH * 2;
 			g.setPaint(new Color(70, 70, 70));
-			if (uiFocused) {
+			if (settingsFocus == 0) {
 				g.drawString("UP/DOWN: navigate   LEFT/RIGHT: adjust   ESC: back", x, y);
 			} else {
 				g.drawString("UP/DOWN: navigate   ENTER: open   ESC: back", x, y);
@@ -3247,7 +3260,7 @@ public class TabbyCat {
 			g.setPaint(Color.black);
 			g.fill(getBounds());
 
-			double uiScaleValue = settingsPanel.uiScaleValue;
+			double uiScaleValue = displayScale;
 			Font scaledFont = textFont.deriveFont((float)(textFont.getSize() * uiScaleValue / UI_SCALE));
 			FontMetrics fm = getFontMetrics(scaledFont);
 			g.setFont(scaledFont);
@@ -3381,7 +3394,7 @@ public class TabbyCat {
 			g.setPaint(Color.black);
 			g.fill(getBounds());
 
-			double uiScaleValue = settingsPanel.uiScaleValue;
+			double uiScaleValue = displayScale;
 			Font scaledFont = textFont.deriveFont((float)(textFont.getSize() * uiScaleValue / UI_SCALE));
 			FontMetrics fm = getFontMetrics(scaledFont);
 			g.setFont(scaledFont);
