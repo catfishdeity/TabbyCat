@@ -48,6 +48,7 @@ import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -3434,37 +3435,52 @@ public class TabbyCat {
 			});
 		}
 
-		private String getInstrumentName(CanvasConfig config) {
-			// try custom soundfont first
+		private Soundbank getSoundbankForCanvas(CanvasConfig config) {
 			if (config.getSoundfontFile().isPresent()) {
-				File f = config.getSoundfontFile().get();
-				Soundbank sb = loadedSoundbanks.get(f);
-				if (sb != null) {
-					for (Instrument inst : sb.getInstruments()) {
-						if (inst.getPatch().getBank() == config.getBank() &&
-								inst.getPatch().getProgram() == config.getProgram()) {
-							return inst.getName();
-						}
-					}
-				}
-				return "";
+				return loadedSoundbanks.get(config.getSoundfontFile().get());
 			}
-			// fallback: default soundbank from any open synth for this canvas
 			for (Map.Entry<Pair<StringCanvasConfig,Integer>,Synthesizer> e : stringSynths.entrySet()) {
-				if (e.getKey().a == config) {
-					Soundbank sb = e.getValue().getDefaultSoundbank();
-					if (sb != null) {
-						for (Instrument inst : sb.getInstruments()) {
-							if (inst.getPatch().getBank() == config.getBank() &&
-									inst.getPatch().getProgram() == config.getProgram()) {
-								return inst.getName();
-							}
-						}
-					}
-					break;
-				}
+				if (e.getKey().a == config) return e.getValue().getDefaultSoundbank();
+			}
+			return null;
+		}
+
+		private String getInstrumentNameAt(Soundbank sb, int bank, int program) {
+			if (sb == null) return "";
+			for (Instrument inst : sb.getInstruments()) {
+				if (inst.getPatch().getBank() == bank && inst.getPatch().getProgram() == program)
+					return inst.getName();
 			}
 			return "";
+		}
+
+		private String getInstrumentName(CanvasConfig config) {
+			Soundbank sb = getSoundbankForCanvas(config);
+			if (sb == null && config.getSoundfontFile().isPresent()) return "";
+			return getInstrumentNameAt(sb, config.getBank(), config.getProgram());
+		}
+
+		// Step to next program (in direction delta) that has a non-empty name. Stays put if none found.
+		private int nextProgram(int bank, int fromProgram, int delta) {
+			Soundbank sb = getSoundbankForCanvas(targetCanvas);
+			for (int p = fromProgram + delta; p >= 0 && p <= 127; p += delta) {
+				if (!getInstrumentNameAt(sb, bank, p).isEmpty()) return p;
+			}
+			return fromProgram;
+		}
+
+		// Step to next bank (in direction delta) that has at least one named instrument. Stays put if none found.
+		private int nextBank(int fromBank, int delta) {
+			Soundbank sb = getSoundbankForCanvas(targetCanvas);
+			if (sb == null) return Math.max(0, fromBank + delta);
+			Set<Integer> validBanks = new TreeSet<>();
+			for (Instrument inst : sb.getInstruments()) {
+				if (!inst.getName().isEmpty()) validBanks.add(inst.getPatch().getBank());
+			}
+			for (int b = fromBank + delta; delta < 0 ? b >= 0 : b <= 16383; b += delta) {
+				if (validBanks.contains(b)) return b;
+			}
+			return fromBank;
 		}
 
 		void esc() {
@@ -3494,11 +3510,11 @@ public class TabbyCat {
 				selectedSfIndex = Math.max(0, selectedSfIndex - 1);
 				repaint();
 			} else if (menuFocus == 1) {
-				targetCanvas.setBank(Math.max(0, targetCanvas.getBank() - 1));
+				targetCanvas.setBank(nextBank(targetCanvas.getBank(), -1));
 				playPreview();
 				repaint();
 			} else if (menuFocus == 2) {
-				targetCanvas.setProgram(Math.max(0, targetCanvas.getProgram() - 1));
+				targetCanvas.setProgram(nextProgram(targetCanvas.getBank(), targetCanvas.getProgram(), -1));
 				playPreview();
 				repaint();
 			} else if (menuFocus == 4) {
@@ -3519,11 +3535,11 @@ public class TabbyCat {
 				selectedSfIndex = Math.min(sfChoiceCount() - 1, selectedSfIndex + 1);
 				repaint();
 			} else if (menuFocus == 1) {
-				targetCanvas.setBank(targetCanvas.getBank() + 1);
+				targetCanvas.setBank(nextBank(targetCanvas.getBank(), 1));
 				playPreview();
 				repaint();
 			} else if (menuFocus == 2) {
-				targetCanvas.setProgram(targetCanvas.getProgram() + 1);
+				targetCanvas.setProgram(nextProgram(targetCanvas.getBank(), targetCanvas.getProgram(), 1));
 				playPreview();
 				repaint();
 			} else if (menuFocus == 4) {
