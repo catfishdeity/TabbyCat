@@ -5,7 +5,8 @@ public enum ControlEventType {
 	TIME_SIGNATURE ("T",TimeSignatureEvent.class),
 	STICKY_NOTE ("I",StickyNote.class),
 	TEMPO ("S",TempoEvent.class),
-	PROGRAM_CHANGE ("B",ProgramChange.class);
+	PROGRAM_CHANGE ("B",ProgramChange.class),
+	SHUFFLE ("F",ShuffleEvent.class);
 	
 	String token;
 	Class<? extends ControlEvent> clazz;

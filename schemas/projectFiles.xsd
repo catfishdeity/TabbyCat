@@ -20,7 +20,9 @@
 		<xsd:attribute name="tempo" type="xsd:positiveInteger" default="110"/>
 		<xsd:attribute name="shuffle" type="xsd:integer" default="0"/>
 		<xsd:attribute name="uiScale" type="xsd:decimal"/>
- 	</xsd:complexType>
+		<xsd:attribute name="activeFilePath" type="xsd:string"/>
+		<xsd:attribute name="wasModified"    type="xsd:boolean"/>
+	</xsd:complexType>
 	
 	<xsd:complexType name="TabData">
 		<xsd:sequence> 
@@ -42,6 +44,7 @@
 				<xsd:element name="note" type="xsd:string"/>
 				<xsd:element name="tempo" type="TempoEvent"/>
 				<xsd:element name="programChange" type="ProgramChangeEvent"/>
+				<xsd:element name="shuffle" type="ShuffleEvent"/>
 			</xsd:choice>
 		</xsd:sequence>
 		<xsd:attribute name="r" type="xsd:nonNegativeInteger" use="required"/>
@@ -62,6 +65,10 @@
 		<xsd:attribute name="n" type="xsd:positiveInteger" default="4"/>
 		<xsd:attribute name="d" type="xsd:positiveInteger" default="4"/>	
 	</xsd:complexType>
+	<xsd:complexType name="ShuffleEvent">
+		<xsd:attribute name="v" type="xsd:integer" default="0"/>
+	</xsd:complexType>
+
 	<xsd:complexType name="InputEvent">
 		<xsd:attribute name="v" type="xsd:string" use="required"/>
 		<xsd:attribute name="r" type="xsd:nonNegativeInteger" use="required"/>
