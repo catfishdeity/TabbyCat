@@ -152,6 +152,8 @@ public class TabbyCat {
 	static final String settingsCardKey = "SETTINGS";
 	static final String audioOutputCardKey = "AUDIO OUTPUT";
 	static final String instrumentSettingsCardKey = "INSTRUMENT SETTINGS EDITOR";
+	static final String stringEditorCardKey = "STRING EDITOR";
+	static final String additionalFretEditorCardKey = "ADDITIONAL FRET EDITOR";
 	
 	static final double MIDDLE_C = 220.0 * Math.pow(2d, 3.0 / 12.0);
 	static final int numEventRows = 3;
@@ -212,6 +214,7 @@ public class TabbyCat {
 	private SettingsPanel settingsPanel;
 	private AudioOutputPanel audioOutputPanel;
 	private InstrumentSettingsPanel instrumentSettingsPanel;
+	private StringEditorPanel stringEditorPanel;
 	final AtomicBoolean exitAfterSave = new AtomicBoolean(false);
 	
 	private CardLayout cardLayout;
@@ -752,6 +755,9 @@ public class TabbyCat {
 		cardPanel.add(audioOutputPanel,audioOutputCardKey);
 		instrumentSettingsPanel = new InstrumentSettingsPanel();
 		cardPanel.add(instrumentSettingsPanel,instrumentSettingsCardKey);
+		stringEditorPanel = new StringEditorPanel();
+		cardPanel.add(stringEditorPanel, stringEditorCardKey);
+		cardPanel.add(new StubEditorPanel("Additional Fret Editor", instrumentSettingsCardKey), additionalFretEditorCardKey);
 		frame.getContentPane().add(cardPanel,BorderLayout.CENTER);
 		frame.pack();
 		Rectangle screenBounds = GraphicsEnvironment.getLocalGraphicsEnvironment()
@@ -3301,7 +3307,9 @@ public class TabbyCat {
 
 	class InstrumentSettingsPanel extends JPanel {
 		StringCanvasConfig targetCanvas = null;
-		int menuFocus = 0; // 0 = Soundfont File, 1 = Bank, 2 = Instrument
+		int menuFocus = 0; // 0 = Soundfont File, 1 = Bank, 2 = Instrument, 3 = EDO, ...
+		private final StringBuffer edoBuffer = new StringBuffer();
+		private final StringBuffer freqBuffer = new StringBuffer();
 
 		public InstrumentSettingsPanel() {
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
@@ -3318,25 +3326,81 @@ public class TabbyCat {
 			actionMap.put("right", rToA(this::right));
 			inputMap.put(k_Enter, "enter");
 			actionMap.put("enter", rToA(this::enter));
+			inputMap.put(k_Backspace, "is_backspace");
+			actionMap.put("is_backspace", rToA(this::edoBackspace));
+			for (char c = '0'; c <= '9'; c++) {
+				char c_ = c;
+				inputMap.put(KeyStroke.getKeyStroke("" + c), "is_" + c);
+				actionMap.put("is_" + c, rToA(() -> edoInput(c_)));
+			}
+			inputMap.put(KeyStroke.getKeyStroke('.'), "is_dot");
+			actionMap.put("is_dot", rToA(() -> edoInput('.')));
+		}
+
+		private void edoInput(char c) {
+			if (menuFocus == 3) { edoBuffer.append(c); repaint(); }
+			else if (menuFocus == 7) { freqBuffer.append(c); repaint(); }
+		}
+
+		private void edoBackspace() {
+			if (menuFocus == 3 && edoBuffer.length() > 0) {
+				edoBuffer.deleteCharAt(edoBuffer.length() - 1); repaint();
+			} else if (menuFocus == 7 && freqBuffer.length() > 0) {
+				freqBuffer.deleteCharAt(freqBuffer.length() - 1); repaint();
+			}
+		}
+
+		private boolean edoBufferValid() {
+			try { return Double.parseDouble(edoBuffer.toString()) > 0; }
+			catch (NumberFormatException e) { return false; }
+		}
+
+		private boolean freqBufferValid() {
+			try { return Double.parseDouble(freqBuffer.toString()) > 0; }
+			catch (NumberFormatException e) { return false; }
+		}
+
+		private void commitEdo() {
+			if (targetCanvas == null) return;
+			if (edoBufferValid()) targetCanvas.setEd2(Double.parseDouble(edoBuffer.toString()));
+			edoBuffer.setLength(0);
+			edoBuffer.append(String.format("%.3f", targetCanvas.getEd2()));
+		}
+
+		private void commitFreq() {
+			if (targetCanvas == null) return;
+			if (freqBufferValid()) targetCanvas.setBaseFrequency(Double.parseDouble(freqBuffer.toString()));
+			freqBuffer.setLength(0);
+			freqBuffer.append(String.format("%.3f", targetCanvas.getBaseFrequency()));
 		}
 
 		void prepare(StringCanvasConfig canvas) {
 			targetCanvas = canvas;
 			menuFocus = 0;
+			edoBuffer.setLength(0);
+			edoBuffer.append(String.format("%.3f", canvas.getEd2()));
+			freqBuffer.setLength(0);
+			freqBuffer.append(String.format("%.3f", canvas.getBaseFrequency()));
 		}
 
 		void esc() {
+			commitEdo();
+			commitFreq();
 			if (targetCanvas != null) resetSynths();
 			cardLayout.show(cardPanel, mainInterfaceCardKey);
 		}
 
 		void up() {
+			if (menuFocus == 3) commitEdo();
+			if (menuFocus == 7) commitFreq();
 			menuFocus = Math.max(0, menuFocus - 1);
 			repaint();
 		}
 
 		void down() {
-			menuFocus = Math.min(2, menuFocus + 1);
+			if (menuFocus == 3) commitEdo();
+			if (menuFocus == 7) commitFreq();
+			menuFocus = Math.min(9, menuFocus + 1);
 			repaint();
 		}
 
@@ -3349,6 +3413,15 @@ public class TabbyCat {
 			} else if (menuFocus == 2) {
 				targetCanvas.setProgram(Math.max(0, targetCanvas.getProgram() - 1));
 				playPreview();
+				repaint();
+			} else if (menuFocus == 4) {
+				targetCanvas.setFretStepSkip(targetCanvas.getFretStepSkip() - 1);
+				repaint();
+			} else if (menuFocus == 5) {
+				targetCanvas.setMaxFrets(targetCanvas.getMaxFrets() - 1);
+				repaint();
+			} else if (menuFocus == 6) {
+				targetCanvas.setMaxHarmonic(targetCanvas.getMaxHarmonic() - 1);
 				repaint();
 			}
 		}
@@ -3363,11 +3436,27 @@ public class TabbyCat {
 				targetCanvas.setProgram(targetCanvas.getProgram() + 1);
 				playPreview();
 				repaint();
+			} else if (menuFocus == 4) {
+				targetCanvas.setFretStepSkip(targetCanvas.getFretStepSkip() + 1);
+				repaint();
+			} else if (menuFocus == 5) {
+				targetCanvas.setMaxFrets(targetCanvas.getMaxFrets() + 1);
+				repaint();
+			} else if (menuFocus == 6) {
+				targetCanvas.setMaxHarmonic(targetCanvas.getMaxHarmonic() + 1);
+				repaint();
 			}
 		}
 
 		void enter() {
-			// Soundfont File (0) is a no-op for now; Bank (1) and Instrument (2) adjusted live
+			if (menuFocus == 8) {
+				commitEdo(); commitFreq();
+				stringEditorPanel.prepare(targetCanvas);
+				cardLayout.show(cardPanel, stringEditorCardKey);
+			} else if (menuFocus == 9) {
+				commitEdo(); commitFreq();
+				cardLayout.show(cardPanel, additionalFretEditorCardKey);
+			}
 		}
 
 		void playPreview() {
@@ -3425,13 +3514,60 @@ public class TabbyCat {
 			drawRow(g, fm, x, y, 2, "Instrument:",
 				String.valueOf(targetCanvas.getProgram()));
 
+			y += lineH + 8;
+
+			{
+				boolean focused = menuFocus == 3;
+				String label = "EDO (ed2):";
+				String value = edoBuffer.toString();
+				boolean valid = edoBufferValid();
+				int labelW = fm.stringWidth(label);
+				g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+				g.drawString(label, x, y);
+				g.setPaint(!valid ? Color.RED : focused ? new Color(255, 255, 100) : Color.GRAY);
+				g.drawString(" " + value, x + labelW, y);
+			}
+
+			y += lineH + 8;
+
+			drawRow(g, fm, x, y, 4, "Fret Step Skip:",
+				String.valueOf(targetCanvas.getFretStepSkip()));
+
+			y += lineH + 8;
+
+			drawRow(g, fm, x, y, 5, "Max Frets:",
+				String.valueOf(targetCanvas.getMaxFrets()));
+
+			y += lineH + 8;
+
+			drawRow(g, fm, x, y, 6, "Max Harmonic:",
+				String.valueOf(targetCanvas.getMaxHarmonic()));
+
+			y += lineH + 8;
+
+			{
+				boolean focused = menuFocus == 7;
+				String label = "Base Frequency:";
+				String value = freqBuffer.toString();
+				boolean valid = freqBufferValid();
+				int labelW = fm.stringWidth(label);
+				g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+				g.drawString(label, x, y);
+				g.setPaint(!valid ? Color.RED : focused ? new Color(255, 255, 100) : Color.GRAY);
+				g.drawString(" " + value, x + labelW, y);
+			}
+
+			y += lineH + 8;
+
+			drawButton(g, fm, x, y, 8, "Edit Strings");
+
+			y += lineH + 8;
+
+			drawButton(g, fm, x, y, 9, "Edit Additional Frets");
+
 			y += lineH * 2;
 			g.setPaint(new Color(70, 70, 70));
-			if (menuFocus == 1 || menuFocus == 2) {
-				g.drawString("UP/DOWN: navigate   LEFT/RIGHT: adjust   ESC: apply & back", x, y);
-			} else {
-				g.drawString("UP/DOWN: navigate   ESC: apply & back", x, y);
-			}
+			g.drawString("UP/DOWN: navigate   LEFT/RIGHT: adjust   ENTER: open editor   ESC: apply & back", x, y);
 		}
 
 		private void drawRow(Graphics2D g, FontMetrics fm, int x, int y, int itemIndex,
@@ -3442,6 +3578,297 @@ public class TabbyCat {
 			g.drawString(label, x, y);
 			g.setPaint(focused ? new Color(255, 255, 100) : Color.GRAY);
 			g.drawString(" " + value, x + labelW, y);
+		}
+
+		private void drawButton(Graphics2D g, FontMetrics fm, int x, int y, int itemIndex, String label) {
+			boolean focused = menuFocus == itemIndex;
+			String text = "[ " + label + " ]";
+			g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+			g.drawString(text, x, y);
+		}
+	}
+
+	class StringEditorPanel extends JPanel {
+		StringCanvasConfig targetCanvas = null;
+		int focusRow = 0, focusCol = 3;
+		StringBuffer[] pitchBuffers = new StringBuffer[0];
+
+		StringEditorPanel() {
+			InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap am = getActionMap();
+			im.put(k_Escape, "sep_esc");
+			am.put("sep_esc", rToA(this::esc));
+			im.put(k_Up, "sep_up");
+			am.put("sep_up", rToA(this::up));
+			im.put(k_Down, "sep_down");
+			am.put("sep_down", rToA(this::down));
+			im.put(k_Left, "sep_left");
+			am.put("sep_left", rToA(this::left));
+			im.put(k_Right, "sep_right");
+			am.put("sep_right", rToA(this::right));
+			im.put(k_Enter, "sep_enter");
+			am.put("sep_enter", rToA(this::enter));
+			im.put(k_Backspace, "sep_bs");
+			am.put("sep_bs", rToA(this::pitchBackspace));
+			for (char c = '0'; c <= '9'; c++) {
+				char c_ = c;
+				im.put(KeyStroke.getKeyStroke("" + c), "sep_" + c);
+				am.put("sep_" + c, rToA(() -> pitchInput(c_)));
+			}
+			im.put(KeyStroke.getKeyStroke('.'), "sep_dot");
+			am.put("sep_dot", rToA(() -> pitchInput('.')));
+			im.put(k_Hyphen, "sep_minus");
+			am.put("sep_minus", rToA(() -> pitchInput('-')));
+		}
+
+		void prepare(StringCanvasConfig canvas) {
+			targetCanvas = canvas;
+			focusRow = 0;
+			focusCol = 3;
+			refreshBuffers();
+		}
+
+		private void refreshBuffers() {
+			double[] steps = targetCanvas.getEdoSteps();
+			pitchBuffers = new StringBuffer[steps.length];
+			for (int i = 0; i < steps.length; i++) {
+				pitchBuffers[i] = new StringBuffer(String.format("%.3f", steps[i]));
+			}
+		}
+
+		private boolean pitchValid(int row) {
+			try { Double.parseDouble(pitchBuffers[row].toString()); return true; }
+			catch (NumberFormatException e) { return false; }
+		}
+
+		private void commitPitch(int row) {
+			if (targetCanvas == null || row >= pitchBuffers.length) return;
+			if (pitchValid(row)) {
+				targetCanvas.getEdoSteps()[row] = Double.parseDouble(pitchBuffers[row].toString());
+			}
+			pitchBuffers[row].setLength(0);
+			pitchBuffers[row].append(String.format("%.3f", targetCanvas.getEdoSteps()[row]));
+		}
+
+		private void pitchInput(char c) {
+			if (focusCol != 3 || targetCanvas == null || focusRow >= pitchBuffers.length) return;
+			// only allow one minus at start
+			if (c == '-' && pitchBuffers[focusRow].length() > 0) return;
+			pitchBuffers[focusRow].append(c);
+			repaint();
+		}
+
+		private void pitchBackspace() {
+			if (focusCol != 3 || targetCanvas == null || focusRow >= pitchBuffers.length) return;
+			if (pitchBuffers[focusRow].length() > 0)
+				pitchBuffers[focusRow].deleteCharAt(pitchBuffers[focusRow].length() - 1);
+			repaint();
+		}
+
+		// returns valid cols for a given row (n = add-string row)
+		private int[] validCols(int row) {
+			if (targetCanvas == null) return new int[]{3};
+			int n = pitchBuffers.length;
+			if (row == n) return new int[]{0}; // add button
+			java.util.List<Integer> cols = new java.util.ArrayList<>();
+			if (n > 1) cols.add(0);   // [x] only if deletable
+			if (row > 0) cols.add(1); // [↑]
+			if (row < n - 1) cols.add(2); // [↓]
+			cols.add(3); // pitch field always present
+			return cols.stream().mapToInt(Integer::intValue).toArray();
+		}
+
+		private int clampCol(int row, int col) {
+			int[] valid = validCols(row);
+			for (int v : valid) if (v == col) return col;
+			// default to last valid (pitch field or button)
+			return valid[valid.length - 1];
+		}
+
+		private int nextCol(int row, int col) {
+			int[] valid = validCols(row);
+			for (int i = 0; i < valid.length - 1; i++) if (valid[i] == col) return valid[i + 1];
+			return valid[valid.length - 1];
+		}
+
+		private int prevCol(int row, int col) {
+			int[] valid = validCols(row);
+			for (int i = valid.length - 1; i > 0; i--) if (valid[i] == col) return valid[i - 1];
+			return valid[0];
+		}
+
+		void esc() {
+			if (targetCanvas != null && focusRow < pitchBuffers.length) commitPitch(focusRow);
+			cardLayout.show(cardPanel, instrumentSettingsCardKey);
+		}
+
+		void up() {
+			if (targetCanvas == null) return;
+			if (focusRow < pitchBuffers.length) commitPitch(focusRow);
+			focusRow = Math.max(0, focusRow - 1);
+			focusCol = clampCol(focusRow, focusCol);
+			repaint();
+		}
+
+		void down() {
+			if (targetCanvas == null) return;
+			if (focusRow < pitchBuffers.length) commitPitch(focusRow);
+			focusRow = Math.min(pitchBuffers.length, focusRow + 1);
+			focusCol = clampCol(focusRow, focusCol);
+			repaint();
+		}
+
+		void left() {
+			focusCol = prevCol(focusRow, focusCol);
+			repaint();
+		}
+
+		void right() {
+			focusCol = nextCol(focusRow, focusCol);
+			repaint();
+		}
+
+		void enter() {
+			if (targetCanvas == null) return;
+			int n = pitchBuffers.length;
+			if (focusRow == n) {
+				// Add String — clone last
+				commitPitch(n - 1);
+				double[] old = targetCanvas.getEdoSteps();
+				double[] next = java.util.Arrays.copyOf(old, old.length + 1);
+				next[next.length - 1] = old[old.length - 1];
+				targetCanvas.setEdoSteps(next);
+				refreshBuffers();
+				focusRow = next.length; // move to new add-button row? keep on new string
+				focusRow = next.length - 1;
+				focusCol = clampCol(focusRow, focusCol);
+			} else if (focusCol == 0 && n > 1) {
+				// Delete
+				commitPitch(focusRow);
+				double[] old = targetCanvas.getEdoSteps();
+				double[] next = new double[old.length - 1];
+				System.arraycopy(old, 0, next, 0, focusRow);
+				System.arraycopy(old, focusRow + 1, next, focusRow, old.length - focusRow - 1);
+				targetCanvas.setEdoSteps(next);
+				focusRow = Math.min(focusRow, next.length - 1);
+				refreshBuffers();
+				focusCol = clampCol(focusRow, focusCol);
+			} else if (focusCol == 1 && focusRow > 0) {
+				// Move up — swap in-place
+				commitPitch(focusRow);
+				commitPitch(focusRow - 1);
+				double[] steps = targetCanvas.getEdoSteps();
+				double tmp = steps[focusRow]; steps[focusRow] = steps[focusRow - 1]; steps[focusRow - 1] = tmp;
+				StringBuffer tbuf = pitchBuffers[focusRow]; pitchBuffers[focusRow] = pitchBuffers[focusRow - 1]; pitchBuffers[focusRow - 1] = tbuf;
+				focusRow--;
+			} else if (focusCol == 2 && focusRow < n - 1) {
+				// Move down — swap in-place
+				commitPitch(focusRow);
+				commitPitch(focusRow + 1);
+				double[] steps = targetCanvas.getEdoSteps();
+				double tmp = steps[focusRow]; steps[focusRow] = steps[focusRow + 1]; steps[focusRow + 1] = tmp;
+				StringBuffer tbuf = pitchBuffers[focusRow]; pitchBuffers[focusRow] = pitchBuffers[focusRow + 1]; pitchBuffers[focusRow + 1] = tbuf;
+				focusRow++;
+			}
+			repaint();
+		}
+
+		@Override
+		public void paint(Graphics g_) {
+			if (targetCanvas == null) return;
+			Graphics2D g = (Graphics2D) g_;
+			g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+			g.setPaint(Color.BLACK);
+			g.fill(getBounds());
+
+			double uiScaleValue = displayScale;
+			Font scaledFont = textFont.deriveFont((float)(textFont.getSize() * uiScaleValue / UI_SCALE));
+			FontMetrics fm = getFontMetrics(scaledFont);
+			g.setFont(scaledFont);
+
+			int lineH = fm.getHeight();
+			int x = 10;
+			int y = lineH;
+
+			g.setPaint(Color.WHITE);
+			g.drawString("Edit Strings: " + targetCanvas.getName(), x, y);
+			y += lineH + 4;
+
+			int n = pitchBuffers.length;
+			int colX   = x;       // [x]
+			int colUp  = colX + fm.stringWidth("[x]  ");
+			int colDn  = colUp + fm.stringWidth("[↑]  ");
+			int colPitch = colDn + fm.stringWidth("[↓]  ");
+
+			for (int i = 0; i < n; i++) {
+				boolean rowFocused = focusRow == i;
+
+				// [x]
+				if (n > 1) {
+					boolean focused = rowFocused && focusCol == 0;
+					g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+					g.drawString("[x]", colX, y);
+				}
+
+				// [↑]
+				if (i > 0) {
+					boolean focused = rowFocused && focusCol == 1;
+					g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+					g.drawString("[↑]", colUp, y);
+				}
+
+				// [↓]
+				if (i < n - 1) {
+					boolean focused = rowFocused && focusCol == 2;
+					g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+					g.drawString("[↓]", colDn, y);
+				}
+
+				// pitch field
+				{
+					boolean focused = rowFocused && focusCol == 3;
+					boolean valid = pitchValid(i);
+					g.setPaint(!valid ? Color.RED : focused ? new Color(255, 255, 100) : Color.GRAY);
+					g.drawString(pitchBuffers[i].toString(), colPitch, y);
+				}
+
+				y += lineH + 4;
+			}
+
+			// Add String button
+			{
+				boolean focused = focusRow == n;
+				g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+				g.drawString("[ Add String ]", x, y);
+				y += lineH * 2;
+			}
+
+			g.setPaint(new Color(70, 70, 70));
+			g.drawString("UP/DOWN: rows   LEFT/RIGHT: field   ENTER: activate   ESC: back", x, y);
+		}
+	}
+
+	class StubEditorPanel extends JPanel {
+		StubEditorPanel(String title, String backCardKey) {
+			InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap am = getActionMap();
+			im.put(k_Escape, "esc");
+			am.put("esc", rToA(() -> cardLayout.show(cardPanel, backCardKey)));
+			setBackground(Color.BLACK);
+			// title stored for paint
+			this.title = title;
+		}
+		private final String title;
+		@Override
+		public void paint(Graphics g_) {
+			Graphics2D g = (Graphics2D) g_;
+			g.setPaint(Color.BLACK);
+			g.fill(getBounds());
+			g.setFont(textFont);
+			g.setPaint(Color.WHITE);
+			g.drawString(title + " (not yet implemented)", 10, textFontMetrics.getHeight());
+			g.setPaint(new Color(70, 70, 70));
+			g.drawString("ESC: back", 10, textFontMetrics.getHeight() * 2 + 4);
 		}
 	}
 
