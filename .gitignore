@@ -1,3 +1,11 @@
 /bin/
 etc/*
 !etc/.gitkeep
+.DS_Store
+.classpath
+.project
+.settings/
+lastproject.txt
+recovery.meow
+scores/*
+!scores/.gitkeep
