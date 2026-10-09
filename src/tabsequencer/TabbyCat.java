@@ -26,6 +26,7 @@ import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -758,7 +759,7 @@ public class TabbyCat {
 			File f = activeFile.get();
 			try {
 				if (f != null) {
-					java.nio.file.Files.writeString(lastProjectTokenFile.toPath(), f.getAbsolutePath());
+					java.nio.file.Files.write(lastProjectTokenFile.toPath(), f.getAbsolutePath().getBytes(StandardCharsets.UTF_8));
 				} else {
 					lastProjectTokenFile.delete();
 				}
@@ -767,7 +768,7 @@ public class TabbyCat {
 
 		if (lastProjectTokenFile.exists()) {
 			try {
-				String path = java.nio.file.Files.readString(lastProjectTokenFile.toPath()).trim();
+				String path = new String(java.nio.file.Files.readAllBytes(lastProjectTokenFile.toPath()), StandardCharsets.UTF_8).trim();
 				File last = new File(path);
 				if (last.exists()) {
 					loadXML(last);
@@ -918,7 +919,7 @@ public class TabbyCat {
 					indexMap.entrySet().stream().map(entry -> {
 						return new Pair<>(entry.getKey(),entry.getKey() != canvas && entry.getValue() >= indexMap.getOrDefault(canvas, 0)
 								?entry.getValue()+1:entry.getValue());
-					}).sorted(cmp2.reversed().thenComparing(cmp1)).toList();
+					}).sorted(cmp2.reversed().thenComparing(cmp1)).collect(Collectors.toList());
 			
 			int i = 1;
 			indexMap.clear();
@@ -974,7 +975,7 @@ public class TabbyCat {
 
 				CanvasesConfig config = new CanvasesConfig(
 							indexMap.entrySet().stream().map(a->new Pair<>(a.getKey(),a.getValue()))
-							.sorted(cmp1.thenComparing(cmp2)).map(a->a.a).toList());
+							.sorted(cmp1.thenComparing(cmp2)).map(a->a.a).collect(Collectors.toList()));
 				projectData = new ProjectFileData(config);
 				projectData.setUiScale(displayScale);
 				activeFile.set(null);
@@ -1115,7 +1116,7 @@ public class TabbyCat {
 			} else {
 				List<File> files =
 						Arrays.asList(workingDir.listFiles()).stream().filter(a->a.isDirectory() || fileFilter.accept(a))
-						.toList();
+						.collect(java.util.stream.Collectors.toList());
 				if (files.get(selectedIndex-1).isDirectory()) {
 					workingDir = new File(workingDir.getAbsolutePath()+"/"+files.get(selectedIndex-1).getName());
 					selectedIndex = 0;
@@ -1180,14 +1181,14 @@ public class TabbyCat {
 		}
 	}
 	
+	private static final List<Pair<String,Color>> UNSAVED_OPTIONS = Arrays.asList(
+		new Pair<>("Yes  — save and close",   new Color(180, 255, 180)),
+		new Pair<>("No   — close without saving", new Color(255, 180, 180)),
+		new Pair<>("Cancel",                   new Color(180, 180, 255))
+	);
+
 	class UnsavedChangesPanel extends JPanel {
 		private int selectedIndex = 0;
-
-		private static final List<Pair<String,Color>> OPTIONS = List.of(
-			new Pair<>("Yes  — save and close",   new Color(180, 255, 180)),
-			new Pair<>("No   — close without saving", new Color(255, 180, 180)),
-			new Pair<>("Cancel",                   new Color(180, 180, 255))
-		);
 
 		public UnsavedChangesPanel() {
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
@@ -1203,18 +1204,18 @@ public class TabbyCat {
 		}
 
 		private void up() {
-			selectedIndex = (selectedIndex == 0) ? OPTIONS.size()-1 : selectedIndex-1;
+			selectedIndex = (selectedIndex == 0) ? UNSAVED_OPTIONS.size()-1 : selectedIndex-1;
 			repaint();
 		}
 
 		private void down() {
-			selectedIndex = (selectedIndex == OPTIONS.size()-1) ? 0 : selectedIndex+1;
+			selectedIndex = (selectedIndex == UNSAVED_OPTIONS.size()-1) ? 0 : selectedIndex+1;
 			repaint();
 		}
 
 		private void enter() {
 			switch (selectedIndex) {
-				case 0 -> { // Yes
+				case 0: { // Yes
 					if (activeFile.get() != null) {
 						try {
 							saveXML(activeFile.get());
@@ -1232,9 +1233,10 @@ public class TabbyCat {
 												.format(java.time.LocalDateTime.now(java.time.ZoneId.of("Z")))));
 						cardLayout.show(cardPanel, saveProjectCardKey);
 					}
+					break;
 				}
-				case 1 -> System.exit(0); // No
-				case 2 -> cardLayout.show(cardPanel, mainInterfaceCardKey); // Cancel
+				case 1: System.exit(0); break; // No
+				case 2: cardLayout.show(cardPanel, mainInterfaceCardKey); break; // Cancel
 			}
 		}
 
@@ -1251,9 +1253,9 @@ public class TabbyCat {
 			g.drawString("YOUR PROJECT HAS UNSAVED CHANGES", 2, y);
 			y += textFontMetrics.getMaxAscent();
 
-			int w = OPTIONS.stream().mapToInt(p -> textFontMetrics.stringWidth(p.a)).max().getAsInt();
-			for (int i = 0; i < OPTIONS.size(); i++) {
-				Pair<String,Color> p = OPTIONS.get(i);
+			int w = UNSAVED_OPTIONS.stream().mapToInt(p -> textFontMetrics.stringWidth(p.a)).max().getAsInt();
+			for (int i = 0; i < UNSAVED_OPTIONS.size(); i++) {
+				Pair<String,Color> p = UNSAVED_OPTIONS.get(i);
 				g.setPaint(selectedIndex == i ? Color.DARK_GRAY : Color.BLACK);
 				g.fillRect(0, y - textFontMetrics.getMaxAscent(), w, textFontMetrics.getMaxAscent());
 				g.setPaint(p.b);
@@ -1263,12 +1265,19 @@ public class TabbyCat {
 		}
 	}
 
+	enum SequencePosition {
+		NEW, OPEN, SAVE, SAVE_AS, TEMPO, SHUFFLE, TAPPER, SETTINGS, HELP;
+	}
+
+	enum CardinalDirection {
+		RIGHT, LEFT, UP, DOWN,
+		SHIFT_RIGHT, SHIFT_LEFT, SHIFT_UP, SHIFT_DOWN,
+		CTRL_RIGHT, CTRL_LEFT,
+		CTRL_SHIFT_LEFT, CTRL_SHIFT_RIGHT, CTRL_SHIFT_UP, CTRL_SHIFT_DOWN;
+	}
+
 	class MainInterfacePanel extends JPanel {
-		
-		enum SequencePosition {
-			NEW, OPEN, SAVE, SAVE_AS, TEMPO, SHUFFLE, TAPPER, SETTINGS, HELP;
-		}
-		
+
 		SequencePosition sequencePosition = SequencePosition.TAPPER;		
 		boolean isInGrid = false;
 		AtomicBoolean isSelectionMode = new AtomicBoolean(false);
@@ -1987,14 +1996,6 @@ public class TabbyCat {
 			repaint();
 		}
 		
-		enum CardinalDirection {
-			RIGHT, LEFT, UP, DOWN,
-			SHIFT_RIGHT, SHIFT_LEFT, SHIFT_UP, SHIFT_DOWN,
-			CTRL_RIGHT, CTRL_LEFT,
-			CTRL_SHIFT_LEFT, CTRL_SHIFT_RIGHT, CTRL_SHIFT_UP, CTRL_SHIFT_DOWN;
-		}
-		
-		
 		int getMaxRow() {
 			int maxRow = numEventRows + projectData.getCanvases().getCanvases().stream().mapToInt(a->a.getRowCount()).sum();
 			return maxRow;
@@ -2109,7 +2110,7 @@ public class TabbyCat {
 				List<Duration> durations = 
 						IntStream.range(1,tapTimes.size()).mapToObj(i -> 
 						Duration.between(taps.get(i-1),taps.get(i)))
-						.toList();
+						.collect(java.util.stream.Collectors.toList());
 				double secs = durations.stream().mapToLong(a->a.toNanos()).average().getAsDouble()
 						/1000000000d;
 						
@@ -2809,7 +2810,7 @@ public class TabbyCat {
 			} else {
 				List<File> files =
 						Arrays.asList(workingDir.listFiles()).stream().filter(a->a.isDirectory() || fileFilter.accept(a))
-						.toList();
+						.collect(java.util.stream.Collectors.toList());
 				if (files.get(selectedIndex-2).isDirectory()) {
 					workingDir = new File(workingDir.getAbsolutePath()+"/"+files.get(selectedIndex-2).getName());
 					selectedIndex= 1;
@@ -3433,53 +3434,51 @@ public class TabbyCat {
 		}
 	}
 
+	private static final Color HEADER_COLOR = new Color(255, 220, 80);
+	private static final Color ENTRY_COLOR  = new Color(200, 200, 200);
+	private static final Color KEY_COLOR    = new Color(120, 200, 255);
+	private static final List<Pair<String,Color>> LINES;
+	static {
+		List<Pair<String,Color>> l = new ArrayList<>();
+		l.add(new Pair<>("MENU BAR  (press , from grid to enter menu)", HEADER_COLOR));
+		l.add(new Pair<>("  Left / Right          Navigate menu items", ENTRY_COLOR));
+		l.add(new Pair<>("  Up / Down             Adjust value (TEMPO or SHUFFLE selected)", ENTRY_COLOR));
+		l.add(new Pair<>("  Enter                 Activate selected item", ENTRY_COLOR));
+		l.add(new Pair<>("  Space                 Play / Pause", ENTRY_COLOR));
+		l.add(new Pair<>("  ,                     Return to grid", ENTRY_COLOR));
+		l.add(new Pair<>("", ENTRY_COLOR));
+		l.add(new Pair<>("GRID  (press , from menu to enter grid)", HEADER_COLOR));
+		l.add(new Pair<>("  Arrow keys            Move cursor", ENTRY_COLOR));
+		l.add(new Pair<>("  Click                 Move cursor to cell", ENTRY_COLOR));
+		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " Click              Move playback position to cell", ENTRY_COLOR));
+		l.add(new Pair<>("  Shift Left / Right    Jump to prev / next measure", ENTRY_COLOR));
+		l.add(new Pair<>("  Shift Up / Down       Jump to first / last row", ENTRY_COLOR));
+		l.add(new Pair<>("  Ctrl Shift Left/Right Jump to start / end of sequence", ENTRY_COLOR));
+		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Alt") + " Left / Right          Move playback position", ENTRY_COLOR));
+		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Alt") + " Shift Left / Right    Jump playback by measure", ENTRY_COLOR));
+		l.add(new Pair<>("  A-Z, 0-9              Enter note at cursor", ENTRY_COLOR));
+		l.add(new Pair<>("  - (hyphen)            Insert slide (string grids)", ENTRY_COLOR));
+		l.add(new Pair<>("  Backspace             Delete note at cursor", ENTRY_COLOR));
+		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " R                Set / clear repeat point", ENTRY_COLOR));
+		l.add(new Pair<>("  Space                 Play / Pause", ENTRY_COLOR));
+		l.add(new Pair<>("  ,                     Exit to menu bar", ENTRY_COLOR));
+		l.add(new Pair<>("", ENTRY_COLOR));
+		l.add(new Pair<>("SELECTION  (" + (IS_MAC ? "Cmd" : "Ctrl") + "+L to begin)", HEADER_COLOR));
+		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " L                Start / end selection", ENTRY_COLOR));
+		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " C                Copy selection", ENTRY_COLOR));
+		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " X                Cut selection", ENTRY_COLOR));
+		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " V                Paste", ENTRY_COLOR));
+		l.add(new Pair<>("", ENTRY_COLOR));
+		l.add(new Pair<>("NEW PROJECT SCREEN", HEADER_COLOR));
+		l.add(new Pair<>("  Up / Down             Navigate fields", ENTRY_COLOR));
+		l.add(new Pair<>("  A-Z                   Type song / artist name", ENTRY_COLOR));
+		l.add(new Pair<>("  0-9                   Set canvas quantity", ENTRY_COLOR));
+		l.add(new Pair<>("  Backspace             Delete character", ENTRY_COLOR));
+		l.add(new Pair<>("  Enter                 Confirm (on last row)", ENTRY_COLOR));
+		LINES = Collections.unmodifiableList(l);
+	}
+
 	class HelpPanel extends JPanel {
-
-		private static final Color HEADER_COLOR = new Color(255, 220, 80);
-		private static final Color ENTRY_COLOR  = new Color(200, 200, 200);
-		private static final Color KEY_COLOR    = new Color(120, 200, 255);
-
-		private static final List<Pair<String,Color>> LINES;
-		static {
-			List<Pair<String,Color>> l = new ArrayList<>();
-			Runnable h = () -> {}; // placeholder — we build below
-			l.add(new Pair<>("MENU BAR  (press , from grid to enter menu)", HEADER_COLOR));
-			l.add(new Pair<>("  Left / Right          Navigate menu items", ENTRY_COLOR));
-			l.add(new Pair<>("  Up / Down             Adjust value (TEMPO or SHUFFLE selected)", ENTRY_COLOR));
-			l.add(new Pair<>("  Enter                 Activate selected item", ENTRY_COLOR));
-			l.add(new Pair<>("  Space                 Play / Pause", ENTRY_COLOR));
-			l.add(new Pair<>("  ,                     Return to grid", ENTRY_COLOR));
-			l.add(new Pair<>("", ENTRY_COLOR));
-			l.add(new Pair<>("GRID  (press , from menu to enter grid)", HEADER_COLOR));
-			l.add(new Pair<>("  Arrow keys            Move cursor", ENTRY_COLOR));
-			l.add(new Pair<>("  Click                 Move cursor to cell", ENTRY_COLOR));
-			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " Click              Move playback position to cell", ENTRY_COLOR));
-			l.add(new Pair<>("  Shift Left / Right    Jump to prev / next measure", ENTRY_COLOR));
-			l.add(new Pair<>("  Shift Up / Down       Jump to first / last row", ENTRY_COLOR));
-			l.add(new Pair<>("  Ctrl Shift Left/Right Jump to start / end of sequence", ENTRY_COLOR));
-			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Alt") + " Left / Right          Move playback position", ENTRY_COLOR));
-			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Alt") + " Shift Left / Right    Jump playback by measure", ENTRY_COLOR));
-			l.add(new Pair<>("  A-Z, 0-9              Enter note at cursor", ENTRY_COLOR));
-			l.add(new Pair<>("  - (hyphen)            Insert slide (string grids)", ENTRY_COLOR));
-			l.add(new Pair<>("  Backspace             Delete note at cursor", ENTRY_COLOR));
-			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " R                Set / clear repeat point", ENTRY_COLOR));
-			l.add(new Pair<>("  Space                 Play / Pause", ENTRY_COLOR));
-			l.add(new Pair<>("  ,                     Exit to menu bar", ENTRY_COLOR));
-			l.add(new Pair<>("", ENTRY_COLOR));
-			l.add(new Pair<>("SELECTION  (" + (IS_MAC ? "Cmd" : "Ctrl") + "+L to begin)", HEADER_COLOR));
-			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " L                Start / end selection", ENTRY_COLOR));
-			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " C                Copy selection", ENTRY_COLOR));
-			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " X                Cut selection", ENTRY_COLOR));
-			l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " V                Paste", ENTRY_COLOR));
-			l.add(new Pair<>("", ENTRY_COLOR));
-			l.add(new Pair<>("NEW PROJECT SCREEN", HEADER_COLOR));
-			l.add(new Pair<>("  Up / Down             Navigate fields", ENTRY_COLOR));
-			l.add(new Pair<>("  A-Z                   Type song / artist name", ENTRY_COLOR));
-			l.add(new Pair<>("  0-9                   Set canvas quantity", ENTRY_COLOR));
-			l.add(new Pair<>("  Backspace             Delete character", ENTRY_COLOR));
-			l.add(new Pair<>("  Enter                 Confirm (on last row)", ENTRY_COLOR));
-			LINES = Collections.unmodifiableList(l);
-		}
 
 		private int scrollOffset = 0;
 
