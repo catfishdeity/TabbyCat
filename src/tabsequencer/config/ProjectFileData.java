@@ -32,6 +32,10 @@ public class ProjectFileData {
 	private String songName = "Untitled";
 	private String artistName = "Unknown Artist";
 	private double uiScale = -1.0; // -1 means "use app default"
+	private double rainbowBrightness = -1.0; // -1 means "use app default"
+	private double scrollbarBrightness = -1.0; // -1 means "use app default"
+	private String gridFontFamily = null; // null means "use app default"
+	private int gridFontSize = -1; // -1 means "use app default"
 
 	public ProjectFileData(CanvasesConfig canvases) {
 		this.canvases = canvases;
@@ -84,6 +88,27 @@ public class ProjectFileData {
 		this.uiScale = uiScale;
 	}
 
+	public double getRainbowBrightness() {
+		return rainbowBrightness;
+	}
+
+	public void setRainbowBrightness(double rainbowBrightness) {
+		this.rainbowBrightness = rainbowBrightness;
+	}
+
+	public double getScrollbarBrightness() {
+		return scrollbarBrightness;
+	}
+
+	public void setScrollbarBrightness(double scrollbarBrightness) {
+		this.scrollbarBrightness = scrollbarBrightness;
+	}
+
+	public String getGridFontFamily() { return gridFontFamily; }
+	public void setGridFontFamily(String gridFontFamily) { this.gridFontFamily = gridFontFamily; }
+	public int getGridFontSize() { return gridFontSize; }
+	public void setGridFontSize(int gridFontSize) { this.gridFontSize = gridFontSize; }
+
 	public void handleCharInput(char c) {
 		// TODO reimplement, move out of the main class
 	}
@@ -116,6 +141,10 @@ public class ProjectFileData {
 		e.setAttribute("tempo", tempo.get() + "");
 		e.setAttribute("shuffle", shuffle.get() + "");
 		if (uiScale > 0) e.setAttribute("uiScale", String.format("%.1f", uiScale));
+		if (rainbowBrightness > 0) e.setAttribute("rainbowBrightness", String.format("%.1f", rainbowBrightness));
+		if (scrollbarBrightness > 0) e.setAttribute("scrollbarBrightness", String.format("%.1f", scrollbarBrightness));
+		if (gridFontFamily != null) e.setAttribute("gridFontFamily", gridFontFamily);
+		if (gridFontSize > 0) e.setAttribute("gridFontSize", String.valueOf(gridFontSize));
 
 		// Canvases (event data for eventCanvas elements is embedded inside)
 		e.appendChild(canvases.toXMLElement(doc, "canvases", eventDataByCanvas));
@@ -234,6 +263,22 @@ public class ProjectFileData {
 		String uiScaleAttr = e.getAttribute("uiScale");
 		if (!uiScaleAttr.isEmpty()) {
 			projectData.uiScale = Double.parseDouble(uiScaleAttr);
+		}
+		String rainbowBrightnessAttr = e.getAttribute("rainbowBrightness");
+		if (!rainbowBrightnessAttr.isEmpty()) {
+			projectData.rainbowBrightness = Double.parseDouble(rainbowBrightnessAttr);
+		}
+		String scrollbarBrightnessAttr = e.getAttribute("scrollbarBrightness");
+		if (!scrollbarBrightnessAttr.isEmpty()) {
+			projectData.scrollbarBrightness = Double.parseDouble(scrollbarBrightnessAttr);
+		}
+		String gridFontFamilyAttr = e.getAttribute("gridFontFamily");
+		if (!gridFontFamilyAttr.isEmpty()) {
+			projectData.gridFontFamily = gridFontFamilyAttr;
+		}
+		String gridFontSizeAttr = e.getAttribute("gridFontSize");
+		if (!gridFontSizeAttr.isEmpty()) {
+			projectData.gridFontSize = Integer.parseInt(gridFontSizeAttr);
 		}
 
 		return projectData;
