@@ -2,11 +2,53 @@
 <xsd:schema xmlns="tabby" xmlns:xsd="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified" targetNamespace="tabby">
 	<xsd:complexType name="CanvasesComplexType">
 		<xsd:sequence>
-			<xsd:choice minOccurs="1" maxOccurs="unbounded">				 
+			<xsd:choice minOccurs="1" maxOccurs="unbounded">
 				<xsd:element name="stringCanvas" type="StringCanvas"/>
-				<xsd:element name="drumCanvas" type="PercussionCanvas"/>	
+				<xsd:element name="drumCanvas" type="PercussionCanvas"/>
+				<xsd:element name="eventCanvas" type="EventCanvas"/>
 			</xsd:choice>
 		</xsd:sequence>
+	</xsd:complexType>
+
+	<xsd:complexType name="EventCanvas">
+		<xsd:sequence>
+			<xsd:element name="event" type="ControlEvent" minOccurs="0" maxOccurs="unbounded"/>
+		</xsd:sequence>
+		<xsd:attribute name="name" type="NonEmptyString" use="required"/>
+		<xsd:attribute name="numRows" type="xsd:positiveInteger" default="3"/>
+	</xsd:complexType>
+
+	<xsd:complexType name="ControlEvent">
+		<xsd:sequence>
+			<xsd:choice>
+				<xsd:element name="timeSignature" type="TimeSignatureComplexType"/>
+				<xsd:element name="note" type="xsd:string"/>
+				<xsd:element name="tempo" type="TempoEvent"/>
+				<xsd:element name="programChange" type="ProgramChangeEvent"/>
+				<xsd:element name="shuffle" type="ShuffleEvent"/>
+			</xsd:choice>
+		</xsd:sequence>
+		<xsd:attribute name="r" type="xsd:nonNegativeInteger" use="required"/>
+		<xsd:attribute name="t" type="xsd:nonNegativeInteger" use="required"/>
+	</xsd:complexType>
+
+	<xsd:complexType name="ProgramChangeEvent">
+		<xsd:attribute name="canvasName" type="xsd:string"/>
+		<xsd:attribute name="bank" type="xsd:nonNegativeInteger" use="required"/>
+		<xsd:attribute name="program" type="xsd:nonNegativeInteger" use="required"/>
+	</xsd:complexType>
+
+	<xsd:complexType name="TempoEvent">
+		<xsd:attribute name="v" type="xsd:positiveInteger" default="120"/>
+	</xsd:complexType>
+
+	<xsd:complexType name="TimeSignatureComplexType">
+		<xsd:attribute name="n" type="xsd:positiveInteger" default="4"/>
+		<xsd:attribute name="d" type="xsd:positiveInteger" default="4"/>
+	</xsd:complexType>
+
+	<xsd:complexType name="ShuffleEvent">
+		<xsd:attribute name="v" type="xsd:integer" default="0"/>
 	</xsd:complexType>
 	<xsd:complexType name="PercussionCanvas">
 		<xsd:sequence>
