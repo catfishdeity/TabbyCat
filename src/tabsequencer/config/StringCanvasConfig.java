@@ -182,7 +182,7 @@ public class StringCanvasConfig extends CanvasConfig {
 				harmonicMatcher.group(1));
 			return Optional.of(freq);
 		} else if (additionalPitchMap.containsKey(token)) {
-			freq*=Math.pow(2,additionalPitchMap.get(token)/ed2);
+			freq*=Math.pow(2,additionalPitchMap.get(token)*fretStepSkip/ed2);
 			return Optional.of(freq);
 		}
 		

@@ -1,5 +1,6 @@
 package tabsequencer;
 
+import java.awt.image.BufferedImage;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Canvas;
@@ -302,7 +303,9 @@ public class TabbyCat {
 			double deviceScale_ = mainInterfacePanel.getGraphicsConfiguration().getDefaultTransform().getScaleX();
 			int visibleCols = (int)(mainInterfacePanel.getWidth() * deviceScale_ / displayScale / mainInterfacePanel.getCellWidth());
 			int cursorCol = visibleCols / 4;
-			projectData.getViewT().set(Math.max(0, projectData.getPlaybackT().get() - cursorCol));
+			if (mainInterfacePanel.followPlayback) {
+				projectData.getViewT().set(Math.max(0, projectData.getPlaybackT().get() - cursorCol));
+			}
 			long bpm = projectData.getTempo().get();
 			long sixteenthNanos = Duration.ofMinutes(1).dividedBy(bpm).dividedBy(4).toNanos();
 			double shuffleRatio = projectData.getShuffle().get() / 100.0;
@@ -1360,8 +1363,16 @@ public class TabbyCat {
 		int lastVerticalTranslate = 0;
 		int lastCellWidth = 1;
 		int lastRowHeight = 1;
+		int lastT1 = 1;
 		Map<SequencePosition, Rectangle2D> menuItemBounds = new EnumMap<>(SequencePosition.class);
 		int lastTopBarHeight = 0;
+		boolean followPlayback = true;
+		Rectangle2D lastScrollbarBounds = null;
+		Rectangle2D lastScrollbarThumbBounds = null;
+		boolean isScrollbarDragging = false;
+		double scrollbarDragStartX = 0;
+		int scrollbarDragStartViewT = 0;
+		Rectangle2D followButtonBounds = null;
 		
 		public MainInterfacePanel() {
 			this.setFocusTraversalKeysEnabled(false);
@@ -1473,7 +1484,7 @@ public class TabbyCat {
 					double deviceScale = getGraphicsConfiguration().getDefaultTransform().getScaleX();
 					double scaledX = e.getX() * deviceScale / displayScale;
 					double scaledY = e.getY() * deviceScale / displayScale;
-					if (scaledY <= lastTopBarHeight + 5) {
+					if (scaledY < lastTopBarHeight) {
 						for (Map.Entry<SequencePosition, Rectangle2D> entry : menuItemBounds.entrySet()) {
 							if (entry.getValue().contains(scaledX, scaledY)) {
 								sequencePosition = entry.getKey();
@@ -1482,6 +1493,31 @@ public class TabbyCat {
 								return;
 							}
 						}
+						if (followButtonBounds != null && followButtonBounds.contains(scaledX, scaledY)) {
+							followPlayback = !followPlayback;
+							repaint();
+							return;
+						}
+						return;
+					}
+					if (lastScrollbarBounds != null && lastScrollbarBounds.contains(scaledX, scaledY)) {
+						isScrollbarDragging = true;
+						scrollbarDragStartX = scaledX;
+						scrollbarDragStartViewT = projectData.getViewT().get();
+						if (lastScrollbarThumbBounds == null || !lastScrollbarThumbBounds.contains(scaledX, scaledY)) {
+							double W_ = lastScrollbarBounds.getWidth();
+							int maxET = lastT1;
+							for (Point p : projectData.getEventData().keySet()) maxET = Math.max(maxET, p.x + 1);
+							for (InstrumentDataKey k : projectData.getInstrumentData().keySet()) maxET = Math.max(maxET, k.getTime() + 1);
+							if (maxET > 0) {
+								int newViewT = (int)(scaledX / W_ * maxET);
+								int tDelta_ = (int)(W_ / lastCellWidth);
+								projectData.getViewT().set(Math.max(0, newViewT - tDelta_ / 2));
+								scrollbarDragStartViewT = projectData.getViewT().get();
+								scrollbarDragStartX = scaledX;
+							}
+						}
+						repaint();
 						return;
 					}
 					double mx = scaledX;
@@ -1539,6 +1575,11 @@ public class TabbyCat {
 				}
 				@Override
 				public void mouseReleased(MouseEvent e) {
+					if (isScrollbarDragging) {
+						isScrollbarDragging = false;
+						repaint();
+						return;
+					}
 					if (!isMouseLasso) return;
 					isMouseLasso = false;
 					double deviceScale = getGraphicsConfiguration().getDefaultTransform().getScaleX();
@@ -1562,6 +1603,19 @@ public class TabbyCat {
 					double deviceScale = getGraphicsConfiguration().getDefaultTransform().getScaleX();
 					double scaledX = e.getX() * deviceScale / displayScale;
 					double scaledY = e.getY() * deviceScale / displayScale;
+					if (isScrollbarDragging && lastScrollbarBounds != null) {
+						double W_ = lastScrollbarBounds.getWidth();
+						int maxET = (int)(W_ / lastCellWidth) + scrollbarDragStartViewT;
+						for (Point p : projectData.getEventData().keySet()) maxET = Math.max(maxET, p.x + 1);
+						for (InstrumentDataKey k : projectData.getInstrumentData().keySet()) maxET = Math.max(maxET, k.getTime() + 1);
+						if (maxET > 0) {
+							double dX = scaledX - scrollbarDragStartX;
+							int dT = (int)(dX / W_ * maxET);
+							projectData.getViewT().set(Math.max(0, scrollbarDragStartViewT + dT));
+						}
+						repaint();
+						return;
+					}
 					Pair<Integer,Integer> coords = gridCoordsFromMouse(scaledX, scaledY);
 					if (coords != null) {
 						if (isMouseLasso) {
@@ -2520,26 +2574,67 @@ public class TabbyCat {
 			g.fill(helpBounds);
 			iterateHue.run();
 			g.drawString(helpString,(int) helpBounds.getMinX(),(int) helpBounds.getMaxY());
-			
+			at.translate(helpBounds.getWidth()+5,0);
+			String followString = followPlayback ? "FOLLOW:ON" : "FOLLOW:OFF";
+			Rectangle2D followBoundsRaw = topFontMetrics.getStringBounds(followString, g);
+			Rectangle2D followBounds_ = at.createTransformedShape(followBoundsRaw).getBounds2D();
+			followButtonBounds = followBounds_;
+			g.setPaint(followPlayback ? new Color(30,100,30) : new Color(80,30,30));
+			g.fill(followBounds_);
+			iterateHue.run();
+			g.drawString(followString,(int) followBounds_.getMinX(),(int) followBounds_.getMaxY());
+
 			at.setToIdentity();
 			
-			at.translate(0, topBarHeight*2+5);//this might need to be changed if we exceed the size of the window
-			
-			g.setPaint(Color.WHITE);
-			g.setFont(gridFont);
-			g.drawLine(0, topBarHeight+5, (int)W, topBarHeight+5);
-			Area clip = new Area(new Rectangle2D.Double(0, 0, W, H));
-			clip.subtract(new Area(new Rectangle2D.Double(0, 0, W, topBarHeight+5)));
-			g.setClip(clip);
-			List<Shape> canvasGrids= new ArrayList<>();
-			Map<String,Point2D> stringPositions = new HashMap<>();
-			List<Rectangle2D> measurePanels = new ArrayList<>();
-			Path2D.Double eventP2D = new Path2D.Double();
+			int sbH = 5; // scrollbar strip height in drawing coords
+			int sbY = lastTopBarHeight + 2; // top of scrollbar strip
+			at.translate(0, sbY + sbH + topBarHeight + 5); // grid starts below scrollbar; extra topBarHeight clears the label ascent
+
 			int cellWidth = (int) getCellWidth();
 			int rowHeight = gridMetrics.getMaxAscent()+4;
 			int t0 = projectData.getViewT().get();
 			int tDelta = (int) (W/cellWidth);
 			int t1 = t0+tDelta;
+
+			// --- Horizontal scrollbar (between menu bar and grid) ---
+			{
+				int maxEventT = t1;
+				for (Point p : projectData.getEventData().keySet()) {
+					maxEventT = Math.max(maxEventT, p.x + 1);
+				}
+				for (InstrumentDataKey k : projectData.getInstrumentData().keySet()) {
+					maxEventT = Math.max(maxEventT, k.getTime() + 1);
+				}
+				// dead area = black (from overall fill); just store bounds for click detection
+				lastScrollbarBounds = new Rectangle2D.Double(0, sbY, W, sbH);
+				// white lines above and below
+				g.setPaint(Color.WHITE);
+				g.drawLine(0, sbY - 1, (int)W, sbY - 1);
+				g.drawLine(0, sbY + sbH + 1, (int)W, sbY + sbH + 1);
+				if (maxEventT > 0) {
+					double thumbX0 = (double) t0 / maxEventT * W;
+					double thumbX1 = Math.min((double) t1 / maxEventT * W, W);
+					double thumbW = Math.max(4, thumbX1 - thumbX0);
+					lastScrollbarThumbBounds = new Rectangle2D.Double(thumbX0, sbY, thumbW, sbH);
+					// rainbow gradient: 7x1 ROYGBIV raster drawn with bilinear scaling
+					BufferedImage rainbow = new BufferedImage(7, 1, BufferedImage.TYPE_INT_RGB);
+					int[] roygbiv = {0xFF0000,0xFF7F00,0xFFFF00,0x00FF00,0x0000FF,0x4B0082,0x8B00FF};
+					for (int i = 0; i < 7; i++) rainbow.setRGB(i, 0, roygbiv[i]);
+					g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+					g.drawImage(rainbow, (int)thumbX0, sbY, (int)thumbW, sbH, null);
+					g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+				}
+			}
+
+			g.setPaint(Color.WHITE);
+			g.setFont(gridFont);
+			Area clip = new Area(new Rectangle2D.Double(0, 0, W, H));
+			clip.subtract(new Area(new Rectangle2D.Double(0, 0, W, sbY + sbH + 3)));
+			g.setClip(clip);
+			List<Shape> canvasGrids= new ArrayList<>();
+			Map<String,Point2D> stringPositions = new HashMap<>();
+			List<Rectangle2D> measurePanels = new ArrayList<>();
+			Path2D.Double eventP2D = new Path2D.Double();
 			int x = 0;
 			for (int t = t0; t <= t1; t++) {
 				eventP2D.append(new Line2D.Double(
@@ -2557,11 +2652,10 @@ public class TabbyCat {
 			String eventsString = "Events";
 			Rectangle2D eventsStringBounds = topFontMetrics.getStringBounds(eventsString, g);
 			eventsStringBounds = at.createTransformedShape(eventsStringBounds).getBounds2D();
-
-			stringPositions.put(eventsString,new Point2D.Double(eventsStringBounds.getMinX(),eventsStringBounds.getMaxY())); 			
-
 			at.translate(0,rowHeight);
-
+			stringPositions.put(eventsString, new Point2D.Double(
+					eventsStringBounds.getMinX(),
+					at.getTranslateY() - topFontMetrics.getMaxDescent() - 1));
 
 			canvasGrids.add(at.createTransformedShape(eventP2D));			
 			at.translate(0,eventP2D.getBounds2D().getHeight());
@@ -2575,10 +2669,10 @@ public class TabbyCat {
 				Rectangle2D metadataStringBounds = gridMetrics.getStringBounds(metadataString, g);
 				at.translate(0,rowHeight);
 				metadataStringBounds = at.createTransformedShape(metadataStringBounds).getBounds2D();
-			
-				stringPositions.put(metadataString, new Point2D.Double(metadataStringBounds.getMinX(),metadataStringBounds.getMaxY()));
-			
 				at.translate(0,rowHeight);
+				stringPositions.put(metadataString, new Point2D.Double(
+						metadataStringBounds.getMinX(),
+						at.getTranslateY() - gridMetrics.getMaxDescent() - 1));
 			
 				Path2D.Double p2d = new Path2D.Double();
 				x = 0;
@@ -2607,6 +2701,7 @@ public class TabbyCat {
 			lastCanvasGrids = new ArrayList<>(canvasGrids);
 			lastCellWidth = cellWidth;
 			lastRowHeight = rowHeight;
+			lastT1 = t1;
 
 			Rectangle2D selectedGridBounds = new Rectangle2D.Double(0,0,1,1);
 			Rectangle2D selectionRectangle = new Rectangle2D.Double(0,0,1,1);
