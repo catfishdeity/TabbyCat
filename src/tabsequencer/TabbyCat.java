@@ -993,17 +993,16 @@ public class TabbyCat {
 
 		int paint(Graphics2D g, int x, int y, int fieldWidth, boolean focused) {
 			g.setFont(textFont);
-			int lineH  = textFontMetrics.getMaxAscent();
-			String labelStr = label + ":";
-			int labelW = textFontMetrics.stringWidth(labelStr);
-			g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
-			g.drawString(labelStr, x, y);
-			g.setPaint(focused ? Color.LIGHT_GRAY : Color.GRAY);
-			g.fillRect(x + labelW + 4, y - lineH, fieldWidth, lineH);
+			int lineH = textFontMetrics.getMaxAscent();
 			g.setPaint(Color.WHITE);
+			g.drawString(label + ":", x, y);
+			y += lineH;
+			g.setPaint(focused ? new Color(50, 50, 70) : Color.DARK_GRAY);
+			g.fillRect(x, y - lineH, fieldWidth, lineH);
 			Shape oldClip = g.getClip();
-			g.setClip(new Rectangle2D.Double(x + labelW + 4, y - lineH, fieldWidth, lineH));
-			g.drawString(buffer.toString() + (focused ? "|" : ""), x + labelW + 6, y);
+			g.setClip(new Rectangle2D.Double(x, y - lineH, fieldWidth, lineH));
+			g.setPaint(new Color(220, 220, 255));
+			g.drawString(buffer.toString() + "|", x + 2, y);
 			g.setClip(oldClip);
 			return y + lineH;
 		}
@@ -3433,6 +3432,7 @@ public class TabbyCat {
 		StringCanvasConfig targetCanvas = null;
 		int menuFocus = 0; // 0 = Soundfont File, 1 = Bank, 2 = Instrument, 3 = EDO, ...
 		int selectedSfIndex = 0; // 0 = Default, 1..sf2Files.size() = sf2Files entries
+		private final StringBuffer nameBuffer = new StringBuffer();
 		private final StringBuffer edoBuffer = new StringBuffer();
 		private final StringBuffer freqBuffer = new StringBuffer();
 
@@ -3474,17 +3474,30 @@ public class TabbyCat {
 			}
 			inputMap.put(KeyStroke.getKeyStroke("PERIOD"), "is_dot");
 			actionMap.put("is_dot", rToA(() -> edoInput('.')));
+			for (char c = 'A'; c <= 'Z'; c++) {
+				char lo = Character.toLowerCase(c), up = c;
+				char c_ = c;
+				inputMap.put(KeyStroke.getKeyStroke(up + ""),          "is_l" + lo);
+				inputMap.put(KeyStroke.getKeyStroke("shift " + up),    "is_u" + lo);
+				actionMap.put("is_l" + lo, rToA(() -> edoInput(lo)));
+				actionMap.put("is_u" + lo, rToA(() -> edoInput(c_)));
+			}
+			inputMap.put(k_Space, "is_space");
+			actionMap.put("is_space", rToA(() -> edoInput(' ')));
 		}
 
 		private void edoInput(char c) {
-			if (menuFocus == 3) { edoBuffer.append(c); repaint(); }
-			else if (menuFocus == 7) { freqBuffer.append(c); repaint(); }
+			if (menuFocus == 0) { nameBuffer.append(c); repaint(); }
+			else if (menuFocus == 4) { edoBuffer.append(c); repaint(); }
+			else if (menuFocus == 8) { freqBuffer.append(c); repaint(); }
 		}
 
 		private void edoBackspace() {
-			if (menuFocus == 3 && edoBuffer.length() > 0) {
+			if (menuFocus == 0 && nameBuffer.length() > 0) {
+				nameBuffer.deleteCharAt(nameBuffer.length() - 1); repaint();
+			} else if (menuFocus == 4 && edoBuffer.length() > 0) {
 				edoBuffer.deleteCharAt(edoBuffer.length() - 1); repaint();
-			} else if (menuFocus == 7 && freqBuffer.length() > 0) {
+			} else if (menuFocus == 8 && freqBuffer.length() > 0) {
 				freqBuffer.deleteCharAt(freqBuffer.length() - 1); repaint();
 			}
 		}
@@ -3513,10 +3526,30 @@ public class TabbyCat {
 			freqBuffer.append(fmtFloat(targetCanvas.getBaseFrequency()));
 		}
 
+		private boolean nameBufferValid() { return !nameBuffer.toString().isEmpty(); }
+
+		private void commitName() {
+			if (targetCanvas == null) return;
+			String newName = nameBuffer.toString();
+			if (!nameBufferValid()) { nameBuffer.setLength(0); nameBuffer.append(targetCanvas.getName()); return; }
+			String oldName = targetCanvas.getName();
+			if (!newName.equals(oldName)) {
+				targetCanvas.setName(newName);
+				if (projectData != null) {
+					Map<InstrumentDataKey, String> data = projectData.getInstrumentData();
+					List<InstrumentDataKey> keys = new java.util.ArrayList<>(data.keySet().stream()
+						.filter(k -> k.getInstrumentName().equals(oldName)).collect(Collectors.toList()));
+					for (InstrumentDataKey k : keys) { String val = data.remove(k); data.put(new InstrumentDataKey(newName, k.getTime(), k.getRow()), val); }
+				}
+			}
+		}
+
 		void prepare(StringCanvasConfig canvas) {
 			targetCanvas = canvas;
 			menuFocus = 0;
 			selectedSfIndex = sfIndexForCanvas(canvas);
+			nameBuffer.setLength(0);
+			nameBuffer.append(canvas.getName());
 			edoBuffer.setLength(0);
 			edoBuffer.append(fmtFloat(canvas.getEd2()));
 			freqBuffer.setLength(0);
@@ -3579,6 +3612,7 @@ public class TabbyCat {
 		}
 
 		void esc() {
+			commitName();
 			commitEdo();
 			commitFreq();
 			if (targetCanvas != null) resetSynths();
@@ -3586,39 +3620,40 @@ public class TabbyCat {
 		}
 
 		void up() {
-			if (menuFocus == 3) commitEdo();
-			if (menuFocus == 7) commitFreq();
+			if (menuFocus == 4) commitEdo();
+			if (menuFocus == 8) commitFreq();
 			menuFocus = Math.max(0, menuFocus - 1);
 			repaint();
 		}
 
 		void down() {
-			if (menuFocus == 3) commitEdo();
-			if (menuFocus == 7) commitFreq();
-			menuFocus = Math.min(9, menuFocus + 1);
+			if (menuFocus == 0) commitName();
+			if (menuFocus == 4) commitEdo();
+			if (menuFocus == 8) commitFreq();
+			menuFocus = Math.min(10, menuFocus + 1);
 			repaint();
 		}
 
 		void left() {
 			if (targetCanvas == null) return;
-			if (menuFocus == 0) {
+			if (menuFocus == 1) {
 				selectedSfIndex = Math.max(0, selectedSfIndex - 1);
 				repaint();
-			} else if (menuFocus == 1) {
+			} else if (menuFocus == 2) {
 				targetCanvas.setBank(nextBank(targetCanvas.getBank(), -1));
 				playPreview();
 				repaint();
-			} else if (menuFocus == 2) {
+			} else if (menuFocus == 3) {
 				targetCanvas.setProgram(nextProgram(targetCanvas.getBank(), targetCanvas.getProgram(), -1));
 				playPreview();
 				repaint();
-			} else if (menuFocus == 4) {
+			} else if (menuFocus == 5) {
 				targetCanvas.setFretStepSkip(targetCanvas.getFretStepSkip() - 1);
 				repaint();
-			} else if (menuFocus == 5) {
+			} else if (menuFocus == 6) {
 				targetCanvas.setMaxFrets(targetCanvas.getMaxFrets() - 1);
 				repaint();
-			} else if (menuFocus == 6) {
+			} else if (menuFocus == 7) {
 				targetCanvas.setMaxHarmonic(targetCanvas.getMaxHarmonic() - 1);
 				repaint();
 			}
@@ -3626,31 +3661,31 @@ public class TabbyCat {
 
 		void right() {
 			if (targetCanvas == null) return;
-			if (menuFocus == 0) {
+			if (menuFocus == 1) {
 				selectedSfIndex = Math.min(sfChoiceCount() - 1, selectedSfIndex + 1);
 				repaint();
-			} else if (menuFocus == 1) {
+			} else if (menuFocus == 2) {
 				targetCanvas.setBank(nextBank(targetCanvas.getBank(), 1));
 				playPreview();
 				repaint();
-			} else if (menuFocus == 2) {
+			} else if (menuFocus == 3) {
 				targetCanvas.setProgram(nextProgram(targetCanvas.getBank(), targetCanvas.getProgram(), 1));
 				playPreview();
 				repaint();
-			} else if (menuFocus == 4) {
+			} else if (menuFocus == 5) {
 				targetCanvas.setFretStepSkip(targetCanvas.getFretStepSkip() + 1);
 				repaint();
-			} else if (menuFocus == 5) {
+			} else if (menuFocus == 6) {
 				targetCanvas.setMaxFrets(targetCanvas.getMaxFrets() + 1);
 				repaint();
-			} else if (menuFocus == 6) {
+			} else if (menuFocus == 7) {
 				targetCanvas.setMaxHarmonic(targetCanvas.getMaxHarmonic() + 1);
 				repaint();
 			}
 		}
 
 		void enter() {
-			if (menuFocus == 0 && targetCanvas != null) {
+			if (menuFocus == 1 && targetCanvas != null) {
 				File chosen = sfChoiceFile(selectedSfIndex);
 				if (chosen != null && !loadedSoundbanks.containsKey(chosen)) {
 					try { loadedSoundbanks.put(chosen, MidiSystem.getSoundbank(chosen)); }
@@ -3659,11 +3694,11 @@ public class TabbyCat {
 				targetCanvas.setSoundfontFile(chosen);
 				playPreview();
 				repaint();
-			} else if (menuFocus == 8) {
+			} else if (menuFocus == 9) {
 				commitEdo(); commitFreq();
 				stringEditorPanel.prepare(targetCanvas);
 				cardLayout.show(cardPanel, stringEditorCardKey);
-			} else if (menuFocus == 9) {
+			} else if (menuFocus == 10) {
 				commitEdo(); commitFreq();
 				additionalFretEditorPanel.prepare(targetCanvas);
 				cardLayout.show(cardPanel, additionalFretEditorCardKey);
@@ -3709,9 +3744,23 @@ public class TabbyCat {
 
 			y += lineH + 4;
 
-			// Soundfont File row
+			// Name row
 			{
 				boolean focused = menuFocus == 0;
+				String label = "Name:";
+				String value = nameBuffer.toString();
+				int labelW = fm.stringWidth(label);
+				g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+				g.drawString(label, x, y);
+				g.setPaint(!nameBufferValid() ? Color.RED : focused ? new Color(255, 255, 100) : Color.GRAY);
+				g.drawString(" " + value + (focused ? "|" : ""), x + labelW, y);
+			}
+
+			y += lineH + 8;
+
+			// Soundfont File row
+			{
+				boolean focused = menuFocus == 1;
 				String label = "Soundfont File:";
 				String selected = sfChoiceName(selectedSfIndex);
 				int loadedIdx = sfIndexForCanvas(targetCanvas);
@@ -3731,14 +3780,14 @@ public class TabbyCat {
 			y += lineH + 8;
 
 			// Bank row (LEFT/RIGHT adjustable)
-			drawRow(g, fm, x, y, 1, "Bank:",
+			drawRow(g, fm, x, y, 2, "Bank:",
 				String.valueOf(targetCanvas.getBank()));
 
 			y += lineH + 8;
 
 			// Instrument row
 			{
-				boolean focused = menuFocus == 2;
+				boolean focused = menuFocus == 3;
 				String label = "Instrument:";
 				String value = String.valueOf(targetCanvas.getProgram());
 				int labelW = fm.stringWidth(label);
@@ -3757,7 +3806,7 @@ public class TabbyCat {
 			y += lineH + 8;
 
 			{
-				boolean focused = menuFocus == 3;
+				boolean focused = menuFocus == 4;
 				String label = "EDO (ed2):";
 				String value = edoBuffer.toString();
 				boolean valid = edoBufferValid();
@@ -3770,23 +3819,23 @@ public class TabbyCat {
 
 			y += lineH + 8;
 
-			drawRow(g, fm, x, y, 4, "Fret Step Skip:",
+			drawRow(g, fm, x, y, 5, "Fret Step Skip:",
 				String.valueOf(targetCanvas.getFretStepSkip()));
 
 			y += lineH + 8;
 
-			drawRow(g, fm, x, y, 5, "Max Frets:",
+			drawRow(g, fm, x, y, 6, "Max Frets:",
 				String.valueOf(targetCanvas.getMaxFrets()));
 
 			y += lineH + 8;
 
-			drawRow(g, fm, x, y, 6, "Max Harmonic:",
+			drawRow(g, fm, x, y, 7, "Max Harmonic:",
 				String.valueOf(targetCanvas.getMaxHarmonic()));
 
 			y += lineH + 8;
 
 			{
-				boolean focused = menuFocus == 7;
+				boolean focused = menuFocus == 8;
 				String label = "Base Frequency:";
 				String value = freqBuffer.toString();
 				boolean valid = freqBufferValid();
@@ -3799,11 +3848,11 @@ public class TabbyCat {
 
 			y += lineH + 8;
 
-			drawButton(g, fm, x, y, 8, "Edit Strings");
+			drawButton(g, fm, x, y, 9, "Edit Strings");
 
 			y += lineH + 8;
 
-			drawButton(g, fm, x, y, 9, "Edit Additional Frets");
+			drawButton(g, fm, x, y, 10, "Edit Additional Frets");
 
 			y += lineH * 2;
 			g.setPaint(new Color(70, 70, 70));
@@ -4098,24 +4147,39 @@ public class TabbyCat {
 	class DrumEditorPanel extends JPanel {
 		DrumCanvasConfig targetCanvas = null;
 		int focusRow = 0, focusCol = 0;
+		private final StringBuffer nameBuffer = new StringBuffer();
 
 		java.util.List<PercRowType>  rowBuf       = new java.util.ArrayList<>();
 		java.util.List<StringBuffer> tokenNameBuf = new java.util.ArrayList<>();
 		java.util.List<PercRowType>  tokenPosBuf  = new java.util.ArrayList<>();
 		java.util.List<StringBuffer> tokenMidiBuf = new java.util.ArrayList<>();
 
+		int selectedSfIndex = 0;
+
+		private int sfChoiceCount() { return sf2Files.size() + 1; }
+		private File sfChoiceFile(int idx) { return idx == 0 ? null : sf2Files.get(idx - 1); }
+		private String sfChoiceName(int idx) { return idx == 0 ? "Default" : sf2Files.get(idx - 1).getName(); }
+		private int sfIndexForDrum(DrumCanvasConfig canvas) {
+			if (!canvas.getSoundfontFile().isPresent()) return 0;
+			File current = canvas.getSoundfontFile().get();
+			for (int i = 0; i < sf2Files.size(); i++)
+				if (sf2Files.get(i).getName().equals(current.getName())) return i + 1;
+			return 0;
+		}
+
 		// --- focus index helpers ---
-		int addRowIdx()     { return 2 + rowBuf.size(); }
-		int firstTokIdx()   { return 3 + rowBuf.size(); }
-		int addTokIdx()     { return 3 + rowBuf.size() + tokenNameBuf.size(); }
+		// row 0 = Name, 1 = Soundfont, 2 = Bank, 3 = Program, 4.. = Rows, then Tokens
+		int addRowIdx()     { return 4 + rowBuf.size(); }
+		int firstTokIdx()   { return 5 + rowBuf.size(); }
+		int addTokIdx()     { return 5 + rowBuf.size() + tokenNameBuf.size(); }
 		int maxFocusRow()   { return addTokIdx(); }
-		boolean isRowItem(int r)  { return r >= 2 && r < addRowIdx(); }
+		boolean isRowItem(int r)  { return r >= 4 && r < addRowIdx(); }
 		boolean isTokItem(int r)  { return r >= firstTokIdx() && r < addTokIdx(); }
-		int rowIdx(int r)         { return r - 2; }
+		int rowIdx(int r)         { return r - 4; }
 		int tokIdx(int r)         { return r - firstTokIdx(); }
 
 		int[] validCols(int row) {
-			if (row == 0 || row == 1) return new int[]{0};
+			if (row == 0 || row == 1 || row == 2 || row == 3) return new int[]{0};
 			if (row == addRowIdx() || row == addTokIdx()) return new int[]{0};
 			java.util.List<Integer> cols = new java.util.ArrayList<>();
 			if (isRowItem(row)) {
@@ -4175,6 +4239,15 @@ public class TabbyCat {
 		void prepare(DrumCanvasConfig canvas) {
 			targetCanvas = canvas;
 			focusRow = 0; focusCol = 0;
+			nameBuffer.setLength(0);
+			nameBuffer.append(canvas.getName());
+			selectedSfIndex = sfIndexForDrum(canvas);
+			canvas.getSoundfontFile().ifPresent(f -> {
+				if (!loadedSoundbanks.containsKey(f)) {
+					try { loadedSoundbanks.put(f, MidiSystem.getSoundbank(f)); }
+					catch (Exception ignored) {}
+				}
+			});
 			rowBuf.clear();
 			rowBuf.addAll(canvas.getRowTypes());
 			tokenNameBuf.clear(); tokenPosBuf.clear(); tokenMidiBuf.clear();
@@ -4215,7 +4288,30 @@ public class TabbyCat {
 			catch (NumberFormatException e) { return false; }
 		}
 
+		private void commitName() {
+			if (targetCanvas == null) return;
+			String newName = nameBuffer.toString();
+			if (newName.isEmpty()) { nameBuffer.setLength(0); nameBuffer.append(targetCanvas.getName()); return; }
+			String oldName = targetCanvas.getName();
+			if (!newName.equals(oldName)) {
+				targetCanvas.setName(newName);
+				if (projectData != null) {
+					Map<InstrumentDataKey, String> data = projectData.getInstrumentData();
+					List<InstrumentDataKey> keys = new java.util.ArrayList<>(data.keySet().stream()
+						.filter(k -> k.getInstrumentName().equals(oldName)).collect(Collectors.toList()));
+					for (InstrumentDataKey k : keys) { String val = data.remove(k); data.put(new InstrumentDataKey(newName, k.getTime(), k.getRow()), val); }
+				}
+			}
+		}
+
+		void playPreviewDrum() {
+			resetSynths();
+			if (!tokenNameBuf.isEmpty())
+				playPreviewNote(targetCanvas, tokenNameBuf.get(0).toString(), 0);
+		}
+
 		void input(char c) {
+			if (focusRow == 0) { nameBuffer.append(c); repaint(); return; }
 			if (!isTokItem(focusRow)) return;
 			int i = tokIdx(focusRow);
 			if (focusCol == 3) {
@@ -4230,6 +4326,7 @@ public class TabbyCat {
 		}
 
 		void backspace() {
+			if (focusRow == 0 && nameBuffer.length() > 0) { nameBuffer.deleteCharAt(nameBuffer.length()-1); repaint(); return; }
 			if (!isTokItem(focusRow)) return;
 			int i = tokIdx(focusRow);
 			StringBuffer buf = focusCol == 3 ? tokenNameBuf.get(i)
@@ -4237,7 +4334,7 @@ public class TabbyCat {
 			if (buf != null && buf.length() > 0) { buf.deleteCharAt(buf.length()-1); flush(); repaint(); }
 		}
 
-		void esc() { flush(); cardLayout.show(cardPanel, mainInterfaceCardKey); }
+		void esc() { commitName(); flush(); cardLayout.show(cardPanel, mainInterfaceCardKey); }
 
 		void up() {
 			focusRow = Math.max(0, focusRow - 1);
@@ -4247,14 +4344,16 @@ public class TabbyCat {
 		}
 
 		void down() {
+			if (focusRow == 0) commitName();
 			focusRow = Math.min(maxFocusRow(), focusRow + 1);
 			focusCol = clampCol(focusRow, focusCol);
 			repaint();
 		}
 
 		void left() {
-			if (focusRow == 0) { targetCanvas.setBank(Math.max(0, targetCanvas.getBank()-1)); repaint(); return; }
-			if (focusRow == 1) { targetCanvas.setProgram(Math.max(0, targetCanvas.getProgram()-1)); repaint(); return; }
+			if (focusRow == 1) { selectedSfIndex = Math.max(0, selectedSfIndex - 1); repaint(); return; }
+			if (focusRow == 2) { targetCanvas.setBank(Math.max(0, targetCanvas.getBank()-1)); playPreviewDrum(); repaint(); return; }
+			if (focusRow == 3) { targetCanvas.setProgram(Math.max(0, targetCanvas.getProgram()-1)); playPreviewDrum(); repaint(); return; }
 			int next = prevCol(focusRow, focusCol);
 			if (next == focusCol && focusRow > 2) {
 				focusRow--;
@@ -4266,8 +4365,9 @@ public class TabbyCat {
 		}
 
 		void right() {
-			if (focusRow == 0) { targetCanvas.setBank(targetCanvas.getBank()+1); repaint(); return; }
-			if (focusRow == 1) { targetCanvas.setProgram(targetCanvas.getProgram()+1); repaint(); return; }
+			if (focusRow == 1) { selectedSfIndex = Math.min(sfChoiceCount() - 1, selectedSfIndex + 1); repaint(); return; }
+			if (focusRow == 2) { targetCanvas.setBank(targetCanvas.getBank()+1); playPreviewDrum(); repaint(); return; }
+			if (focusRow == 3) { targetCanvas.setProgram(targetCanvas.getProgram()+1); playPreviewDrum(); repaint(); return; }
 			int next = nextCol(focusRow, focusCol);
 			if (next == focusCol && focusRow < maxFocusRow()) {
 				focusRow++;
@@ -4279,6 +4379,7 @@ public class TabbyCat {
 		}
 
 		void toggleFocused() {
+			if (focusRow == 0) { input(' '); return; }
 			if (isRowItem(focusRow) && focusCol == 3) toggleRow(rowIdx(focusRow));
 			else if (isTokItem(focusRow) && focusCol == 4) toggleTok(tokIdx(focusRow));
 		}
@@ -4301,6 +4402,17 @@ public class TabbyCat {
 		}
 
 		void enter() {
+			if (focusRow == 1 && targetCanvas != null) {
+				File chosen = sfChoiceFile(selectedSfIndex);
+				if (chosen != null && !loadedSoundbanks.containsKey(chosen)) {
+					try { loadedSoundbanks.put(chosen, MidiSystem.getSoundbank(chosen)); }
+					catch (Exception ignored) {}
+				}
+				targetCanvas.setSoundfontFile(chosen);
+				playPreviewDrum();
+				repaint();
+				return;
+			}
 			if (focusRow == addRowIdx()) {
 				rowBuf.add(PercRowType.HAND);
 				flush(); repaint(); return;
@@ -4377,13 +4489,45 @@ public class TabbyCat {
 			g.drawString("Drum Editor: " + targetCanvas.getName(), x, y);
 			y += lineH + 4;
 
+			// Name
+			{
+				boolean focused = focusRow == 0;
+				String label = "Name:";
+				String value = nameBuffer.toString();
+				int labelW = fm.stringWidth(label);
+				g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+				g.drawString(label, x, y);
+				g.setPaint(value.isEmpty() ? Color.RED : focused ? new Color(255,255,100) : Color.GRAY);
+				g.drawString(" " + value + (focused ? "|" : ""), x + labelW, y);
+			}
+			y += lineH + 6;
+
+			// Soundfont File
+			{
+				boolean focused = focusRow == 1;
+				String label = "Soundfont File:";
+				String selected = sfChoiceName(selectedSfIndex);
+				int loadedIdx = sfIndexForDrum(targetCanvas);
+				int lw = fm.stringWidth(label);
+				int selW = fm.stringWidth(" " + selected);
+				g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+				g.drawString(label, x, y);
+				g.setPaint(focused ? new Color(255,255,100) : Color.GRAY);
+				g.drawString(" " + selected, x + lw, y);
+				if (selectedSfIndex != loadedIdx) {
+					g.setPaint(new Color(100,100,100));
+					g.drawString("  (loaded: " + sfChoiceName(loadedIdx) + "  ENTER to apply)", x + lw + selW, y);
+				}
+			}
+			y += lineH + 6;
+
 			// Bank
-			drawDepRow(g, fm, x, y, 0, "Bank:", String.valueOf(targetCanvas.getBank()), null);
+			drawDepRow(g, fm, x, y, 2, "Bank:", String.valueOf(targetCanvas.getBank()), null);
 			y += lineH + 6;
 
 			// Program
 			{
-				boolean focused = focusRow == 1;
+				boolean focused = focusRow == 3;
 				String label = "Program:", value = String.valueOf(targetCanvas.getProgram());
 				int lw = fm.stringWidth(label), vw = fm.stringWidth(" " + value);
 				g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);

@@ -10,7 +10,7 @@ public abstract class CanvasConfig {
 	public abstract CanvasType getType();
 	protected File soundfontFile;
 	protected int bank, program;
-	protected final String name;
+	protected String name;
 	
 	protected CanvasConfig(String name, File soundfontFile, int bank, int program) {
 		this.name = name;
@@ -33,6 +33,10 @@ public abstract class CanvasConfig {
 
 	public final String getName() {
 		return name;
+	}
+
+	public final void setName(String name) {
+		this.name = name;
 	}
 
 	public final int getBank() {
