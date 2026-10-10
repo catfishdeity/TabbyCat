@@ -167,7 +167,7 @@ public class TabbyCat {
 	static final String newCanvasCardKey = "NEW CANVAS";
 
 	static final double MIDDLE_C = 220.0 * Math.pow(2d, 3.0 / 12.0);
-	static final int trackStripWidth = 30;
+	int trackStripWidth = 30;
 	static final int UI_SCALE = 2;
 	double displayScale = UI_SCALE;
 	double rainbowBrightness = 1.0;
@@ -496,6 +496,7 @@ public class TabbyCat {
 			InstrumentDataKey dataKey = e.getKey();
 			String value = e.getValue();
 			projectData.getCanvasConfig(dataKey.getInstrumentName()).ifPresent(canvasConfig -> {
+				if (canvasConfig.isMuted()) return;
 				if (canvasConfig instanceof DrumCanvasConfig) {
 					DrumCanvasConfig drumConfig = (DrumCanvasConfig) canvasConfig;
 					drumConfig.getMidiNumber(value).ifPresent(midiNumber -> {
@@ -1729,7 +1730,32 @@ public class TabbyCat {
 							repaint();
 							return;
 						}
-						if (sb[2].contains(mx, my)) {
+						// bounds order: [0]=up [1]=down [2]=edit [3]=mute [4]=delete
+						if (sb.length > 2 && sb[2] != null && sb[2].contains(mx, my)) {
+							// Edit — open settings for this canvas
+							CanvasConfig canvas = projectData.getCanvases().getCanvases().get(si);
+							if (canvas instanceof DrumCanvasConfig) {
+								drumEditorPanel.prepare((DrumCanvasConfig) canvas);
+								cardLayout.show(cardPanel, drumEditorCardKey);
+							} else if (canvas instanceof StringCanvasConfig) {
+								instrumentSettingsPanel.prepare((StringCanvasConfig) canvas);
+								cardLayout.show(cardPanel, instrumentSettingsCardKey);
+							} else if (canvas instanceof EventCanvasConfig) {
+								eventCanvasSettingsPanel.prepare((EventCanvasConfig) canvas);
+								cardLayout.show(cardPanel, eventCanvasSettingsCardKey);
+							}
+							repaint();
+							return;
+						}
+						if (sb.length > 3 && sb[3] != null && sb[3].contains(mx, my)) {
+							// Mute toggle
+							CanvasConfig canvas = projectData.getCanvases().getCanvases().get(si);
+							canvas.setMuted(!canvas.isMuted());
+							if (!fileHasBeenModified.get()) { fileHasBeenModified.set(true); updateWindowTitle(); }
+							repaint();
+							return;
+						}
+						if (sb.length > 4 && sb[4] != null && sb[4].contains(mx, my)) {
 							// Delete
 							deleteConfirmPanel.prepare(si, projectData.getCanvases().getCanvases().get(si).getName());
 							cardLayout.show(cardPanel, deleteConfirmCardKey);
@@ -2716,7 +2742,7 @@ public class TabbyCat {
 			menuItemBounds.clear();
 			Iterator<Double> hueIterator = DoubleStream.iterate(0f, i->i+0.07).iterator();
 			Runnable iterateHue = () -> {
-				g.setPaint(Color.getHSBColor(hueIterator.next().floatValue(),0.5f,(float)rainbowBrightness));
+				g.setPaint(Color.getHSBColor(hueIterator.next().floatValue(),0.5f,1.0f));
 			};
 			g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
 			g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
@@ -2812,40 +2838,45 @@ public class TabbyCat {
 			Rectangle2D followBoundsRaw = topFontMetrics.getStringBounds(followString, g);
 			Rectangle2D followBounds_ = at.createTransformedShape(followBoundsRaw).getBounds2D();
 			menuItemBounds.put(SequencePosition.FOLLOW, followBounds_);
-			g.setPaint(!isInGrid && sequencePosition==SequencePosition.FOLLOW ? Color.GRAY :
-					(followPlayback ? new Color(30,100,30) : new Color(80,30,30)));
-			g.fill(followBounds_);
+			if (!isInGrid && sequencePosition == SequencePosition.FOLLOW) { g.setPaint(Color.GRAY); g.fill(followBounds_); }
 			iterateHue.run();
 			g.drawString(followString,(int) followBounds_.getMinX(),(int) followBounds_.getMaxY());
 			at.translate(followBounds_.getWidth()+5,0);
-			String repeatStartString = "\u2590|";
-			Rectangle2D repeatStartBounds = topFontMetrics.getStringBounds(repeatStartString, g);
-			repeatStartBounds = at.createTransformedShape(repeatStartBounds).getBounds2D();
+			// Repeat start: thin bar (left) + thick bar (right) — musical "begin repeat" symbol
+			// Use negative y so at.createTransformedShape aligns with the text baseline (same as string bounds convention)
+			int repW = 10;
+			Rectangle2D repeatStartBounds = at.createTransformedShape(new java.awt.geom.Rectangle2D.Double(0, -topBarHeight, repW, lastTopBarHeight)).getBounds2D();
 			menuItemBounds.put(SequencePosition.SET_REPEAT_START, repeatStartBounds);
-			g.setPaint(!isInGrid && sequencePosition==SequencePosition.SET_REPEAT_START ? Color.GRAY :
-					(projectData.getRepeatT0().get() >= 0 ? Color.orange.darker() : Color.BLACK));
-			g.fill(repeatStartBounds);
-			iterateHue.run();
-			g.drawString(repeatStartString,(int) repeatStartBounds.getMinX(),(int) repeatStartBounds.getMaxY());
-			at.translate(repeatStartBounds.getWidth()+5,0);
-			String repeatEndString = "|\u258c";
-			Rectangle2D repeatEndBounds = topFontMetrics.getStringBounds(repeatEndString, g);
-			repeatEndBounds = at.createTransformedShape(repeatEndBounds).getBounds2D();
+			boolean rsOn = projectData.getRepeatT0().get() >= 0;
+			if (!isInGrid && sequencePosition == SequencePosition.SET_REPEAT_START) { g.setPaint(Color.GRAY); g.fill(repeatStartBounds); }
+			g.setPaint(rsOn ? new Color(0xBF, 0x57, 0x00) : Color.WHITE);
+			{
+				int rx = (int)repeatStartBounds.getMinX(), ry = (int)repeatStartBounds.getMinY(), rh2 = (int)repeatStartBounds.getHeight();
+				g.drawLine(rx, ry, rx, ry + rh2);       // thin bar (left)
+				g.fillRect(rx + 2, ry, 4, rh2);          // thick bar
+			}
+			at.translate(repW + 5, 0);
+			// Repeat end: thick bar (left) + thin bar (right) — musical "end repeat" symbol
+			Rectangle2D repeatEndBounds = at.createTransformedShape(new java.awt.geom.Rectangle2D.Double(0, -topBarHeight, repW, lastTopBarHeight)).getBounds2D();
 			menuItemBounds.put(SequencePosition.SET_REPEAT_END, repeatEndBounds);
-			g.setPaint(!isInGrid && sequencePosition==SequencePosition.SET_REPEAT_END ? Color.GRAY :
-					(projectData.getRepeatT1().get() >= 0 ? Color.orange.darker() : Color.BLACK));
-			g.fill(repeatEndBounds);
-			iterateHue.run();
-			g.drawString(repeatEndString,(int) repeatEndBounds.getMinX(),(int) repeatEndBounds.getMaxY());
+			boolean reOn = projectData.getRepeatT1().get() >= 0;
+			if (!isInGrid && sequencePosition == SequencePosition.SET_REPEAT_END) { g.setPaint(Color.GRAY); g.fill(repeatEndBounds); }
+			g.setPaint(reOn ? new Color(0xBF, 0x57, 0x00) : Color.WHITE);
+			{
+				int rx2 = (int)repeatEndBounds.getMinX(), ry2 = (int)repeatEndBounds.getMinY(), rh3 = (int)repeatEndBounds.getHeight();
+				g.fillRect(rx2, ry2, 4, rh3);              // thick bar (left)
+				g.drawLine(rx2 + 6, ry2, rx2 + 6, ry2 + rh3); // thin bar (right)
+			}
 
 			at.setToIdentity();
 			
 			int sbH = 5; // scrollbar strip height in drawing coords
 			int sbY = lastTopBarHeight + 2; // top of scrollbar strip
-			at.translate(0, sbY + sbH + topBarHeight + 5); // grid starts below scrollbar; extra topBarHeight clears the label ascent
+			at.translate(0, sbY + sbH + 2); // just past scrollbar border; each canvas prepends its own 5px gap
 
 			int cellWidth = (int) getCellWidth();
 			int rowHeight = gridMetrics.getMaxAscent()+4;
+			trackStripWidth = 2 * (cellWidth + 4); // +4 per column so labels have room to center
 			int t0 = projectData.getViewT().get();
 			int tDelta = (int) ((W - trackStripWidth) / cellWidth);
 			int t1 = t0+tDelta;
@@ -2895,6 +2926,7 @@ public class TabbyCat {
 			for (CanvasConfig canvasConfig : projectData.getCanvases().getCanvases()) {
 				int canvasRowCount = canvasConfig.getRowCount();
 				String canvasLabelString = canvasConfig.getName();
+				at.translate(0, 5); // 5px gap above each canvas label (from scrollbar or previous measure panel)
 				if (canvasConfig instanceof EventCanvasConfig) {
 					// Event canvas: single row height above grid (like old Events label)
 					Rectangle2D labelBounds = topFontMetrics.getStringBounds(canvasLabelString, g);
@@ -2904,9 +2936,8 @@ public class TabbyCat {
 							labelBounds.getMinX(),
 							at.getTranslateY() - topFontMetrics.getMaxDescent() - 1));
 				} else {
-					// Instrument canvas: two row heights above grid (name + extra gap)
+					// Instrument canvas: one row height above grid for the label
 					Rectangle2D labelBounds = gridMetrics.getStringBounds(canvasLabelString, g);
-					at.translate(0, rowHeight);
 					labelBounds = at.createTransformedShape(labelBounds).getBounds2D();
 					at.translate(0, rowHeight);
 					stringPositions.put(canvasLabelString, new Point2D.Double(
@@ -3038,21 +3069,23 @@ public class TabbyCat {
 				g.draw(new Line2D.Double(playbackStartX, bounds.getMinY(), playbackStartX,bounds.getMaxY()));
 				g.draw(new Line2D.Double(playbackStartX+3, bounds.getMinY(), playbackStartX+3,bounds.getMaxY()));
 
-				// repeatT0: thick|thin  ▐|
+				double repeatBarY0 = bounds.getMinY() + 2;
+				double repeatBarY1 = bounds.getMaxY() - 2;
+				// repeatT0: start repeat — thin|thick  |▌  (fat on right)
 				if (projectData.getRepeatT0().get() >= 0) {
 					int r0X = (projectData.getRepeatT0().get()-projectData.getViewT().get())*cellWidth + trackStripWidth;
-					g.setStroke(new BasicStroke(3));
-					g.draw(new Line2D.Double(r0X, bounds.getMinY(), r0X, bounds.getMaxY()));
 					g.setStroke(new BasicStroke(1));
-					g.draw(new Line2D.Double(r0X+4, bounds.getMinY(), r0X+4, bounds.getMaxY()));
+					g.draw(new Line2D.Double(r0X,   repeatBarY0, r0X,   repeatBarY1));
+					g.setStroke(new BasicStroke(3));
+					g.draw(new Line2D.Double(r0X+4, repeatBarY0, r0X+4, repeatBarY1));
 				}
-				// repeatT1: thin|thick  |▌
+				// repeatT1: end repeat — thick|thin  ▐|  (fat on left)
 				if (projectData.getRepeatT1().get() >= 0) {
 					int r1X = (projectData.getRepeatT1().get()-projectData.getViewT().get())*cellWidth + trackStripWidth;
-					g.setStroke(new BasicStroke(1));
-					g.draw(new Line2D.Double(r1X-4, bounds.getMinY(), r1X-4, bounds.getMaxY()));
 					g.setStroke(new BasicStroke(3));
-					g.draw(new Line2D.Double(r1X, bounds.getMinY(), r1X, bounds.getMaxY()));
+					g.draw(new Line2D.Double(r1X-4, repeatBarY0, r1X-4, repeatBarY1));
+					g.setStroke(new BasicStroke(1));
+					g.draw(new Line2D.Double(r1X,   repeatBarY0, r1X,   repeatBarY1));
 				}
 				g.setStroke(new BasicStroke(1));
 
@@ -3183,42 +3216,124 @@ public class TabbyCat {
 			// Track control strip — drawn as an overlay on the left edge of each canvas
 			lastStripBounds.clear();
 			g.setClip(null);
+			g.setStroke(new BasicStroke(1));
 			for (int sci = 0; sci < canvasGrids.size(); sci++) {
 				CanvasConfig sc = projectData.getCanvases().getCanvases().get(sci);
 				Rectangle2D cgb = canvasGrids.get(sci).getBounds2D();
 				double sy = cgb.getMinY();
 				double sh = cgb.getHeight();
-				// dark background for strip
-				g.setPaint(new Color(20, 20, 20, 210));
-				g.fillRect(0, (int) sy, trackStripWidth, (int) sh);
+				double stripH = Math.max(sh, 3.0 * rowHeight);
+				int colW = trackStripWidth / 2;
+
+				// black fill + vertical rainbow border
+				g.setPaint(Color.BLACK);
+				g.fillRect(0, (int) sy, trackStripWidth, (int) stripH);
+				g.setPaint(new java.awt.LinearGradientPaint(0, (float) sy, 0, (float)(sy + stripH), rbFractions, rbColors));
+				// top, bottom, left only — no right edge
+				g.drawLine(0, (int) sy,              trackStripWidth - 1, (int) sy);
+				g.drawLine(0, (int)(sy + stripH) - 1, trackStripWidth - 1, (int)(sy + stripH) - 1);
+				g.drawLine(0, (int) sy,              0,                   (int)(sy + stripH) - 1);
+
 				boolean canUp   = sci > 0;
 				boolean canDown = sci < canvasGrids.size() - 1;
-				double h3 = sh / 3.0;
-				Rectangle2D upR  = new Rectangle2D.Double(0, sy,        trackStripWidth, h3);
-				Rectangle2D dnR  = new Rectangle2D.Double(0, sy + h3,   trackStripWidth, h3);
-				Rectangle2D delR = new Rectangle2D.Double(0, sy + 2*h3, trackStripWidth, h3);
-				lastStripBounds.add(new Rectangle2D[]{upR, dnR, delR});
+
 				g.setFont(gridFont);
-				g.setPaint(canUp   ? Color.WHITE : new Color(60,60,60));
-				g.drawString("\u2191", 9, (int)(sy + h3) - 2);
-				g.setPaint(canDown ? Color.WHITE : new Color(60,60,60));
-				g.drawString("\u2193", 9, (int)(sy + 2*h3) - 2);
-				g.setPaint(new Color(220, 80, 80));
-				g.drawString("\u00d7", 8, (int)(sy + sh) - 2);
+				int ascent  = gridMetrics.getMaxAscent();
+				int descent = gridMetrics.getMaxDescent();
+
+				// Click bounds — [0]=up [1]=down [2]=edit [3]=mute [4]=delete
+				// Disabled arrows use zero-size rect (unclickable)
+				Rectangle2D[] sb = new Rectangle2D[5];
+				for (int i = 0; i < 5; i++) sb[i] = new Rectangle2D.Double(0, 0, 0, 0);
+
+				// Helper: baseline y for text vertically centered in a cell rect
+				// ly = cellTop + (cellHeight + ascent - descent) / 2
+				// Col 0: pack enabled items top-down — up (if canUp), down (if canDown), X
+				int col0Row = 0;
+				if (canUp) {
+					Rectangle2D r = new Rectangle2D.Double(0, sy + col0Row * rowHeight, colW, rowHeight);
+					sb[0] = r;
+					int lw = gridMetrics.stringWidth("\u2191");
+					int lx = (int)(r.getMinX() + (r.getWidth() - lw) / 2.0);
+					int ly = (int)(r.getMinY() + (rowHeight + ascent - descent) / 2.0);
+					g.setPaint(Color.WHITE);
+					g.drawString("\u2191", lx, ly);
+					col0Row++;
+				}
+				if (canDown) {
+					Rectangle2D r = new Rectangle2D.Double(0, sy + col0Row * rowHeight, colW, rowHeight);
+					sb[1] = r;
+					int lw = gridMetrics.stringWidth("\u2193");
+					int lx = (int)(r.getMinX() + (r.getWidth() - lw) / 2.0);
+					int ly = (int)(r.getMinY() + (rowHeight + ascent - descent) / 2.0);
+					g.setPaint(Color.WHITE);
+					g.drawString("\u2193", lx, ly);
+					col0Row++;
+				}
+				{
+					Rectangle2D r = new Rectangle2D.Double(0, sy + col0Row * rowHeight, colW, rowHeight);
+					sb[4] = r;
+					int lw = gridMetrics.stringWidth("X");
+					int lx = (int)(r.getMinX() + (r.getWidth() - lw) / 2.0);
+					int ly = (int)(r.getMinY() + (rowHeight + ascent - descent) / 2.0);
+					g.setPaint(new Color(220, 80, 80));
+					g.drawString("X", lx, ly);
+				}
+
+				// Col 1: [m] row 0, [e] row 1 — shared lx so both are perfectly aligned
+				{
+					int col1LabelW = Math.max(gridMetrics.stringWidth("[m]"), gridMetrics.stringWidth("[e]"));
+					int col1Lx = (int)(colW + (colW - col1LabelW) / 2.0);
+
+					Rectangle2D rM = new Rectangle2D.Double(colW, sy, colW, rowHeight);
+					sb[3] = rM;
+					int lyM = (int)(rM.getMinY() + (rowHeight + ascent - descent) / 2.0);
+					g.setPaint(sc.isMuted() ? new Color(0xBF, 0x57, 0x00) : Color.WHITE);
+					g.drawString("[m]", col1Lx, lyM);
+
+					Rectangle2D rE = new Rectangle2D.Double(colW, sy + rowHeight, colW, rowHeight);
+					sb[2] = rE;
+					int lyE = (int)(rE.getMinY() + (rowHeight + ascent - descent) / 2.0);
+					g.setPaint(Color.WHITE);
+					g.drawString("[e]", col1Lx, lyE);
+				}
+
+				lastStripBounds.add(sb);
 			}
 			// + ADD CANVAS bar below last canvas grid (and its measure panel)
-			if (!canvasGrids.isEmpty() && !measurePanels.isEmpty()) {
-				Rectangle2D lastMeasure = measurePanels.get(measurePanels.size() - 1);
-				double addY = lastMeasure.getMaxY() + 2;
-				double addH = lastRowHeight;
-				lastAddCanvasBounds = new Rectangle2D.Double(0, addY, W, addH);
-				g.setPaint(new Color(40, 40, 40));
-				g.fillRect(0, (int) addY, (int) W, (int) addH);
-				g.setPaint(new Color(120, 120, 120));
-				g.setFont(gridFont);
-				String addLabel = "+ ADD CANVAS";
-				int addLabelW = g.getFontMetrics(gridFont).stringWidth(addLabel);
-				g.drawString(addLabel, (int)(W/2 - addLabelW/2), (int)(addY + addH - 2));
+			if (projectData != null) {
+				double addY, addH;
+				if (!canvasGrids.isEmpty() && !measurePanels.isEmpty()) {
+					Rectangle2D lastMeasure = measurePanels.get(measurePanels.size() - 1);
+					addY = lastMeasure.getMaxY() + 2;
+					addH = lastRowHeight;
+				} else {
+					// No canvases yet — position below the scrollbar
+					addY = lastTopBarHeight + 14;
+					addH = lastRowHeight > 0 ? lastRowHeight : 20;
+				}
+				boolean hasCanvases = !canvasGrids.isEmpty();
+				double barW = hasCanvases ? trackStripWidth : W;
+				lastAddCanvasBounds = new Rectangle2D.Double(0, addY, barW, addH);
+
+				// black fill
+				g.setPaint(Color.BLACK);
+				g.fillRect(0, (int) addY, (int) barW, (int) addH);
+
+				// horizontal rainbow border
+				g.setStroke(new BasicStroke(1));
+				g.setPaint(new java.awt.LinearGradientPaint(0, (float) addY, (float) barW, (float) addY, rbFractions, rbColors));
+				g.drawRect(0, (int) addY, (int) barW - 1, (int) addH - 1);
+
+				// bright white '+' as two crossed lines, stroke 2, exact center
+				double cx  = barW / 2.0;
+				double cy  = addY + addH / 2.0;
+				double arm = addH / 3.0;
+				g.setStroke(new BasicStroke(2));
+				g.setPaint(Color.WHITE);
+				g.draw(new Line2D.Double(cx - arm, cy,       cx + arm, cy));
+				g.draw(new Line2D.Double(cx,       cy - arm, cx,       cy + arm));
+				g.setStroke(new BasicStroke(1));
 			}
 
 			for (Rectangle2D measurePanel : measurePanels) {

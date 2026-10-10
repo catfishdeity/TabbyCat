@@ -56,4 +56,8 @@ public abstract class CanvasConfig {
 	}
 
 	public abstract boolean willAccept(String token, int row);
+
+	protected boolean muted = false;
+	public boolean isMuted() { return muted; }
+	public void setMuted(boolean muted) { this.muted = muted; }
 }

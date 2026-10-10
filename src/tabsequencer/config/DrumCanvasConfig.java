@@ -54,7 +54,10 @@ public class DrumCanvasConfig extends CanvasConfig {
 				IntStream.range(0,tokenNodes.getLength()).mapToObj(i->PercToken.fromXMLElement((Element) tokenNodes.item(i)))
 				.collect(Collectors.toList());
 				
-		return new DrumCanvasConfig(name,soundfontFile,bank,program,rowTypes,tokens);		
+		DrumCanvasConfig result = new DrumCanvasConfig(name,soundfontFile,bank,program,rowTypes,tokens);
+		String mutedAttr = e.getAttribute("muted");
+		if (!mutedAttr.isEmpty()) result.muted = Boolean.parseBoolean(mutedAttr);
+		return result;
 	}
 
 	@Override
@@ -66,7 +69,8 @@ public class DrumCanvasConfig extends CanvasConfig {
 		e.setAttribute("name", getName());
 		e.setAttribute("bank", getBank()+"");
 		e.setAttribute("program", getProgram()+"");
-		
+		if (muted) e.setAttribute("muted", "true");
+
 		for (PercRowType rowType : rowTypes) {
 			Element rowE = doc.createElement("row");
 			e.appendChild(rowE);

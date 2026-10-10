@@ -23,6 +23,7 @@ public class EventCanvasConfig extends CanvasConfig {
 		Element e = doc.createElement(tagName);
 		e.setAttribute("name", name);
 		e.setAttribute("numRows", numRows + "");
+		if (muted) e.setAttribute("muted", "true");
 		return e;
 		// Event data is appended by ProjectFileData.toXMLElement
 	}
@@ -31,6 +32,9 @@ public class EventCanvasConfig extends CanvasConfig {
 		String name = e.getAttribute("name");
 		String numRowsAttr = e.getAttribute("numRows");
 		int numRows = numRowsAttr.isEmpty() ? 3 : Integer.parseInt(numRowsAttr);
-		return new EventCanvasConfig(name, numRows);
+		EventCanvasConfig result = new EventCanvasConfig(name, numRows);
+		String mutedAttr = e.getAttribute("muted");
+		if (!mutedAttr.isEmpty()) result.muted = Boolean.parseBoolean(mutedAttr);
+		return result;
 	}
 }

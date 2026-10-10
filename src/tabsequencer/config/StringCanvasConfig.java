@@ -51,7 +51,10 @@ public class StringCanvasConfig extends CanvasConfig {
 		double baseFrequency = Double.parseDouble(e.getAttribute("baseFrequency"));
 		
 		
-		return new StringCanvasConfig(edoSteps,name,maxFrets,maxHarmonic,ed2,soundfontFile,bank,program,fretStepSkip,baseFrequency,additionalPitchMap);
+		StringCanvasConfig result = new StringCanvasConfig(edoSteps,name,maxFrets,maxHarmonic,ed2,soundfontFile,bank,program,fretStepSkip,baseFrequency,additionalPitchMap);
+		String mutedAttr = e.getAttribute("muted");
+		if (!mutedAttr.isEmpty()) result.muted = Boolean.parseBoolean(mutedAttr);
+		return result;
 	}
 	
 	private double[] edoSteps;
@@ -135,6 +138,7 @@ public class StringCanvasConfig extends CanvasConfig {
 		e.setAttribute("ed2", ed2+"");
 		e.setAttribute("fretStepSkip", fretStepSkip+"");
 		e.setAttribute("baseFrequency", baseFrequency+"");
+		if (muted) e.setAttribute("muted", "true");
 		return e;
 	}
 

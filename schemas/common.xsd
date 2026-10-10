@@ -16,6 +16,7 @@
 		</xsd:sequence>
 		<xsd:attribute name="name" type="NonEmptyString" use="required"/>
 		<xsd:attribute name="numRows" type="xsd:positiveInteger" default="3"/>
+		<xsd:attribute name="muted" type="xsd:boolean" default="false"/>
 	</xsd:complexType>
 
 	<xsd:complexType name="ControlEvent">
@@ -59,6 +60,7 @@
 		<xsd:attribute name="soundfontFile" type="xsd:string" use="optional"/>
 		<xsd:attribute name="bank" type="xsd:nonNegativeInteger" default="0"/>
 		<xsd:attribute name="program" type="xsd:nonNegativeInteger" default="0"/>
+		<xsd:attribute name="muted" type="xsd:boolean" default="false"/>
 	</xsd:complexType>
 	
 	<xsd:complexType name="PercRow">		
@@ -79,7 +81,7 @@
 	</xsd:simpleType>
 	
 	<xsd:complexType name="StringCanvas">
-		<xsd:sequence>			
+		<xsd:sequence>
 			<xsd:element name="string" type="PitchedString" minOccurs="1" maxOccurs="unbounded"/>
 			<xsd:element name="additionalPitch" type="AdditionalPitch" minOccurs="0" maxOccurs="unbounded"/>
 		</xsd:sequence>
@@ -92,6 +94,7 @@
 		<xsd:attribute name="bank" type="xsd:nonNegativeInteger" default="0"/>
 		<xsd:attribute name="program" type="xsd:nonNegativeInteger" default="0"/>
 		<xsd:attribute name="baseFrequency" type="xsd:double" default="82.41"/>
+		<xsd:attribute name="muted" type="xsd:boolean" default="false"/>
 	</xsd:complexType>
 	
 	<xsd:complexType name="PitchedString">
