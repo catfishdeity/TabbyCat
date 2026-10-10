@@ -1127,40 +1127,10 @@ public class TabbyCat {
 		}
 	}
 
-	class TextWidget {
-		private final String label;
-		private final StringBuffer buffer = new StringBuffer();
-
-		TextWidget(String label) { this.label = label; }
-		TextWidget(String label, String initial) { this.label = label; buffer.append(initial); }
-
-		void append(char c)  { buffer.append(c); }
-		void backspace()     { if (buffer.length() > 0) buffer.deleteCharAt(buffer.length() - 1); }
-		void reset()         { buffer.setLength(0); }
-		void reset(String s) { buffer.setLength(0); buffer.append(s); }
-		String getText()     { return buffer.toString(); }
-
-		int paint(Graphics2D g, int x, int y, int fieldWidth, boolean focused) {
-			g.setFont(textFont);
-			int lineH = textFontMetrics.getMaxAscent();
-			g.setPaint(Color.WHITE);
-			g.drawString(label + ":", x, y);
-			y += lineH;
-			g.setPaint(focused ? new Color(50, 50, 70) : Color.DARK_GRAY);
-			g.fillRect(x, y - lineH, fieldWidth, lineH);
-			Shape oldClip = g.getClip();
-			g.setClip(new Rectangle2D.Double(x, y - lineH, fieldWidth, lineH));
-			g.setPaint(new Color(220, 220, 255));
-			g.drawString(buffer.toString() + "|", x + 2, y);
-			g.setClip(oldClip);
-			return y + lineH;
-		}
-	}
-
 	class NewProjectPanel extends JPanel {
 
-		TextWidget songField   = new TextWidget("Title",  "New Song");
-		TextWidget artistField = new TextWidget("Artist", "Artist");
+		StringBuffer songBuffer   = new StringBuffer("New Song");
+		StringBuffer artistBuffer = new StringBuffer("Artist");
 		int selectedIndex = 0;
 		
 		final int modulo = 1;
@@ -1199,16 +1169,16 @@ public class TabbyCat {
 			}
 			inputMap.put(k_Space, "space");
 			actionMap.put("space", rToA(() -> {
-				if (selectedIndex == 0) { songField.append(' '); repaint(); }
-				else if (selectedIndex == 1) { artistField.append(' '); repaint(); }
+				if (selectedIndex == 0) { songBuffer.append(' '); repaint(); }
+				else if (selectedIndex == 1) { artistBuffer.append(' '); repaint(); }
 			}));
 		}
 
 		void handleChar(char c) {
 			if (selectedIndex == 0) {
-				songField.append(c);
+				songBuffer.append(c);
 			} else if (selectedIndex == 1) {
-				artistField.append(c);
+				artistBuffer.append(c);
 			} else if (selectedIndex == canvasesConfig.getCanvases().size()+2) {
 				//do nothing
 				//System.out.println("hey");
@@ -1246,9 +1216,9 @@ public class TabbyCat {
 		
 		void backspace() {
 			if (selectedIndex == 0) {
-				songField.backspace();
+				if (songBuffer.length() > 0) songBuffer.deleteCharAt(songBuffer.length() - 1);
 			} else if (selectedIndex == 1) {
-				artistField.backspace();
+				if (artistBuffer.length() > 0) artistBuffer.deleteCharAt(artistBuffer.length() - 1);
 			} else if (selectedIndex == canvasesConfig.getCanvases().size()+2) {
 				//do nothing
 			} else {
@@ -1293,8 +1263,8 @@ public class TabbyCat {
 						.sorted(cmp1.thenComparing(cmp2)).map(a->a.a).collect(Collectors.toList()));
 				CanvasesConfig config = new CanvasesConfig(orderedCanvases);
 				projectData = new ProjectFileData(config);
-				projectData.setSongName(songField.getText());
-				projectData.setArtistName(artistField.getText());
+				projectData.setSongName(songBuffer.toString());
+				projectData.setArtistName(artistBuffer.toString());
 				projectData.setUiScale(displayScale);
 				activeFile.set(null);
 				fileHasBeenModified.set(false);
@@ -1315,9 +1285,29 @@ public class TabbyCat {
 			g.setPaint(Color.BLACK);
 			g.fill(this.getBounds());
 			int rowHeight = textFontMetrics.getMaxAscent();
-			int fieldWidth = textFontMetrics.stringWidth("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
-			int y = songField.paint(g, 2, rowHeight, fieldWidth, selectedIndex == 0);
-			y = artistField.paint(g, 2, y, fieldWidth, selectedIndex == 1);
+			int y = rowHeight;
+			// Title row
+			{
+				boolean focused = selectedIndex == 0;
+				String lbl = "Title:";
+				int lblW = textFontMetrics.stringWidth(lbl);
+				g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+				g.drawString(lbl, 2, y);
+				g.setPaint(focused ? new Color(255, 255, 100) : Color.GRAY);
+				g.drawString(" " + songBuffer + (focused ? "|" : ""), 2 + lblW, y);
+			}
+			y += rowHeight + 4;
+			// Artist row
+			{
+				boolean focused = selectedIndex == 1;
+				String lbl = "Artist:";
+				int lblW = textFontMetrics.stringWidth(lbl);
+				g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+				g.drawString(lbl, 2, y);
+				g.setPaint(focused ? new Color(255, 255, 100) : Color.GRAY);
+				g.drawString(" " + artistBuffer + (focused ? "|" : ""), 2 + lblW, y);
+			}
+			y += rowHeight + 8;
 			
 			int yForInstruments = y;
 			int xForInstruments = 2;
@@ -1587,7 +1577,7 @@ public class TabbyCat {
 			actionMap.put("ctrlshifts", rToA(this::showSaveAs));
 			inputMap.put(k_CtrlI,"ctrli");
 			actionMap.put("ctrli", rToA(this::ctrlI));
-			
+
 			inputMap.put(k_Enter,"enter");
 			actionMap.put("enter", rToA(this::enter));
 			
@@ -1915,6 +1905,7 @@ public class TabbyCat {
 				cardLayout.show(cardPanel, eventCanvasSettingsCardKey);
 			}
 		}
+
 
 		void backspace() {
 			if (!instrumentClipboard.isEmpty() || !eventClipboard.isEmpty()) {
@@ -3638,7 +3629,9 @@ public class TabbyCat {
 
 	class SettingsPanel extends JPanel {
 		FloatSpinner uiScale = new FloatSpinner("UI Scale", UI_SCALE, 0.1, 10.0, 0.1);
-		int settingsFocus = 0; // 0 = UI Scale, 1 = Output Device
+		int settingsFocus = 0; // 0 = Title, 1 = Artist, 2 = UI Scale, 3 = Output Device
+		private StringBuffer songBuffer   = new StringBuffer();
+		private StringBuffer artistBuffer = new StringBuffer();
 
 		public SettingsPanel() {
 			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
@@ -3655,14 +3648,55 @@ public class TabbyCat {
 			actionMap.put("right", rToA(this::adjustRight));
 			inputMap.put(k_Enter, "enter");
 			actionMap.put("enter", rToA(this::enter));
+			inputMap.put(k_Backspace, "s_bsp");
+			actionMap.put("s_bsp", rToA(this::settingsBsp));
+			inputMap.put(k_Space, "s_spc");
+			actionMap.put("s_spc", rToA(() -> settingsAppend(' ')));
+			for (char c = 'A'; c <= 'Z'; c++) {
+				char lo = Character.toLowerCase(c), up = c;
+				char c_ = c;
+				inputMap.put(KeyStroke.getKeyStroke(up + ""),        "s_l" + lo);
+				inputMap.put(KeyStroke.getKeyStroke("shift " + up),  "s_u" + lo);
+				actionMap.put("s_l" + lo, rToA(() -> settingsAppend(lo)));
+				actionMap.put("s_u" + lo, rToA(() -> settingsAppend(c_)));
+			}
+			for (char c = '0'; c <= '9'; c++) {
+				char c_ = c;
+				inputMap.put(KeyStroke.getKeyStroke("" + c), "s_d" + c);
+				actionMap.put("s_d" + c, rToA(() -> settingsAppend(c_)));
+			}
+			for (char c : new char[]{'.', ',', '!', '?', '\'', '-', '_'}) {
+				char c_ = c;
+				inputMap.put(KeyStroke.getKeyStroke(c), "s_p" + c);
+				actionMap.put("s_p" + c, rToA(() -> settingsAppend(c_)));
+			}
 		}
 
-		void refresh() { uiScale.setValue(displayScale); repaint(); }
-		void up()   { settingsFocus = 0; repaint(); }
-		void down() { settingsFocus = 1; repaint(); }
+		void refresh() {
+			uiScale.setValue(displayScale);
+			if (projectData != null) {
+				songBuffer.setLength(0);   songBuffer.append(projectData.getSongName());
+				artistBuffer.setLength(0); artistBuffer.append(projectData.getArtistName());
+			}
+			repaint();
+		}
+
+		void up() {
+			settingsFocus--;
+			if (settingsFocus < 0) settingsFocus = 3;
+			if (projectData == null && settingsFocus < 2) settingsFocus = 3;
+			repaint();
+		}
+
+		void down() {
+			settingsFocus++;
+			if (settingsFocus > 3) settingsFocus = (projectData != null) ? 0 : 2;
+			if (projectData == null && settingsFocus < 2) settingsFocus = 2;
+			repaint();
+		}
 
 		void adjustLeft() {
-			if (settingsFocus == 0) {
+			if (settingsFocus == 2) {
 				uiScale.left();
 				displayScale = uiScale.getValue();
 				if (projectData != null) projectData.setUiScale(uiScale.getValue());
@@ -3671,7 +3705,7 @@ public class TabbyCat {
 		}
 
 		void adjustRight() {
-			if (settingsFocus == 0) {
+			if (settingsFocus == 2) {
 				uiScale.right();
 				displayScale = uiScale.getValue();
 				if (projectData != null) projectData.setUiScale(uiScale.getValue());
@@ -3680,10 +3714,22 @@ public class TabbyCat {
 		}
 
 		void enter() {
-			if (settingsFocus == 1) {
+			if (settingsFocus == 3) {
 				audioOutputPanel.refresh();
 				cardLayout.show(cardPanel, audioOutputCardKey);
 			}
+		}
+
+		void settingsAppend(char c) {
+			if (projectData == null) return;
+			if (settingsFocus == 0) { songBuffer.append(c); projectData.setSongName(songBuffer.toString()); repaint(); }
+			else if (settingsFocus == 1) { artistBuffer.append(c); projectData.setArtistName(artistBuffer.toString()); repaint(); }
+		}
+
+		void settingsBsp() {
+			if (projectData == null) return;
+			if (settingsFocus == 0 && songBuffer.length() > 0) { songBuffer.deleteCharAt(songBuffer.length()-1); projectData.setSongName(songBuffer.toString()); repaint(); }
+			else if (settingsFocus == 1 && artistBuffer.length() > 0) { artistBuffer.deleteCharAt(artistBuffer.length()-1); projectData.setArtistName(artistBuffer.toString()); repaint(); }
 		}
 
 		@Override
@@ -3697,12 +3743,34 @@ public class TabbyCat {
 			int x = 10;
 			int y = lineH;
 
+			// --- Title row ---
+			if (projectData != null) {
+				boolean sf = settingsFocus == 0;
+				String slabel = "Title:";
+				int slabelW = textFontMetrics.stringWidth(slabel);
+				g.setPaint(sf ? Color.WHITE : Color.DARK_GRAY);
+				g.drawString(slabel, x, y);
+				g.setPaint(sf ? new Color(255, 255, 100) : Color.GRAY);
+				g.drawString(" " + songBuffer + (sf ? "|" : ""), x + slabelW, y);
+				y += lineH + 4;
+
+				// --- Artist row ---
+				boolean af = settingsFocus == 1;
+				String alabel = "Artist:";
+				int alabelW = textFontMetrics.stringWidth(alabel);
+				g.setPaint(af ? Color.WHITE : Color.DARK_GRAY);
+				g.drawString(alabel, x, y);
+				g.setPaint(af ? new Color(255, 255, 100) : Color.GRAY);
+				g.drawString(" " + artistBuffer + (af ? "|" : ""), x + alabelW, y);
+				y += lineH + 8;
+			}
+
 			// --- UI Scale row ---
-			uiScale.paint(g, x, y, settingsFocus == 0);
+			uiScale.paint(g, x, y, settingsFocus == 2);
 
 			// --- Output Device row ---
 			y += lineH + 8;
-			boolean audioFocused = settingsFocus == 1;
+			boolean audioFocused = settingsFocus == 3;
 			String deviceLabel = "Output Device:";
 			String deviceName = (selectedAudioMixerInfo == null) ? "Default (system)" : selectedAudioMixerInfo.getName();
 			int deviceLabelW = textFontMetrics.stringWidth(deviceLabel);
@@ -3715,7 +3783,9 @@ public class TabbyCat {
 			// --- Nav hint ---
 			y += lineH * 2;
 			g.setPaint(new Color(70, 70, 70));
-			if (settingsFocus == 0) {
+			if (settingsFocus == 0 || settingsFocus == 1) {
+				g.drawString("UP/DOWN: navigate   A-Z/0-9: type   Backspace: delete   ESC: back", x, y);
+			} else if (settingsFocus == 2) {
 				g.drawString("UP/DOWN: navigate   LEFT/RIGHT: adjust   ESC: back", x, y);
 			} else {
 				g.drawString("UP/DOWN: navigate   ENTER: open   ESC: back", x, y);
@@ -5323,30 +5393,6 @@ public class TabbyCat {
 		}
 	}
 
-	class StubEditorPanel extends JPanel {
-		StubEditorPanel(String title, String backCardKey) {
-			InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-			ActionMap am = getActionMap();
-			im.put(k_Escape, "esc");
-			am.put("esc", rToA(() -> cardLayout.show(cardPanel, backCardKey)));
-			setBackground(Color.BLACK);
-			// title stored for paint
-			this.title = title;
-		}
-		private final String title;
-		@Override
-		public void paint(Graphics g_) {
-			Graphics2D g = (Graphics2D) g_;
-			g.setPaint(Color.BLACK);
-			g.fill(getBounds());
-			g.setFont(textFont);
-			g.setPaint(Color.WHITE);
-			g.drawString(title + " (not yet implemented)", 10, textFontMetrics.getHeight());
-			g.setPaint(new Color(70, 70, 70));
-			g.drawString("ESC: back", 10, textFontMetrics.getHeight() * 2 + 4);
-		}
-	}
-
 	class TextInputPanel extends JPanel {
 		private final String label;
 		private final java.util.function.Consumer<String> onConfirm;
@@ -5412,15 +5458,11 @@ public class TabbyCat {
 			int rowH = textFontMetrics.getMaxAscent();
 			int y = rowH;
 
+			int labelW = textFontMetrics.stringWidth(label);
 			g.setPaint(Color.WHITE);
 			g.drawString(label, 2, y);
-			y += rowH;
-
-			int fieldW = (int)(getBounds().getWidth() - 4);
-			g.setPaint(Color.DARK_GRAY);
-			g.fillRect(2, y - rowH, fieldW, rowH);
-			g.setPaint(new Color(220, 220, 255));
-			g.drawString(buffer.toString() + "|", 4, y);
+			g.setPaint(new Color(255, 255, 100));
+			g.drawString(" " + buffer.toString() + "|", 2 + labelW, y);
 			y += rowH * 2;
 
 			g.setPaint(Color.GRAY);
