@@ -5346,6 +5346,8 @@ public class TabbyCat {
 				if (c < '0' || c > '9') return;
 				tokenMidiBuf.get(i).append(c);
 				flush(); repaint();
+				if (midiValid(i) && nameValid(i))
+					playPreviewNote(targetCanvas, tokenNameBuf.get(i).toString(), 0);
 			}
 		}
 
@@ -5355,7 +5357,11 @@ public class TabbyCat {
 			int i = tokIdx(focusRow);
 			StringBuffer buf = focusCol == 3 ? tokenNameBuf.get(i)
 			                 : focusCol == 5 ? tokenMidiBuf.get(i) : null;
-			if (buf != null && buf.length() > 0) { buf.deleteCharAt(buf.length()-1); flush(); repaint(); }
+			if (buf != null && buf.length() > 0) {
+				buf.deleteCharAt(buf.length()-1); flush(); repaint();
+				if (focusCol == 5 && midiValid(i) && nameValid(i))
+					playPreviewNote(targetCanvas, tokenNameBuf.get(i).toString(), 0);
+			}
 		}
 
 		void esc() { commitName(); flush(); cardLayout.show(cardPanel, mainInterfaceCardKey); }
