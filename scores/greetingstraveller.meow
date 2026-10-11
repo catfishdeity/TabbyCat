@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<tabProject xmlns="tabby" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" artistName="BAANOIR" cursorT="365" gridFontFamily="Monospaced" gridFontSize="12" playbackStartT="0" playbackT="388" rainbowBrightness="0.8" repeatT0="384" repeatT1="432" scrollbarBrightness="0.8" selectedCanvas="0" selectedRow="4" shuffle="0" songName="Greetings Traveler" tempo="168" uiScale="1.8" viewT="368" xsi:schemaLocation="tabby ../schemas/projectFiles.xsd">
+<tabProject xmlns="tabby" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" artistName="BAANOIR" cursorT="432" gridFontFamily="Monospaced" gridFontSize="12" playbackStartT="0" playbackT="409" rainbowBrightness="0.8" repeatT0="384" repeatT1="480" scrollbarBrightness="0.8" selectedCanvas="0" selectedRow="6" shuffle="0" songName="Greetings Traveler" tempo="168" uiScale="1.8" viewT="389" xsi:schemaLocation="tabby ../schemas/projectFiles.xsd">
     <canvases>
         <eventCanvas name="Events" numRows="3">
             <event r="2" t="0">
@@ -18,22 +18,22 @@
             <row type="FOOT"/>
             <row type="FOOT"/>
             <token midiNumber="0" position="FOOT" token="K2"/>
-            <token midiNumber="1" position="FOOT" token="K"/>
-            <token midiNumber="44" position="FOOT" token="P"/>
+            <token midiNumber="6" position="FOOT" token="K"/>
+            <token midiNumber="11" position="FOOT" token="XP"/>
             <token midiNumber="15" position="HAND" token="X"/>
+            <token midiNumber="15" position="HAND" token="X1"/>
+            <token midiNumber="27" position="HAND" token="X2"/>
             <token midiNumber="26" position="HAND" token="O"/>
-            <token midiNumber="20" position="HAND" token="C"/>
-            <token midiNumber="20" position="HAND" token="C2"/>
-            <token midiNumber="31" position="HAND" token="R"/>
-            <token midiNumber="59" position="HAND" token="R2"/>
-            <token midiNumber="53" position="HAND" token="B"/>
             <token midiNumber="41" position="HAND" token="S"/>
-            <token midiNumber="40" position="HAND" token="S2"/>
-            <token midiNumber="55" position="HAND" token="L"/>
-            <token midiNumber="53" position="HAND" token="M"/>
+            <token midiNumber="49" position="HAND" token="S2"/>
+            <token midiNumber="42" position="HAND" token="S3"/>
             <token midiNumber="52" position="HAND" token="H"/>
+            <token midiNumber="54" position="HAND" token="M"/>
+            <token midiNumber="55" position="HAND" token="L"/>
+            <token midiNumber="31" position="HAND" token="R"/>
+            <token midiNumber="20" position="HAND" token="C"/>
         </drumCanvas>
-        <stringCanvas bank="0" baseFrequency="65.406" ed2="41.0" fretStepSkip="2" maxFrets="41" maxHarmonic="16" muted="true" name="KiteBass" program="4" soundfontFile="sf2/creative_sf_cd_ii/SYNTH04S.SF2">
+        <stringCanvas bank="0" baseFrequency="65.406" ed2="41.0" fretStepSkip="2" maxFrets="41" maxHarmonic="16" name="KiteBass" program="0" soundfontFile="sf2/creative_sf_cd_ii/ROKBASSM.SF2">
             <string steps="65.000"/>
             <string steps="52.000"/>
             <string steps="39.000"/>
@@ -44,7 +44,7 @@
             <additionalPitch steps="3.500" token="D"/>
             <additionalPitch steps="4.500" token="E"/>
         </stringCanvas>
-        <stringCanvas bank="0" baseFrequency="130.812" ed2="41.0" fretStepSkip="2" maxFrets="41" maxHarmonic="16" name="KiteElectric" program="5" soundfontFile="sf2/creative_sf_cd_ii/FUZZGTRS.SF2">
+        <stringCanvas bank="0" baseFrequency="130.812" ed2="41.0" fretStepSkip="2" maxFrets="41" maxHarmonic="16" name="KiteElectric" program="1" soundfontFile="sf2/creative_sf_cd_ii/POPGTRSS.SF2">
             <string steps="78.000"/>
             <string steps="65.000"/>
             <string steps="52.000"/>
@@ -67,6 +67,17 @@
         <event r="6" t="414" v="2"/>
         <event r="6" t="413" v="-"/>
         <event r="6" t="419" v="-"/>
+        <event r="6" t="432" v="0"/>
+        <event r="6" t="434" v="1"/>
+        <event r="6" t="433" v="-"/>
+        <event r="6" t="440" v="3"/>
+        <event r="6" t="439" v="-"/>
+        <event r="6" t="442" v="-"/>
+        <event r="6" t="441" v="-"/>
+        <event r="6" t="436" v="B"/>
+        <event r="6" t="435" v="-"/>
+        <event r="6" t="438" v="2"/>
+        <event r="6" t="437" v="-"/>
         <event r="6" t="384" v="0"/>
         <event r="6" t="386" v="1"/>
         <event r="6" t="385" v="-"/>
@@ -106,6 +117,43 @@
         <event r="6" t="403" v="-"/>
         <event r="6" t="406" v="-"/>
         <event r="6" t="405" v="-"/>
+        <event r="6" t="479" v="-"/>
+        <event r="6" t="476" v="B"/>
+        <event r="6" t="475" v="-"/>
+        <event r="6" t="478" v="1"/>
+        <event r="6" t="477" v="-"/>
+        <event r="6" t="448" v="B"/>
+        <event r="6" t="447" v="-"/>
+        <event r="6" t="450" v="2"/>
+        <event r="6" t="449" v="-"/>
+        <event r="6" t="444" v="0"/>
+        <event r="6" t="443" v="-"/>
+        <event r="6" t="446" v="1"/>
+        <event r="6" t="445" v="-"/>
+        <event r="6" t="456" v="0"/>
+        <event r="6" t="455" v="-"/>
+        <event r="6" t="458" v="1"/>
+        <event r="6" t="457" v="-"/>
+        <event r="6" t="452" v="3"/>
+        <event r="6" t="451" v="-"/>
+        <event r="6" t="454" v="-"/>
+        <event r="6" t="453" v="-"/>
+        <event r="6" t="464" v="3"/>
+        <event r="6" t="463" v="-"/>
+        <event r="6" t="466" v="-"/>
+        <event r="6" t="465" v="-"/>
+        <event r="6" t="460" v="B"/>
+        <event r="6" t="459" v="-"/>
+        <event r="6" t="462" v="2"/>
+        <event r="6" t="461" v="-"/>
+        <event r="6" t="472" v="2"/>
+        <event r="6" t="471" v="-"/>
+        <event r="6" t="474" v="2"/>
+        <event r="6" t="473" v="-"/>
+        <event r="6" t="468" v="3"/>
+        <event r="6" t="467" v="-"/>
+        <event r="6" t="470" v="3"/>
+        <event r="6" t="469" v="-"/>
     </instrumentTabData>
     <instrumentTabData name="KiteBass">
         <event r="5" t="56" v="3"/>
@@ -505,6 +553,34 @@
         <event r="5" t="245" v="-"/>
         <event r="5" t="246" v="2"/>
         <event r="5" t="247" v="-"/>
+        <event r="5" t="440" v="3"/>
+        <event r="5" t="441" v="-"/>
+        <event r="5" t="442" v="-"/>
+        <event r="5" t="443" v="-"/>
+        <event r="5" t="444" v="0"/>
+        <event r="5" t="445" v="-"/>
+        <event r="5" t="446" v="1"/>
+        <event r="5" t="447" v="-"/>
+        <event r="5" t="448" v="B"/>
+        <event r="5" t="449" v="-"/>
+        <event r="5" t="450" v="2"/>
+        <event r="5" t="451" v="-"/>
+        <event r="5" t="452" v="3"/>
+        <event r="5" t="453" v="-"/>
+        <event r="5" t="454" v="-"/>
+        <event r="5" t="455" v="-"/>
+        <event r="5" t="456" v="0"/>
+        <event r="5" t="457" v="-"/>
+        <event r="5" t="458" v="1"/>
+        <event r="5" t="459" v="-"/>
+        <event r="5" t="460" v="B"/>
+        <event r="5" t="461" v="-"/>
+        <event r="5" t="462" v="2"/>
+        <event r="5" t="463" v="-"/>
+        <event r="5" t="464" v="3"/>
+        <event r="5" t="465" v="-"/>
+        <event r="5" t="466" v="-"/>
+        <event r="5" t="467" v="-"/>
         <event r="5" t="408" v="0"/>
         <event r="5" t="409" v="-"/>
         <event r="5" t="410" v="1"/>
@@ -518,6 +594,13 @@
         <event r="5" t="418" v="-"/>
         <event r="5" t="419" v="-"/>
         <event r="5" t="432" v="0"/>
+        <event r="5" t="433" v="-"/>
+        <event r="5" t="434" v="1"/>
+        <event r="5" t="435" v="-"/>
+        <event r="5" t="436" v="B"/>
+        <event r="5" t="437" v="-"/>
+        <event r="5" t="438" v="2"/>
+        <event r="5" t="439" v="-"/>
     </instrumentTabData>
     <instrumentTabData name="Drums">
         <event r="0" t="88" v="R"/>
@@ -631,9 +714,17 @@
         <event r="1" t="254" v="M"/>
         <event r="2" t="224" v="P"/>
         <event r="1" t="256" v="M"/>
+        <event r="0" t="456" v="O"/>
         <event r="1" t="427" v="S"/>
         <event r="1" t="428" v="S"/>
+        <event r="0" t="452" v="O"/>
+        <event r="0" t="464" v="O"/>
+        <event r="0" t="460" v="O"/>
         <event r="1" t="431" v="S"/>
+        <event r="0" t="440" v="O"/>
+        <event r="0" t="436" v="O"/>
+        <event r="0" t="448" v="O"/>
+        <event r="0" t="444" v="O"/>
         <event r="1" t="416" v="S"/>
         <event r="3" t="396" v="K"/>
         <event r="3" t="397" v="K"/>
@@ -644,11 +735,14 @@
         <event r="3" t="400" v="K"/>
         <event r="3" t="401" v="K"/>
         <event r="3" t="402" v="K"/>
+        <event r="1" t="464" v="S"/>
         <event r="3" t="378" v="K"/>
+        <event r="1" t="440" v="S"/>
         <event r="3" t="387" v="K"/>
         <event r="3" t="388" v="K"/>
         <event r="3" t="389" v="K"/>
         <event r="3" t="390" v="K"/>
+        <event r="1" t="452" v="S"/>
         <event r="3" t="384" v="K"/>
         <event r="3" t="385" v="K"/>
         <event r="3" t="386" v="K"/>
@@ -659,7 +753,6 @@
         <event r="0" t="400" v="O"/>
         <event r="2" t="340" v="P"/>
         <event r="0" t="396" v="O"/>
-        <event r="1" t="365" v="O"/>
         <event r="2" t="336" v="P"/>
         <event r="2" t="316" v="P"/>
         <event r="1" t="348" v="M"/>
@@ -678,6 +771,7 @@
         <event r="0" t="420" v="O"/>
         <event r="0" t="422" v="O"/>
         <event r="1" t="392" v="S"/>
+        <event r="0" t="432" v="C"/>
         <event r="1" t="404" v="S"/>
         <event r="0" t="428" v="O"/>
         <event r="0" t="430" v="O"/>
@@ -695,6 +789,13 @@
         <event r="3" t="424" v="K"/>
         <event r="3" t="425" v="K"/>
         <event r="3" t="426" v="K"/>
+        <event r="3" t="435" v="K"/>
+        <event r="3" t="436" v="K"/>
+        <event r="3" t="437" v="K"/>
+        <event r="3" t="438" v="K"/>
+        <event r="3" t="432" v="K"/>
+        <event r="3" t="433" v="K"/>
+        <event r="3" t="434" v="K"/>
         <event r="3" t="411" v="K"/>
         <event r="3" t="412" v="K"/>
         <event r="3" t="413" v="K"/>
@@ -706,5 +807,22 @@
         <event r="3" t="421" v="K"/>
         <event r="3" t="422" v="K"/>
         <event r="3" t="415" v="K"/>
+        <event r="3" t="459" v="K"/>
+        <event r="3" t="460" v="K"/>
+        <event r="3" t="461" v="K"/>
+        <event r="3" t="462" v="K"/>
+        <event r="3" t="456" v="K"/>
+        <event r="3" t="457" v="K"/>
+        <event r="3" t="458" v="K"/>
+        <event r="3" t="463" v="K"/>
+        <event r="3" t="444" v="K"/>
+        <event r="3" t="445" v="K"/>
+        <event r="3" t="446" v="K"/>
+        <event r="3" t="439" v="K"/>
+        <event r="3" t="451" v="K"/>
+        <event r="3" t="447" v="K"/>
+        <event r="3" t="448" v="K"/>
+        <event r="3" t="449" v="K"/>
+        <event r="3" t="450" v="K"/>
     </instrumentTabData>
 </tabProject>
