@@ -28,7 +28,7 @@ public class ProjectFileData {
 	private final CanvasesConfig canvases;
 	private final Map<String, Map<Point, ControlEvent>> eventDataByCanvas;
 	private final Map<InstrumentDataKey, String> instrumentData;
-	private final AtomicInteger cursorT, repeatT0, repeatT1, playbackStartT, selectedRow, selectedCanvas, viewT, tempo, playbackT, initialTempo, shuffle;
+	private final AtomicInteger cursorT, repeatT0, repeatT1, playbackStartT, selectedRow, selectedCanvas, viewT, tempo, playbackT, initialTempo, shuffle, playbackT0;
 
 	private String songName = "Untitled";
 	private String artistName = "Unknown Artist";
@@ -55,6 +55,7 @@ public class ProjectFileData {
 		this.initialTempo = new AtomicInteger(120);
 		this.playbackT = new AtomicInteger(0);
 		this.shuffle = new AtomicInteger(0);
+		this.playbackT0 = new AtomicInteger(0);
 	}
 
 	public Optional<CanvasConfig> getCanvasConfig(String name) {
@@ -354,5 +355,9 @@ public class ProjectFileData {
 
 	public AtomicInteger getViewT() {
 		return viewT;
+	}
+
+	public AtomicInteger getPlaybackT0() {
+		return playbackT0;
 	}
 }

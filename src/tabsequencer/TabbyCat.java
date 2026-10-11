@@ -1,6 +1,7 @@
 package tabsequencer;
 
 import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Canvas;
@@ -206,6 +207,7 @@ public class TabbyCat {
 		
 	final AtomicBoolean isPlaying = new AtomicBoolean(false);
 	final AtomicBoolean playbackDaemonIsStarted = new AtomicBoolean(false);
+	final java.util.concurrent.atomic.AtomicLong playbackRestartNanos = new java.util.concurrent.atomic.AtomicLong(0);
 
 	final TreeMap<Integer, Integer> cachedMeasurePositions = new TreeMap<>();
 	final HashSet<Integer> cachedBeatMarkerPositions = new HashSet<>();
@@ -321,8 +323,9 @@ public class TabbyCat {
 				LockSupport.parkNanos(1_000_000L); // 1ms nap — don't spin 100%
 				continue;
 			}
-			// Reset if stale — e.g. after a stop/resume
-			if (System.nanoTime() - intendedFireTimeNanos > 2_000_000_000L) {
+			// Reset timer on explicit restart, or if stale (e.g. > 2s gap)
+			long restartSignal = playbackRestartNanos.getAndSet(0);
+			if (restartSignal > 0 || System.nanoTime() - intendedFireTimeNanos > 2_000_000_000L) {
 				intendedFireTimeNanos = System.nanoTime();
 			}
 			try {
@@ -736,8 +739,10 @@ public class TabbyCat {
 			playbackDaemonIsStarted.set(true);
 			playbackDaemon.submit(() -> playbackDaemonFunction(System.nanoTime()));
 		}
-		int currentT = projectData.getPlaybackT().get();
-		midiDaemon.submit(() -> rescanProgramsToT(currentT));
+		int startT = projectData.getPlaybackT0().get();
+		projectData.getPlaybackT().set(startT);
+		midiDaemon.submit(() -> rescanProgramsToT(startT));
+		playbackRestartNanos.set(System.nanoTime());
 		isPlaying.set(true);
 	}
 
@@ -1048,6 +1053,42 @@ public class TabbyCat {
 		}
 
 		frame.setVisible(true);
+		try {
+			byte[] iconBytes = java.util.Base64.getDecoder().decode(
+				"iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAERlWElm" +
+				"TU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAEKAD" +
+				"AAQAAAABAAAAEAAAAAA0VXHyAAABDUlEQVQ4EaVTKw7CQBTcEiwVGBCQIugVuERJ0GgE" +
+				"gjtwCwQCjSah4Q5coQaCwQBJL1B2tp3Na7uLYZL2/WZmXzcQFBrqD3SkNhxOZOnNJa9L" +
+				"Fpr5+q5MfN5M5Iwxr/qSZw0siSY6NsFDan3cAdEbREWxVaZUl0/ZdtSGV4kCRDimaWqM" +
+				"k+u8doCrSGfnkpskyhqggxWPh105hFF8Mrl5ZQtF4XK1UbgPoGWAC6oBJlosEe4jtwFI" +
+				"vz6FGyR6dcJuYIV66LxtreDJkmsN6MgIkyb43bIfvEbT1k+5/8gs5z2OVbO2Q510MJQEm" +
+				"VOMKCE5tf+CJDFvitFnD0ZeA54OEh6KYMAN0PMagOiDNPsCUK22r7blkgMAAAAASUVORK5CYII=");
+			BufferedImage iconSmall = ImageIO.read(new java.io.ByteArrayInputStream(iconBytes));
+			int iconSize = 512;
+			BufferedImage iconImage = new BufferedImage(iconSize, iconSize, BufferedImage.TYPE_INT_ARGB);
+			Graphics2D ig = iconImage.createGraphics();
+			ig.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+			ig.drawImage(iconSmall, 0, 0, iconSize, iconSize, null);
+			ig.dispose();
+			frame.setIconImage(iconImage);
+			if (IS_MAC) {
+				// Try java.awt.Taskbar (Java 9+) first, fall back to com.apple.eawt.Application
+				boolean taskbarSet = false;
+				try {
+					Class<?> taskbarClass = Class.forName("java.awt.Taskbar");
+					Object taskbar = taskbarClass.getMethod("getTaskbar").invoke(null);
+					taskbarClass.getMethod("setIconImage", java.awt.Image.class).invoke(taskbar, iconImage);
+					taskbarSet = true;
+				} catch (Exception ignored) {}
+				if (!taskbarSet) {
+					try {
+						Class<?> appClass = Class.forName("com.apple.eawt.Application");
+						Object app = appClass.getMethod("getApplication").invoke(null);
+						appClass.getMethod("setDockIconImage", java.awt.Image.class).invoke(app, iconImage);
+					} catch (Exception ignored) {}
+				}
+			}
+		} catch (Exception ignored) {}
 	}
 	
 
@@ -1718,7 +1759,7 @@ public class TabbyCat {
 				@Override
 				public void mousePressed(MouseEvent e) {
 					requestFocusInWindow();
-					if (SwingUtilities.isRightMouseButton(e)) {
+					if (SwingUtilities.isRightMouseButton(e) && (!instrumentClipboard.isEmpty() || !eventClipboard.isEmpty())) {
 						ctrlV();
 						return;
 					}
@@ -1847,7 +1888,9 @@ public class TabbyCat {
 									? clickedRelativeRow
 									: rowBreaks.get(i - 1) + 1 + clickedRelativeRow;
 
-							if (e.isShiftDown()) {
+							if (SwingUtilities.isRightMouseButton(e)) {
+								projectData.getPlaybackT0().set(Math.max(0, clickedT));
+							} else if (e.isShiftDown()) {
 								projectData.getCursorT().set(Math.max(0, clickedT));
 								projectData.getSelectedRow().set(absoluteRow);
 								isInGrid = true;
@@ -1855,8 +1898,6 @@ public class TabbyCat {
 									isMouseLasso = true;
 									toggleSelectionMode();
 								}
-							} else if ((e.getModifiersEx() & java.awt.event.InputEvent.META_DOWN_MASK) != 0) {
-								projectData.getPlaybackT().set(Math.max(0, clickedT));
 							} else {
 								projectData.getCursorT().set(Math.max(0, clickedT));
 								projectData.getSelectedRow().set(absoluteRow);
@@ -2476,13 +2517,13 @@ public class TabbyCat {
 
 		}
 		public void playTToPreviousMeasure() {
-			NavigableMap<Integer, Integer> headMap = cachedMeasurePositions.headMap(projectData.getPlaybackT().get(),
+			NavigableMap<Integer, Integer> headMap = cachedMeasurePositions.headMap(projectData.getPlaybackT0().get(),
 					false);
 			if (!headMap.isEmpty()) {
 				Entry<Integer, Integer> last = headMap.lastEntry();
-				projectData.getPlaybackT().set(last.getKey());
+				projectData.getPlaybackT0().set(last.getKey());
 			}
-			while (projectData.getPlaybackT().get() < projectData.getViewT().get() + scrollTimeMargin
+			while (projectData.getPlaybackT0().get() < projectData.getViewT().get() + scrollTimeMargin
 					&& projectData.getViewT().get() > 0) {
 				projectData.getViewT().getAndDecrement();
 			}
@@ -2490,13 +2531,13 @@ public class TabbyCat {
 		}
 
 		public void playTToNextMeasure() {
-			NavigableMap<Integer, Integer> tailMap = cachedMeasurePositions.tailMap(projectData.getPlaybackT().get(),
+			NavigableMap<Integer, Integer> tailMap = cachedMeasurePositions.tailMap(projectData.getPlaybackT0().get(),
 					false);
 			if (!tailMap.isEmpty()) {
 				Entry<Integer, Integer> next = tailMap.firstEntry();
-				projectData.getPlaybackT().set(next.getKey());
+				projectData.getPlaybackT0().set(next.getKey());
 			}
-			while (projectData.getPlaybackT().get() > getMaxVisibleTime() - scrollTimeMargin) {
+			while (projectData.getPlaybackT0().get() > getMaxVisibleTime() - scrollTimeMargin) {
 				projectData.getViewT().getAndIncrement();
 			}
 			repaint();
@@ -3149,6 +3190,10 @@ public class TabbyCat {
 				g.setStroke(new BasicStroke(1));
 				g.draw(new Line2D.Double(playbackStartX, bounds.getMinY(), playbackStartX,bounds.getMaxY()));
 				g.draw(new Line2D.Double(playbackStartX+3, bounds.getMinY(), playbackStartX+3,bounds.getMaxY()));
+
+				int pt0X = (projectData.getPlaybackT0().get()-projectData.getViewT().get())*cellWidth + trackStripWidth;
+				g.setPaint(new Color(0x55, 0x66, 0x77));
+				g.fill(new Rectangle2D.Double(pt0X, bounds.getMinY(), cellWidth, bounds.getHeight()));
 
 				double repeatBarY0 = bounds.getMinY() + 2;
 				double repeatBarY1 = bounds.getMaxY() - 2;
@@ -6064,7 +6109,7 @@ public class TabbyCat {
 		l.add(new Pair<>("  Home                  Jump to start", ENTRY_COLOR));
 		l.add(new Pair<>("  End                   Jump to last event", ENTRY_COLOR));
 		l.add(new Pair<>("  Page Up / Page Down   Scroll 80% of window", ENTRY_COLOR));
-		l.add(new Pair<>("  Right-click           Paste clipboard", ENTRY_COLOR));
+		l.add(new Pair<>("  Right-click           Set play start / Paste (if clipboard)", ENTRY_COLOR));
 		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " [                Set / clear repeat start (\u2590|)", ENTRY_COLOR));
 		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " ]                Set / clear repeat end   (|\u258c)", ENTRY_COLOR));
 		l.add(new Pair<>("  Space                 Play / Pause", ENTRY_COLOR));
