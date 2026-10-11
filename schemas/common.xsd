@@ -27,10 +27,17 @@
 				<xsd:element name="tempo" type="TempoEvent"/>
 				<xsd:element name="programChange" type="ProgramChangeEvent"/>
 				<xsd:element name="shuffle" type="ShuffleEvent"/>
+				<xsd:element name="tuningChange" type="TuningChangeEvent"/>
 			</xsd:choice>
 		</xsd:sequence>
 		<xsd:attribute name="r" type="xsd:nonNegativeInteger" use="required"/>
 		<xsd:attribute name="t" type="xsd:nonNegativeInteger" use="required"/>
+	</xsd:complexType>
+
+	<xsd:complexType name="TuningChangeEvent">
+		<xsd:attribute name="canvasName" type="xsd:string" use="required"/>
+		<xsd:attribute name="row" type="xsd:nonNegativeInteger" use="required"/>
+		<xsd:attribute name="offset" type="xsd:double" use="required"/>
 	</xsd:complexType>
 
 	<xsd:complexType name="ProgramChangeEvent">

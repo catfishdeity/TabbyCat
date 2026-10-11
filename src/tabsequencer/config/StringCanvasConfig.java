@@ -58,20 +58,22 @@ public class StringCanvasConfig extends CanvasConfig {
 	}
 	
 	private double[] edoSteps;
+	private double[] runtimeEdoStepOffsets;
 	private int maxFrets, maxHarmonic, fretStepSkip;
 	private double ed2, baseFrequency;
-	
+
 	private Map<String,Double> additionalPitchMap;
 	public StringCanvasConfig(double[] edoSteps, String name, int maxFrets, int maxHarmonic, double ed2, File soundfontFile,
 			int bank, int program, int fretStepSkip, double baseFrequency, Map<String,Double> additionalPitchMap) {
 		super(name,soundfontFile,bank,program);
-		this.edoSteps = edoSteps;		
+		this.edoSteps = edoSteps;
+		this.runtimeEdoStepOffsets = new double[edoSteps.length];
 		this.maxFrets = maxFrets;
 		this.maxHarmonic = maxHarmonic;
 		this.ed2 = ed2;
 		this.fretStepSkip = fretStepSkip;
 		this.baseFrequency = baseFrequency;
-		this.additionalPitchMap = Collections.unmodifiableMap(additionalPitchMap);			
+		this.additionalPitchMap = Collections.unmodifiableMap(additionalPitchMap);
 	}
 	
 	public double getBaseFrequency() {
@@ -103,7 +105,19 @@ public class StringCanvasConfig extends CanvasConfig {
 		return maxHarmonic;
 	}
 
-	public void setEdoSteps(double[] steps) { this.edoSteps = steps.length >= 1 ? steps : this.edoSteps; }
+	public void setRuntimeEdoStepOffset(int row, double offset) {
+		if (row >= 0 && row < runtimeEdoStepOffsets.length) runtimeEdoStepOffsets[row] = offset;
+	}
+	public void clearRuntimeEdoStepOffsets() {
+		java.util.Arrays.fill(runtimeEdoStepOffsets, 0.0);
+	}
+
+	public void setEdoSteps(double[] steps) {
+		if (steps.length >= 1) {
+			this.edoSteps = steps;
+			this.runtimeEdoStepOffsets = new double[steps.length];
+		}
+	}
 	public void setAdditionalPitchMap(java.util.LinkedHashMap<String,Double> map) {
 		this.additionalPitchMap = Collections.unmodifiableMap(new java.util.LinkedHashMap<>(map));
 	}
@@ -174,7 +188,7 @@ public class StringCanvasConfig extends CanvasConfig {
 	}
 
 	public Optional<Double> getFrequency(String token, int row) {
-		double edoStep = edoSteps[row];
+		double edoStep = edoSteps[row] + runtimeEdoStepOffsets[row];
 		double freq = baseFrequency*Math.pow(2, edoStep/ed2);
 		Matcher intMatcher = integerPattern.matcher(token);
 		Matcher harmonicMatcher = harmonicPattern.matcher(token);

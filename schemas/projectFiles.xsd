@@ -25,6 +25,8 @@
 		<xsd:attribute name="scrollbarBrightness" type="xsd:decimal"/>
 		<xsd:attribute name="gridFontFamily" type="xsd:string"/>
 		<xsd:attribute name="gridFontSize" type="xsd:positiveInteger"/>
+		<xsd:attribute name="textFontFamily" type="xsd:string"/>
+		<xsd:attribute name="textFontSize" type="xsd:positiveInteger"/>
 		<xsd:attribute name="activeFilePath" type="xsd:string"/>
 		<xsd:attribute name="wasModified"    type="xsd:boolean"/>
 	</xsd:complexType>

@@ -24,6 +24,7 @@ import tabsequencer.events.ShuffleEvent;
 import tabsequencer.events.StickyNote;
 import tabsequencer.events.TempoEvent;
 import tabsequencer.events.TimeSignatureEvent;
+import tabsequencer.events.TuningChangeEvent;
 
 public class CanvasesConfig {
 
@@ -79,6 +80,9 @@ public class CanvasesConfig {
 			NodeList stickyNodes = eventNode.getElementsByTagName("note");
 			for (int k = 0; k < stickyNodes.getLength(); k++)
 				evData.put(p, StickyNote.fromXMLElement((Element) stickyNodes.item(k)));
+			NodeList tuningNodes = eventNode.getElementsByTagName("tuningChange");
+			for (int k = 0; k < tuningNodes.getLength(); k++)
+				evData.put(p, TuningChangeEvent.fromXMLElement((Element) tuningNodes.item(k)));
 		}
 	}
 

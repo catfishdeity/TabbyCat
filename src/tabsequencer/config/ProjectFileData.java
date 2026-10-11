@@ -22,6 +22,7 @@ import tabsequencer.events.ShuffleEvent;
 import tabsequencer.events.StickyNote;
 import tabsequencer.events.TempoEvent;
 import tabsequencer.events.TimeSignatureEvent;
+import tabsequencer.events.TuningChangeEvent;
 
 public class ProjectFileData {
 	private final CanvasesConfig canvases;
@@ -36,6 +37,8 @@ public class ProjectFileData {
 	private double scrollbarBrightness = -1.0; // -1 means "use app default"
 	private String gridFontFamily = null; // null means "use app default"
 	private int gridFontSize = -1; // -1 means "use app default"
+	private String textFontFamily = null; // null means "use app default"
+	private int textFontSize = -1; // -1 means "use app default"
 
 	public ProjectFileData(CanvasesConfig canvases) {
 		this.canvases = canvases;
@@ -108,6 +111,10 @@ public class ProjectFileData {
 	public void setGridFontFamily(String gridFontFamily) { this.gridFontFamily = gridFontFamily; }
 	public int getGridFontSize() { return gridFontSize; }
 	public void setGridFontSize(int gridFontSize) { this.gridFontSize = gridFontSize; }
+	public String getTextFontFamily() { return textFontFamily; }
+	public void setTextFontFamily(String textFontFamily) { this.textFontFamily = textFontFamily; }
+	public int getTextFontSize() { return textFontSize; }
+	public void setTextFontSize(int textFontSize) { this.textFontSize = textFontSize; }
 
 	public void handleCharInput(char c) {
 		// TODO reimplement, move out of the main class
@@ -145,6 +152,8 @@ public class ProjectFileData {
 		if (scrollbarBrightness > 0) e.setAttribute("scrollbarBrightness", String.format("%.1f", scrollbarBrightness));
 		if (gridFontFamily != null) e.setAttribute("gridFontFamily", gridFontFamily);
 		if (gridFontSize > 0) e.setAttribute("gridFontSize", String.valueOf(gridFontSize));
+		if (textFontFamily != null) e.setAttribute("textFontFamily", textFontFamily);
+		if (textFontSize > 0) e.setAttribute("textFontSize", String.valueOf(textFontSize));
 
 		// Canvases (event data for eventCanvas elements is embedded inside)
 		e.appendChild(canvases.toXMLElement(doc, "canvases", eventDataByCanvas));
@@ -213,6 +222,9 @@ public class ProjectFileData {
 					NodeList stickyNodes = eventNode.getElementsByTagName("note");
 					IntStream.range(0, stickyNodes.getLength()).mapToObj(k -> (Element) stickyNodes.item(k))
 							.map(StickyNote::fromXMLElement).forEach(sn -> evData.put(p, sn));
+					NodeList tuningNodes = eventNode.getElementsByTagName("tuningChange");
+					IntStream.range(0, tuningNodes.getLength()).mapToObj(k -> (Element) tuningNodes.item(k))
+							.map(TuningChangeEvent::fromXMLElement).forEach(tc -> evData.put(p, tc));
 				}
 			}
 		}
@@ -279,6 +291,14 @@ public class ProjectFileData {
 		String gridFontSizeAttr = e.getAttribute("gridFontSize");
 		if (!gridFontSizeAttr.isEmpty()) {
 			projectData.gridFontSize = Integer.parseInt(gridFontSizeAttr);
+		}
+		String textFontFamilyAttr = e.getAttribute("textFontFamily");
+		if (!textFontFamilyAttr.isEmpty()) {
+			projectData.textFontFamily = textFontFamilyAttr;
+		}
+		String textFontSizeAttr = e.getAttribute("textFontSize");
+		if (!textFontSizeAttr.isEmpty()) {
+			projectData.textFontSize = Integer.parseInt(textFontSizeAttr);
 		}
 
 		return projectData;

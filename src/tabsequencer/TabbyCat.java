@@ -110,6 +110,7 @@ import tabsequencer.config.StringCanvasConfig;
 import tabsequencer.events.ControlEvent;
 import tabsequencer.events.ControlEventType;
 import tabsequencer.events.ProgramChange;
+import tabsequencer.events.TuningChangeEvent;
 import tabsequencer.events.StickyNote;
 import tabsequencer.events.ShuffleEvent;
 import tabsequencer.events.TempoEvent;
@@ -155,6 +156,7 @@ public class TabbyCat {
 	static final String shuffleEventCardKey = "SHUFFLE EVENT";
 	static final String notesEventCardKey = "NEW NOTE";
 	static final String programChangeEventCardKey = "PROGRAM CHANGE";
+	static final String tuningChangeEventCardKey = "TUNING CHANGE EVENT";
 	static final String helpCardKey = "HELP";
 	static final String settingsCardKey = "SETTINGS";
 	static final String audioOutputCardKey = "AUDIO OUTPUT";
@@ -180,7 +182,9 @@ public class TabbyCat {
 	int gridFontSize = 12;
 	private Font gridFont = new Font(gridFontFamily, Font.PLAIN, gridFontSize);
 	private FontMetrics gridFontMetrics = new Canvas().getFontMetrics(gridFont);
-	private Font textFont = new Font("Monospaced", Font.PLAIN, 14);
+	String textFontFamily = "Monospaced";
+	int textFontSize = 14;
+	private Font textFont = new Font(textFontFamily, Font.PLAIN, textFontSize);
 	private FontMetrics textFontMetrics = new Canvas().getFontMetrics(textFont);
 	
 	final int scrollTimeMargin = 4;	
@@ -223,6 +227,7 @@ public class TabbyCat {
 	private ShuffleEventPanel shuffleEventPanel;
 	private TextInputPanel notesEventPanel;
 	private ProgramChangeEventPanel programChangeEventPanel;
+	private TuningChangeEventPanel tuningChangeEventPanel;
 	private LoadProjectPanel loadProjectPanel;
 	private NewProjectPanel newProjectPanel;
 	private MainInterfacePanel mainInterfacePanel;
@@ -388,6 +393,37 @@ public class TabbyCat {
 		}
 	}
 
+	void rescanTuningToT(int t) {
+		for (CanvasConfig canvas : projectData.getCanvases().getCanvases()) {
+			if (canvas instanceof StringCanvasConfig)
+				((StringCanvasConfig) canvas).clearRuntimeEdoStepOffsets();
+		}
+		// key: canvasName + ":" + row -> [stepOffset, time]
+		Map<String, double[]> last = new HashMap<>();
+		for (CanvasConfig c : projectData.getCanvases().getCanvases()) {
+			if (!(c instanceof EventCanvasConfig)) continue;
+			for (Map.Entry<Point, ControlEvent> entry : projectData.getEventData(c.getName()).entrySet()) {
+				int et = entry.getKey().x;
+				if (et <= t && entry.getValue().getType() == ControlEventType.TUNING_CHANGE) {
+					TuningChangeEvent tc = (TuningChangeEvent) entry.getValue();
+					String key = tc.getCanvasName() + ":" + tc.getRow();
+					if (!last.containsKey(key) || et >= last.get(key)[1]) {
+						last.put(key, new double[]{tc.getStepOffset(), et});
+					}
+				}
+			}
+		}
+		for (Map.Entry<String, double[]> entry : last.entrySet()) {
+			String[] parts = entry.getKey().split(":");
+			String canvasName = parts[0];
+			int row = Integer.parseInt(parts[1]);
+			projectData.getCanvasConfig(canvasName).ifPresent(canvas -> {
+				if (canvas instanceof StringCanvasConfig)
+					((StringCanvasConfig) canvas).setRuntimeEdoStepOffset(row, entry.getValue()[0]);
+			});
+		}
+	}
+
 	void sendProgramChange(CanvasConfig canvas, int bank, int program) {
 		try {
 			if (canvas instanceof StringCanvasConfig) {
@@ -438,6 +474,7 @@ public class TabbyCat {
 		int t = projectData.getPlaybackT().get();
 		if (t == 0) {
 			rescanProgramsToT(0);
+			rescanTuningToT(0);
 		}
 		List<Map.Entry<Point,ControlEvent>> allEventsAtT = new java.util.ArrayList<>();
 		for (CanvasConfig c : projectData.getCanvases().getCanvases()) {
@@ -459,6 +496,14 @@ public class TabbyCat {
 				ProgramChange pc = (ProgramChange) a;
 				projectData.getCanvasConfig(pc.getInstrument()).ifPresent(canvas ->
 					sendProgramChange(canvas, pc.getBank(), pc.getProgram()));
+				break;
+			}
+			case TUNING_CHANGE: {
+				TuningChangeEvent tc = (TuningChangeEvent) a;
+				projectData.getCanvasConfig(tc.getCanvasName()).ifPresent(canvas -> {
+					if (canvas instanceof StringCanvasConfig)
+						((StringCanvasConfig) canvas).setRuntimeEdoStepOffset(tc.getRow(), tc.getStepOffset());
+				});
 				break;
 			}
 			default:
@@ -699,6 +744,11 @@ public class TabbyCat {
 		activeDrumNotes.clear();
 		activeStringNotes.forEach((channel, note) -> channel.noteOff(note));
 		activeStringNotes.clear();
+		if (projectData != null) {
+			for (CanvasConfig c : projectData.getCanvases().getCanvases())
+				if (c instanceof StringCanvasConfig)
+					((StringCanvasConfig) c).clearRuntimeEdoStepOffsets();
+		}
 	}
 
 	void flushSynths() {
@@ -866,6 +916,12 @@ public class TabbyCat {
 		if (mainInterfacePanel != null) mainInterfacePanel.repaint();
 	}
 
+	void rebuildTextFont() {
+		textFont = new Font(textFontFamily, Font.PLAIN, textFontSize);
+		textFontMetrics = new Canvas().getFontMetrics(textFont);
+		if (mainInterfacePanel != null) mainInterfacePanel.repaint();
+	}
+
 	public static TabbyCat getInstance() {
 		if (instance == null) {
 			instance = new TabbyCat();
@@ -924,6 +980,8 @@ public class TabbyCat {
 		cardPanel.add(notesEventPanel,notesEventCardKey);
 		programChangeEventPanel = new ProgramChangeEventPanel();
 		cardPanel.add(programChangeEventPanel, programChangeEventCardKey);
+		tuningChangeEventPanel = new TuningChangeEventPanel();
+		cardPanel.add(tuningChangeEventPanel, tuningChangeEventCardKey);
 		helpPanel = new HelpPanel();
 		cardPanel.add(helpPanel,helpCardKey);
 		settingsPanel = new SettingsPanel();
@@ -1016,6 +1074,13 @@ public class TabbyCat {
 			gridFontSize = projectFileData.getGridFontSize();
 		}
 		rebuildGridFont();
+		if (projectFileData.getTextFontFamily() != null) {
+			textFontFamily = projectFileData.getTextFontFamily();
+		}
+		if (projectFileData.getTextFontSize() > 0) {
+			textFontSize = projectFileData.getTextFontSize();
+		}
+		rebuildTextFont();
 		settingsPanel.refresh();
 		updateMeasureLinePositions();
 		for (CanvasConfig canvasConfig : projectData.getCanvases().getCanvases()) {
@@ -2062,6 +2127,9 @@ public class TabbyCat {
 				} else if (c == 'P') {
 					programChangeEventPanel.refresh();
 					cardLayout.show(cardPanel, programChangeEventCardKey);
+				} else if (c == 'U') {
+					tuningChangeEventPanel.refresh();
+					cardLayout.show(cardPanel, tuningChangeEventCardKey);
 				}
 			} else {
 				CanvasConfig canvasConfig = charCanvas;
@@ -2734,8 +2802,8 @@ public class TabbyCat {
 			double W = getWidth() * deviceScale / displayScale;
 			double H = getHeight() * deviceScale / displayScale;
 			FontMetrics gridMetrics = g.getFontMetrics(gridFont);
-			Font topFont = new Font("SansSerif",Font.PLAIN,14);			
-			FontMetrics topFontMetrics = g.getFontMetrics(topFont);			
+			Font topFont = textFont;
+			FontMetrics topFontMetrics = g.getFontMetrics(topFont);
 			g.setFont(topFont);
 			int topBarHeight = topFontMetrics.getMaxAscent();
 			lastTopBarHeight = topBarHeight + topFontMetrics.getMaxDescent();
@@ -2851,21 +2919,30 @@ public class TabbyCat {
 			if (!isInGrid && sequencePosition == SequencePosition.SET_REPEAT_START) { g.setPaint(Color.GRAY); g.fill(repeatStartBounds); }
 			g.setPaint(rsOn ? new Color(0xBF, 0x57, 0x00) : Color.WHITE);
 			{
-				int rx = (int)repeatStartBounds.getMinX(), ry = (int)repeatStartBounds.getMinY(), rh2 = (int)repeatStartBounds.getHeight();
-				g.drawLine(rx, ry, rx, ry + rh2);       // thin bar (left)
-				g.fillRect(rx + 2, ry, 4, rh2);          // thick bar
+				// barTop = top of capital letters, barBottom = baseline (where drawString draws)
+				Rectangle2D nb = topFontMetrics.getStringBounds("N", g);
+				int barTop    = (int)(topBarHeight + nb.getY());
+				int barBottom = (int)(topBarHeight + nb.getMaxY());
+				int barH      = barBottom - barTop;
+				int rx = (int)repeatStartBounds.getMinX();
+				g.fillRect(rx, barTop, 4, barH);               // fat bar LEFT (start repeat)
+				g.drawLine(rx + 6, barTop, rx + 6, barBottom); // thin bar right
 			}
 			at.translate(repW + 5, 0);
-			// Repeat end: thick bar (left) + thin bar (right) — musical "end repeat" symbol
+			// Repeat end: thin bar (left) + fat bar (right) — musical "end repeat" symbol
 			Rectangle2D repeatEndBounds = at.createTransformedShape(new java.awt.geom.Rectangle2D.Double(0, -topBarHeight, repW, lastTopBarHeight)).getBounds2D();
 			menuItemBounds.put(SequencePosition.SET_REPEAT_END, repeatEndBounds);
 			boolean reOn = projectData.getRepeatT1().get() >= 0;
 			if (!isInGrid && sequencePosition == SequencePosition.SET_REPEAT_END) { g.setPaint(Color.GRAY); g.fill(repeatEndBounds); }
 			g.setPaint(reOn ? new Color(0xBF, 0x57, 0x00) : Color.WHITE);
 			{
-				int rx2 = (int)repeatEndBounds.getMinX(), ry2 = (int)repeatEndBounds.getMinY(), rh3 = (int)repeatEndBounds.getHeight();
-				g.fillRect(rx2, ry2, 4, rh3);              // thick bar (left)
-				g.drawLine(rx2 + 6, ry2, rx2 + 6, ry2 + rh3); // thin bar (right)
+				Rectangle2D nb = topFontMetrics.getStringBounds("N", g);
+				int barTop    = (int)(topBarHeight + nb.getY());
+				int barBottom = (int)(topBarHeight + nb.getMaxY());
+				int barH      = barBottom - barTop;
+				int rx2 = (int)repeatEndBounds.getMinX();
+				g.drawLine(rx2, barTop, rx2, barBottom);               // thin bar left
+				g.fillRect(rx2 + 2, barTop, 4, barH);                  // fat bar RIGHT (end repeat)
 			}
 
 			at.setToIdentity();
@@ -3152,6 +3229,16 @@ public class TabbyCat {
 									g.drawString(text,
 											x,
 											(int) (bounds.getMinY()+(row+1)*rowHeight-2));
+									break;
+								}
+								case TUNING_CHANGE: {
+									g.setFont(gridFont.deriveFont(Font.ITALIC));
+									g.setPaint(new Color(200, 100, 255));
+									g.drawString(event.toString(),
+											x,
+											(int) (bounds.getMinY()+(row+1)*rowHeight-2));
+									g.setFont(gridFont);
+									break;
 								}
 								default:
 									break;					
@@ -3348,6 +3435,83 @@ public class TabbyCat {
 						g.drawString(".", x, (int) measurePanel.getMaxY());
 					}
 					x += cellWidth;
+				}
+			}
+
+			// --- hint bar overlay at bottom ---
+			Pair<Integer,Integer> hintPair = getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
+			int hintCanvasIdx = hintPair.a;
+			int hintRelRow = hintPair.b;
+			if (hintCanvasIdx < projectData.getCanvases().getCanvases().size()) {
+				CanvasConfig hintCanvas = projectData.getCanvases().getCanvases().get(hintCanvasIdx);
+				List<String> hintLines = new java.util.ArrayList<>();
+
+				if (hintCanvas instanceof EventCanvasConfig) {
+					hintLines.add("T: time sig   S: tempo   F: shuffle   N: note   P: program   U: tuning");
+				} else if (hintCanvas instanceof DrumCanvasConfig) {
+					DrumCanvasConfig dc = (DrumCanvasConfig) hintCanvas;
+					if (hintRelRow < dc.getRowTypes().size()) {
+						PercRowType rowType = dc.getRowTypes().get(hintRelRow);
+						StringBuilder sb = new StringBuilder(rowType.toString().toLowerCase() + ":  ");
+						for (PercToken pt : dc.getTokens()) {
+							if (pt.getPosition() == rowType) {
+								sb.append(pt.getToken()).append("  ");
+							}
+						}
+						hintLines.add(sb.toString().trim());
+					}
+				} else if (hintCanvas instanceof StringCanvasConfig) {
+					StringCanvasConfig sc = (StringCanvasConfig) hintCanvas;
+					StringBuilder sb = new StringBuilder();
+					sb.append("0\u2013").append(sc.getMaxFrets());
+					if (sc.getMaxHarmonic() > 0) sb.append("   H\u2013H").append(sc.getMaxHarmonic());
+					sb.append("   \u2013");
+					for (String key : sc.getAdditionalPitchMap().keySet()) {
+						if (!key.matches("\\d+")) sb.append("   ").append(key);
+					}
+					hintLines.add(sb.toString());
+				}
+
+				// second line: global / selection-mode shortcuts
+				String mod = IS_MAC ? "\u2318" : "ctrl+";
+				String modAlt = IS_MAC ? "\u2318" : "alt+";
+				StringBuilder globalHints = new StringBuilder();
+				if (isSelectionMode.get()) {
+					globalHints.append(mod).append("C: copy   ");
+					globalHints.append(mod).append("X: cut   ");
+					globalHints.append("esc: cancel");
+				} else {
+					globalHints.append(mod).append("L: select   ");
+					globalHints.append(mod).append("[: rpt start   ");
+					globalHints.append(mod).append("]: rpt end   ");
+					globalHints.append("space: play   \u21e7space: play\u21ba   ");
+					globalHints.append(mod).append("S: save   ");
+					globalHints.append(mod).append("I: import");
+				}
+				if (!instrumentClipboard.isEmpty() || !eventClipboard.isEmpty()) {
+					globalHints.append("   ").append(mod).append("V: paste");
+				}
+				hintLines.add(globalHints.toString());
+
+				{
+					g.setFont(topFont);
+					int lineH = topFontMetrics.getMaxAscent() + topFontMetrics.getMaxDescent();
+					int sepH = 5; // 2 lines at y+0, y+2 plus 3px gap before text
+					int barH = lineH * hintLines.size() + sepH + 2;
+					int barY = (int)(H - barH);
+					g.setPaint(Color.BLACK);
+					g.fill(new Rectangle2D.Double(0, barY, W, barH));
+					Color[] rbColorsOffset = new Color[7];
+					for (int i = 0; i < 7; i++) rbColorsOffset[i] = Color.getHSBColor((i / 6f + 0.5f) % 1f, 0.5f, (float)rainbowBrightness);
+					java.awt.LinearGradientPaint hintRainbow = new java.awt.LinearGradientPaint(trackStripWidth, 0, (float)W, 0, rbFractions, rbColorsOffset);
+					g.setPaint(hintRainbow);
+					g.draw(new Line2D.Double(trackStripWidth, barY, W, barY));
+					g.draw(new Line2D.Double(trackStripWidth, barY + 2, W, barY + 2));
+					g.setPaint(new Color(160, 160, 160));
+					for (int hi = 0; hi < hintLines.size(); hi++) {
+						int textY = barY + sepH + topFontMetrics.getMaxAscent() + hi * (lineH + 1);
+						g.drawString(hintLines.get(hi), trackStripWidth + 4, textY);
+					}
 				}
 			}
 		}
@@ -3769,6 +3933,126 @@ public class TabbyCat {
 		}
 	}
 
+	class TuningChangeEventPanel extends JPanel {
+		int focus = 0; // 0 = canvas, 1 = row, 2 = offset
+		List<String> canvasOptions = new ArrayList<>();
+		int canvasIndex = 0;
+		int rowIndex = 0;
+		IntSpinner offset = new IntSpinner("OFFSET", 0, -127, 127);
+
+		public TuningChangeEventPanel() {
+			InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap am = getActionMap();
+			im.put(k_Escape, "esc");
+			am.put("esc",    rToA(() -> { if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
+			im.put(k_Left,  "left");  am.put("left",  rToA(this::left));
+			im.put(k_Right, "right"); am.put("right", rToA(this::right));
+			im.put(k_Up,    "up");    am.put("up",    rToA(this::up));
+			im.put(k_Down,  "down");  am.put("down",  rToA(this::down));
+			im.put(k_Enter, "enter"); am.put("enter", rToA(this::enter));
+		}
+
+		void refresh() {
+			canvasOptions.clear();
+			if (projectData != null) {
+				for (CanvasConfig c : projectData.getCanvases().getCanvases()) {
+					if (c instanceof StringCanvasConfig) {
+						canvasOptions.add(c.getName());
+					}
+				}
+			}
+			Point p = new Point(projectData.getCursorT().get(), projectData.getSelectedRow().get());
+			Pair<Integer,Integer> pair = mainInterfacePanel.getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
+			CanvasConfig refreshCanvas = projectData.getCanvases().getCanvases().get(pair.a);
+			ControlEvent existing = (refreshCanvas instanceof EventCanvasConfig)
+					? projectData.getEventData(refreshCanvas.getName()).get(p) : null;
+			if (existing != null && existing.getType() == ControlEventType.TUNING_CHANGE) {
+				TuningChangeEvent tc = (TuningChangeEvent) existing;
+				int idx = canvasOptions.indexOf(tc.getCanvasName());
+				canvasIndex = (idx >= 0) ? idx : 0;
+				rowIndex = tc.getRow();
+				offset.setValue((int) tc.getStepOffset());
+			} else {
+				canvasIndex = 0;
+				rowIndex = 0;
+				offset.setValue(0);
+			}
+			focus = 0;
+			repaint();
+		}
+
+		void left()  { focus = (focus + 2) % 3; repaint(); }
+		void right() { focus = (focus + 1) % 3; repaint(); }
+
+		void up() {
+			if (focus == 0) canvasIndex = Math.min(canvasIndex + 1, canvasOptions.size() - 1);
+			else if (focus == 1) {
+				String name = canvasOptions.isEmpty() ? null : canvasOptions.get(canvasIndex);
+				int maxRow = 0;
+				if (name != null) {
+					java.util.Optional<CanvasConfig> cc = projectData.getCanvasConfig(name);
+					if (cc.isPresent()) maxRow = cc.get().getRowCount() - 1;
+				}
+				rowIndex = Math.min(rowIndex + 1, maxRow);
+			} else offset.up();
+			repaint();
+		}
+
+		void down() {
+			if (focus == 0) canvasIndex = Math.max(canvasIndex - 1, 0);
+			else if (focus == 1) rowIndex = Math.max(rowIndex - 1, 0);
+			else offset.down();
+			repaint();
+		}
+
+		void enter() {
+			String name = canvasOptions.isEmpty() ? "" : canvasOptions.get(canvasIndex);
+			TuningChangeEvent tc = new TuningChangeEvent(name, rowIndex, offset.getValue());
+			Pair<Integer,Integer> tcPair = mainInterfacePanel.getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
+			CanvasConfig tcCanvas = projectData.getCanvases().getCanvases().get(tcPair.a);
+			if (tcCanvas instanceof EventCanvasConfig) {
+				projectData.getEventData(tcCanvas.getName()).put(
+					new Point(projectData.getCursorT().get(), projectData.getSelectedRow().get()), tc);
+			}
+			mainInterfacePanel.repaint();
+			cardLayout.show(cardPanel, mainInterfaceCardKey);
+		}
+
+		@Override
+		public void paint(Graphics g_) {
+			Graphics2D g = (Graphics2D) g_;
+			g.setFont(textFont);
+			g.setPaint(Color.BLACK);
+			g.fill(getBounds());
+			int y = textFontMetrics.getMaxAscent() * 2;
+			int x = 2;
+			String canvasDisplay = canvasOptions.isEmpty() ? "(none)" : canvasOptions.get(canvasIndex);
+			String canvasLabel = "CANVAS: " + canvasDisplay;
+			g.setPaint(focus == 0 ? Color.WHITE : Color.GRAY);
+			g.drawString(canvasLabel, x, y);
+			x += textFontMetrics.stringWidth(canvasLabel) + 20;
+			String rowLabel = "ROW: " + rowIndex;
+			g.setPaint(focus == 1 ? Color.WHITE : Color.GRAY);
+			g.drawString(rowLabel, x, y);
+			x += textFontMetrics.stringWidth(rowLabel) + 20;
+			x = offset.paint(g, x, y, focus == 2);
+			x += 20;
+			// Show the base edoStep for the currently selected canvas+row
+			String name = canvasOptions.isEmpty() ? null : canvasOptions.get(canvasIndex);
+			if (name != null) {
+				java.util.Optional<CanvasConfig> cc = projectData.getCanvasConfig(name);
+				if (cc.isPresent() && cc.get() instanceof StringCanvasConfig) {
+					StringCanvasConfig sc = (StringCanvasConfig) cc.get();
+					if (rowIndex < sc.getEdoSteps().length) {
+						String baseLabel = "BASE: " + sc.getEdoSteps()[rowIndex];
+						g.setPaint(new Color(150, 150, 150));
+						g.drawString(baseLabel, x, y);
+					}
+				}
+			}
+		}
+	}
+
 	class SettingsPanel extends JPanel {
 		FloatSpinner uiScale = new FloatSpinner("UI Scale", UI_SCALE, 0.1, 10.0, 0.1);
 		FloatSpinner rainbowBrightnessSpinner = new FloatSpinner("Rainbow Brightness", 1.0, 0.1, 1.0, 0.1);
@@ -3776,7 +4060,9 @@ public class TabbyCat {
 		private String[] availableFonts = GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames();
 		private int fontFamilyIndex = 0; // index into availableFonts
 		private IntSpinner gridFontSizeSpinner = new IntSpinner("Grid Font Size", 12, 6, 48);
-		int settingsFocus = 0; // 0=Title 1=Artist 2=UI Scale 3=Rainbow Brightness 4=Scrollbar Brightness 5=Grid Font Family 6=Grid Font Size 7=Output Device
+		private int textFontFamilyIndex = 0;
+		private IntSpinner textFontSizeSpinner = new IntSpinner("UI Font Size", 14, 6, 48);
+		int settingsFocus = 0; // 0=Title 1=Artist 2=UI Scale 3=Rainbow Brightness 4=Scrollbar Brightness 5=Grid Font Family 6=Grid Font Size 7=UI Font Family 8=UI Font Size 9=Output Device
 		private StringBuffer songBuffer   = new StringBuffer();
 		private StringBuffer artistBuffer = new StringBuffer();
 
@@ -3824,10 +4110,12 @@ public class TabbyCat {
 			rainbowBrightnessSpinner.setValue(rainbowBrightness);
 			scrollbarBrightnessSpinner.setValue(scrollbarBrightness);
 			gridFontSizeSpinner.setValue(gridFontSize);
-			// find current gridFontFamily in availableFonts
+			textFontSizeSpinner.setValue(textFontSize);
 			fontFamilyIndex = 0;
+			textFontFamilyIndex = 0;
 			for (int i = 0; i < availableFonts.length; i++) {
-				if (availableFonts[i].equals(gridFontFamily)) { fontFamilyIndex = i; break; }
+				if (availableFonts[i].equals(gridFontFamily)) fontFamilyIndex = i;
+				if (availableFonts[i].equals(textFontFamily)) textFontFamilyIndex = i;
 			}
 			if (projectData != null) {
 				songBuffer.setLength(0);   songBuffer.append(projectData.getSongName());
@@ -3838,14 +4126,14 @@ public class TabbyCat {
 
 		void up() {
 			settingsFocus--;
-			if (settingsFocus < 0) settingsFocus = 7;
-			if (projectData == null && settingsFocus < 2) settingsFocus = 7;
+			if (settingsFocus < 0) settingsFocus = 9;
+			if (projectData == null && settingsFocus < 2) settingsFocus = 9;
 			repaint();
 		}
 
 		void down() {
 			settingsFocus++;
-			if (settingsFocus > 7) settingsFocus = (projectData != null) ? 0 : 2;
+			if (settingsFocus > 9) settingsFocus = (projectData != null) ? 0 : 2;
 			if (projectData == null && settingsFocus < 2) settingsFocus = 2;
 			repaint();
 		}
@@ -3880,6 +4168,18 @@ public class TabbyCat {
 				if (projectData != null) projectData.setGridFontSize(gridFontSize);
 				rebuildGridFont();
 				refresh();
+			} else if (settingsFocus == 7) {
+				textFontFamilyIndex = (textFontFamilyIndex - 1 + availableFonts.length) % availableFonts.length;
+				textFontFamily = availableFonts[textFontFamilyIndex];
+				if (projectData != null) projectData.setTextFontFamily(textFontFamily);
+				rebuildTextFont();
+				refresh();
+			} else if (settingsFocus == 8) {
+				textFontSizeSpinner.left();
+				textFontSize = textFontSizeSpinner.getValue();
+				if (projectData != null) projectData.setTextFontSize(textFontSize);
+				rebuildTextFont();
+				refresh();
 			}
 		}
 
@@ -3913,11 +4213,23 @@ public class TabbyCat {
 				if (projectData != null) projectData.setGridFontSize(gridFontSize);
 				rebuildGridFont();
 				refresh();
+			} else if (settingsFocus == 7) {
+				textFontFamilyIndex = (textFontFamilyIndex + 1) % availableFonts.length;
+				textFontFamily = availableFonts[textFontFamilyIndex];
+				if (projectData != null) projectData.setTextFontFamily(textFontFamily);
+				rebuildTextFont();
+				refresh();
+			} else if (settingsFocus == 8) {
+				textFontSizeSpinner.right();
+				textFontSize = textFontSizeSpinner.getValue();
+				if (projectData != null) projectData.setTextFontSize(textFontSize);
+				rebuildTextFont();
+				refresh();
 			}
 		}
 
 		void enter() {
-			if (settingsFocus == 7) {
+			if (settingsFocus == 9) {
 				audioOutputPanel.refresh();
 				cardLayout.show(cardPanel, audioOutputCardKey);
 			}
@@ -3995,9 +4307,25 @@ public class TabbyCat {
 			y += lineH + 8;
 			gridFontSizeSpinner.paint(g, x, y, settingsFocus == 6);
 
+			// --- UI Font Family row ---
+			y += lineH + 8;
+			{
+				boolean focused = settingsFocus == 7;
+				String lbl = "UI Font:";
+				int lblW = textFontMetrics.stringWidth(lbl);
+				g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
+				g.drawString(lbl, x, y);
+				g.setPaint(focused ? new Color(255,255,100) : Color.GRAY);
+				g.drawString(" " + textFontFamily, x + lblW, y);
+			}
+
+			// --- UI Font Size row ---
+			y += lineH + 8;
+			textFontSizeSpinner.paint(g, x, y, settingsFocus == 8);
+
 			// --- Output Device row ---
 			y += lineH + 8;
-			boolean audioFocused = settingsFocus == 7;
+			boolean audioFocused = settingsFocus == 9;
 			String deviceLabel = "Output Device:";
 			String deviceName = (selectedAudioMixerInfo == null) ? "Default (system)" : selectedAudioMixerInfo.getName();
 			int deviceLabelW = textFontMetrics.stringWidth(deviceLabel);
@@ -4012,7 +4340,7 @@ public class TabbyCat {
 			g.setPaint(new Color(70, 70, 70));
 			if (settingsFocus == 0 || settingsFocus == 1) {
 				g.drawString("UP/DOWN: navigate   A-Z/0-9: type   Backspace: delete   ESC: back", x, y);
-			} else if (settingsFocus == 2 || settingsFocus == 3 || settingsFocus == 4 || settingsFocus == 5 || settingsFocus == 6) {
+			} else if (settingsFocus >= 2 && settingsFocus <= 8) {
 				g.drawString("UP/DOWN: navigate   LEFT/RIGHT: adjust   ESC: back", x, y);
 			} else {
 				g.drawString("UP/DOWN: navigate   ENTER: open   ESC: back", x, y);
