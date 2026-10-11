@@ -366,7 +366,7 @@ public class TabbyCat {
 		}
 	}	
 	
-	Map<MidiChannel,Integer> activeDrumNotes = new HashMap<>();
+	Map<String,Pair<MidiChannel,Integer>> activeDrumNotes = new HashMap<>();
 	Map<MidiChannel,Integer> activeStringNotes = new HashMap<>();
 
 	void rescanProgramsToT(int t) {
@@ -510,9 +510,7 @@ public class TabbyCat {
 				break;
 			}
 		});
-		activeDrumNotes.forEach((midiChannel,midiNoteNum) -> {
-			midiChannel.noteOff(midiNoteNum);
-		});
+		// drum noteOffs are now handled per-row at note-on time (choke) and on stopPlayback()
 		for (CanvasConfig canvas :projectData.getCanvases().getCanvases()) {
 			if (canvas instanceof StringCanvasConfig) {
 				StringCanvasConfig stringCanvas = (StringCanvasConfig) canvas; 
@@ -547,8 +545,14 @@ public class TabbyCat {
 					drumConfig.getMidiNumber(value).ifPresent(midiNumber -> {
 						try {
 							Synthesizer synth = getSynth(drumConfig);
-							synth.getChannels()[9].noteOn(midiNumber, 100);
-							activeDrumNotes.put(synth.getChannels()[9],midiNumber);
+							MidiChannel ch = synth.getChannels()[9];
+							String rowKey = drumConfig.getName() + ":" + dataKey.getRow();
+							Pair<MidiChannel,Integer> prev = activeDrumNotes.get(rowKey);
+							if (prev != null) {
+								prev.a.noteOff(prev.b);
+							}
+							ch.noteOn(midiNumber, 100);
+							activeDrumNotes.put(rowKey, new Pair<>(ch, midiNumber));
 						} catch (Exception e1) {
 							e1.printStackTrace();
 						}
@@ -740,7 +744,7 @@ public class TabbyCat {
 	void stopPlayback() {
 		isPlaying.set(false);
 		lastStopTimeMs = System.currentTimeMillis();
-		activeDrumNotes.forEach((channel, note) -> channel.noteOff(note));
+		activeDrumNotes.forEach((rowKey, pair) -> pair.a.noteOff(pair.b));
 		activeDrumNotes.clear();
 		activeStringNotes.forEach((channel, note) -> channel.noteOff(note));
 		activeStringNotes.clear();
