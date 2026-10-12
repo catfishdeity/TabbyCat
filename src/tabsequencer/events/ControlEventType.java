@@ -7,7 +7,8 @@ public enum ControlEventType {
 	TEMPO ("S",TempoEvent.class),
 	PROGRAM_CHANGE ("B",ProgramChange.class),
 	SHUFFLE ("F",ShuffleEvent.class),
-	TUNING_CHANGE ("U", TuningChangeEvent.class);
+	TUNING_CHANGE ("U", TuningChangeEvent.class),
+	TUPLET ("Q", TupletEvent.class);
 	
 	String token;
 	Class<? extends ControlEvent> clazz;

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<tabProject xmlns="tabby" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" artistName="BAANOIR" cursorT="432" gridFontFamily="Monospaced" gridFontSize="12" playbackStartT="0" playbackT="409" rainbowBrightness="0.8" repeatT0="384" repeatT1="480" scrollbarBrightness="0.8" selectedCanvas="0" selectedRow="6" shuffle="0" songName="Greetings Traveler" tempo="168" uiScale="1.8" viewT="389" xsi:schemaLocation="tabby ../schemas/projectFiles.xsd">
+<tabProject xmlns="tabby" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" artistName="BAANOIR" cursorT="462" gridFontFamily="Monospaced" gridFontSize="12" playbackStartT="0" playbackT="474" rainbowBrightness="0.8" repeatT0="456" repeatT1="480" scrollbarBrightness="0.8" selectedCanvas="0" selectedRow="3" shuffle="0" songName="Greetings Traveler" tempo="168" uiScale="1.8" viewT="454" xsi:schemaLocation="tabby ../schemas/projectFiles.xsd">
     <canvases>
         <eventCanvas name="Events" numRows="3">
             <event r="2" t="0">
@@ -10,6 +10,9 @@
             </event>
             <event r="1" t="384">
                 <note>HEAVY!</note>
+            </event>
+            <event r="0" t="460">
+                <tuplet end="464" n="3"/>
             </event>
         </eventCanvas>
         <drumCanvas bank="0" name="Drums" program="0" soundfontFile="sf2/Alesis_HR16A.sf2">
@@ -44,6 +47,7 @@
             <additionalPitch steps="3.500" token="D"/>
             <additionalPitch steps="4.500" token="E"/>
         </stringCanvas>
+        <eventCanvas name="Events 5" numRows="3"/>
         <stringCanvas bank="0" baseFrequency="130.812" ed2="41.0" fretStepSkip="2" maxFrets="41" maxHarmonic="16" name="KiteElectric" program="1" soundfontFile="sf2/creative_sf_cd_ii/POPGTRSS.SF2">
             <string steps="78.000"/>
             <string steps="65.000"/>
@@ -117,11 +121,6 @@
         <event r="6" t="403" v="-"/>
         <event r="6" t="406" v="-"/>
         <event r="6" t="405" v="-"/>
-        <event r="6" t="479" v="-"/>
-        <event r="6" t="476" v="B"/>
-        <event r="6" t="475" v="-"/>
-        <event r="6" t="478" v="1"/>
-        <event r="6" t="477" v="-"/>
         <event r="6" t="448" v="B"/>
         <event r="6" t="447" v="-"/>
         <event r="6" t="450" v="2"/>
@@ -138,22 +137,11 @@
         <event r="6" t="451" v="-"/>
         <event r="6" t="454" v="-"/>
         <event r="6" t="453" v="-"/>
-        <event r="6" t="464" v="3"/>
-        <event r="6" t="463" v="-"/>
-        <event r="6" t="466" v="-"/>
-        <event r="6" t="465" v="-"/>
+        <event r="6" t="463" v="3"/>
         <event r="6" t="460" v="B"/>
         <event r="6" t="459" v="-"/>
         <event r="6" t="462" v="2"/>
         <event r="6" t="461" v="-"/>
-        <event r="6" t="472" v="2"/>
-        <event r="6" t="471" v="-"/>
-        <event r="6" t="474" v="2"/>
-        <event r="6" t="473" v="-"/>
-        <event r="6" t="468" v="3"/>
-        <event r="6" t="467" v="-"/>
-        <event r="6" t="470" v="3"/>
-        <event r="6" t="469" v="-"/>
     </instrumentTabData>
     <instrumentTabData name="KiteBass">
         <event r="5" t="56" v="3"/>
@@ -576,11 +564,7 @@
         <event r="5" t="460" v="B"/>
         <event r="5" t="461" v="-"/>
         <event r="5" t="462" v="2"/>
-        <event r="5" t="463" v="-"/>
-        <event r="5" t="464" v="3"/>
-        <event r="5" t="465" v="-"/>
-        <event r="5" t="466" v="-"/>
-        <event r="5" t="467" v="-"/>
+        <event r="5" t="463" v="3"/>
         <event r="5" t="408" v="0"/>
         <event r="5" t="409" v="-"/>
         <event r="5" t="410" v="1"/>
@@ -718,9 +702,10 @@
         <event r="1" t="427" v="S"/>
         <event r="1" t="428" v="S"/>
         <event r="0" t="452" v="O"/>
-        <event r="0" t="464" v="O"/>
+        <event r="0" t="467" v="O"/>
         <event r="0" t="460" v="O"/>
         <event r="1" t="431" v="S"/>
+        <event r="0" t="463" v="O"/>
         <event r="0" t="440" v="O"/>
         <event r="0" t="436" v="O"/>
         <event r="0" t="448" v="O"/>
@@ -735,9 +720,10 @@
         <event r="3" t="400" v="K"/>
         <event r="3" t="401" v="K"/>
         <event r="3" t="402" v="K"/>
-        <event r="1" t="464" v="S"/>
+        <event r="0" t="475" v="O"/>
         <event r="3" t="378" v="K"/>
         <event r="1" t="440" v="S"/>
+        <event r="0" t="471" v="O"/>
         <event r="3" t="387" v="K"/>
         <event r="3" t="388" v="K"/>
         <event r="3" t="389" v="K"/>
@@ -746,6 +732,7 @@
         <event r="3" t="384" v="K"/>
         <event r="3" t="385" v="K"/>
         <event r="3" t="386" v="K"/>
+        <event r="0" t="479" v="O"/>
         <event r="0" t="392" v="O"/>
         <event r="2" t="332" v="P"/>
         <event r="0" t="388" v="O"/>

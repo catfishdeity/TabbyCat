@@ -23,6 +23,7 @@ import tabsequencer.events.StickyNote;
 import tabsequencer.events.TempoEvent;
 import tabsequencer.events.TimeSignatureEvent;
 import tabsequencer.events.TuningChangeEvent;
+import tabsequencer.events.TupletEvent;
 
 public class ProjectFileData {
 	private final CanvasesConfig canvases;
@@ -226,6 +227,9 @@ public class ProjectFileData {
 					NodeList tuningNodes = eventNode.getElementsByTagName("tuningChange");
 					IntStream.range(0, tuningNodes.getLength()).mapToObj(k -> (Element) tuningNodes.item(k))
 							.map(TuningChangeEvent::fromXMLElement).forEach(tc -> evData.put(p, tc));
+					NodeList tupletNodes = eventNode.getElementsByTagName("tuplet");
+					IntStream.range(0, tupletNodes.getLength()).mapToObj(k -> (Element) tupletNodes.item(k))
+							.map(TupletEvent::fromXMLElement).forEach(te -> evData.put(p, te));
 				}
 			}
 		}

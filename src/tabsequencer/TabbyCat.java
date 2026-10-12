@@ -112,6 +112,7 @@ import tabsequencer.events.ControlEvent;
 import tabsequencer.events.ControlEventType;
 import tabsequencer.events.ProgramChange;
 import tabsequencer.events.TuningChangeEvent;
+import tabsequencer.events.TupletEvent;
 import tabsequencer.events.StickyNote;
 import tabsequencer.events.ShuffleEvent;
 import tabsequencer.events.TempoEvent;
@@ -158,6 +159,7 @@ public class TabbyCat {
 	static final String notesEventCardKey = "NEW NOTE";
 	static final String programChangeEventCardKey = "PROGRAM CHANGE";
 	static final String tuningChangeEventCardKey = "TUNING CHANGE EVENT";
+	static final String tupletEventCardKey = "TUPLET EVENT";
 	static final String helpCardKey = "HELP";
 	static final String settingsCardKey = "SETTINGS";
 	static final String audioOutputCardKey = "AUDIO OUTPUT";
@@ -209,8 +211,10 @@ public class TabbyCat {
 	final AtomicBoolean playbackDaemonIsStarted = new AtomicBoolean(false);
 	final java.util.concurrent.atomic.AtomicLong playbackRestartNanos = new java.util.concurrent.atomic.AtomicLong(0);
 
-	final TreeMap<Integer, Integer> cachedMeasurePositions = new TreeMap<>();
-	final HashSet<Integer> cachedBeatMarkerPositions = new HashSet<>();
+	final TreeMap<Integer, Integer> cachedMeasurePositions = new TreeMap<>(); // tick → measure# (navigation only)
+	final TreeMap<Double, Integer> cachedMeasureCells = new TreeMap<>();    // real-time cell → measure# (rendering)
+	final ArrayList<Double> cachedBeatMarkerCells = new ArrayList<>();      // real-time cell positions (rendering)
+	final TreeMap<Integer, TupletEvent> cachedTuplets = new TreeMap<>();
 
 	final ExecutorService playbackDaemon = Executors.newSingleThreadExecutor(r -> {
 		Thread t = new Thread(r, "playback-daemon");
@@ -230,6 +234,7 @@ public class TabbyCat {
 	private TextInputPanel notesEventPanel;
 	private ProgramChangeEventPanel programChangeEventPanel;
 	private TuningChangeEventPanel tuningChangeEventPanel;
+	private TupletEventPanel tupletEventPanel;
 	private LoadProjectPanel loadProjectPanel;
 	private NewProjectPanel newProjectPanel;
 	private MainInterfacePanel mainInterfacePanel;
@@ -358,13 +363,26 @@ public class TabbyCat {
 			long thisSixteenthNanos = tBeforeIncrement % 2 == 0
 					? (long)(sixteenthNanos * (1.0 + shuffleRatio))
 					: (long)(sixteenthNanos * (1.0 - shuffleRatio));
+			// Tuplet override: use raw sixteenthNanos (no shuffle inside tuplets)
+			TupletEvent activeTuplet = getTupletAtClock(tBeforeIncrement);
+			if (activeTuplet != null) {
+				Integer tuplT0 = cachedTuplets.floorKey(tBeforeIncrement);
+				int rangeWidth = activeTuplet.getEndT() - tuplT0;
+				int k = tBeforeIncrement - tuplT0;
+				if (k < activeTuplet.getSubdivisions()) {
+					thisSixteenthNanos = (long)((double) rangeWidth * sixteenthNanos / activeTuplet.getSubdivisions());
+				}
+				// k >= B: normal clock tick within the tuplet's clock range — leave thisSixteenthNanos unchanged
+			}
 			long nextIntendedNanos = intendedFireTimeNanos + thisSixteenthNanos;
 			// Hybrid: park until 2ms before target, then spin for sub-ms precision
-			long sleepNanos = nextIntendedNanos - System.nanoTime() - 2_000_000L;
-			if (sleepNanos > 0) {
-				LockSupport.parkNanos(sleepNanos);
+			if (thisSixteenthNanos > 0) {
+				long sleepNanos = nextIntendedNanos - System.nanoTime() - 2_000_000L;
+				if (sleepNanos > 0) {
+					LockSupport.parkNanos(sleepNanos);
+				}
+				while (System.nanoTime() < nextIntendedNanos) { /* spin */ }
 			}
-			while (System.nanoTime() < nextIntendedNanos) { /* spin */ }
 			intendedFireTimeNanos = nextIntendedNanos;
 		}
 	}	
@@ -871,52 +889,136 @@ public class TabbyCat {
 	}
 	
 	public void updateMeasureLinePositions() {
-		AtomicReference<TimeSignatureEvent> timeSignature = new AtomicReference<>(
-				new TimeSignatureEvent(4, TimeSignatureDenominator._4));
-		AtomicInteger counter = new AtomicInteger(0);
-		AtomicInteger measure = new AtomicInteger(1);
+		TimeSignatureEvent ts = new TimeSignatureEvent(4, TimeSignatureDenominator._4);
+		double beatLen    = 16.0 / ts.denominator.getValue();
+		double measureLen = (double) ts.get16ths();
+
 		Map<Integer, Integer> measures = new TreeMap<>();
-		Set<Integer> markers = new HashSet<>();
+		TreeMap<Double, Integer> mCells = new TreeMap<>();
+		ArrayList<Double> bCells = new ArrayList<>();
+
 		measures.put(0, 1);
-		measure.set(2);
+		mCells.put(0.0, 1);
+		int measureNum = 2;
+
+		double rt      = 0.0;  // accumulated real time
+		double nextBeat    = beatLen;
+		double nextMeasure = measureLen;
+
 		for (int t = 0; t < 10000 * 16; t++) {
-			int t_ = t;
-			Optional<TimeSignatureEvent> tsO = java.util.Optional.empty();
+			// --- time-signature check ---
+			TimeSignatureEvent newTs = null;
 			outer:
 			for (CanvasConfig c_ : projectData.getCanvases().getCanvases()) {
 				if (!(c_ instanceof EventCanvasConfig)) continue;
 				Map<Point, ControlEvent> evData_ = projectData.getEventData(c_.getName());
 				for (int row_ = 0; row_ < c_.getRowCount(); row_++) {
-					ControlEvent ev_ = evData_.get(new Point(t_, row_));
+					ControlEvent ev_ = evData_.get(new Point(t, row_));
 					if (ev_ != null && ev_.getType() == ControlEventType.TIME_SIGNATURE) {
-						tsO = java.util.Optional.of((TimeSignatureEvent) ev_);
+						newTs = (TimeSignatureEvent) ev_;
 						break outer;
 					}
 				}
 			}
-
-			if (tsO.isPresent()) {
-				timeSignature.set(tsO.get());
-				counter.set(0);
+			if (newTs != null) {
+				ts = newTs;
+				beatLen    = 16.0 / ts.denominator.getValue();
+				measureLen = (double) ts.get16ths();
 				if (t > 0) {
-					measures.put(t, measure.getAndIncrement());
+					measures.put(t, measureNum);
+					mCells.put((double) t, measureNum++);
 				}
+				nextBeat    = rt + beatLen;
+				nextMeasure = rt + measureLen;
 			} else {
-				if (counter.get() == timeSignature.get().get16ths()) {
-					counter.set(0);
-					measures.put(t, measure.getAndIncrement());
+				// Exact boundary at the start of this tick?
+				if (rt > 1e-9) {
+					if (Math.abs(rt - nextMeasure) < 1e-9) {
+						measures.put(t, measureNum);
+						mCells.put((double) t, measureNum++);
+						nextMeasure += measureLen;
+						nextBeat = rt + beatLen; // realign beats to measure start
+					} else if (Math.abs(rt - nextBeat) < 1e-9) {
+						bCells.add((double) t);
+						nextBeat += beatLen;
+					}
 				}
 			}
-			if (counter.get() > 0 && counter.get() % (16 / timeSignature.get().denominator.getValue()) == 0) {
-				markers.add(t);
+
+			// --- real-time step for this tick ---
+			double step = 1.0;
+			Integer tupT0 = cachedTuplets.floorKey(t);
+			if (tupT0 != null) {
+				TupletEvent te = cachedTuplets.get(tupT0);
+				if (t < te.getEndT()) {
+					int k = t - tupT0;
+					if (k < te.getSubdivisions()) {
+						step = (double)(te.getEndT() - tupT0) / te.getSubdivisions();
+					}
+				}
 			}
-			counter.incrementAndGet();
+
+			// Fractional crossings strictly inside (rt, rt+step)
+			// (can happen when step > beatLen, e.g. large tuplet with small beat)
+			while (nextBeat > rt + 1e-9 && nextBeat < rt + step - 1e-9) {
+				double frac = (nextBeat - rt) / step;
+				double cell = t + frac;
+				if (Math.abs(nextBeat - nextMeasure) < 1e-9) {
+					measures.put((int) Math.round(cell), measureNum);
+					mCells.put(cell, measureNum++);
+					nextMeasure += measureLen;
+					nextBeat    += beatLen;
+				} else {
+					bCells.add(cell);
+					nextBeat += beatLen;
+				}
+			}
+
+			rt += step;
 		}
+
 		cachedMeasurePositions.clear();
-		cachedBeatMarkerPositions.clear();
 		cachedMeasurePositions.putAll(measures);
-		cachedBeatMarkerPositions.addAll(markers);
+		cachedMeasureCells.clear();
+		cachedMeasureCells.putAll(mCells);
+		cachedBeatMarkerCells.clear();
+		cachedBeatMarkerCells.addAll(bCells);
 	}
+
+	public void updateTupletCache() {
+		TreeMap<Integer, TupletEvent> result = new TreeMap<>();
+		if (projectData != null) {
+			for (CanvasConfig c : projectData.getCanvases().getCanvases()) {
+				if (!(c instanceof EventCanvasConfig)) continue;
+				for (Map.Entry<Point, ControlEvent> e : projectData.getEventData(c.getName()).entrySet()) {
+					if (e.getValue().getType() == ControlEventType.TUPLET) {
+						result.put(e.getKey().x, (TupletEvent) e.getValue());
+					}
+				}
+			}
+		}
+		cachedTuplets.clear();
+		cachedTuplets.putAll(result);
+	}
+
+	// Storage range [t0, t0+B) — used by rendering and cursor guards
+	TupletEvent getTupletAt(int t) {
+		Integer start = cachedTuplets.floorKey(t);
+		if (start == null) return null;
+		TupletEvent te = cachedTuplets.get(start);
+		return (t < start + te.getSubdivisions()) ? te : null;
+	}
+
+	// Clock range [t0, t0+A) — used by playback scheduler
+	TupletEvent getTupletAtClock(int t) {
+		Integer start = cachedTuplets.floorKey(t);
+		if (start == null) return null;
+		TupletEvent te = cachedTuplets.get(start);
+		return (t < te.getEndT()) ? te : null;
+	}
+
+	boolean isInsideTuplet(int t) { return getTupletAt(t) != null; }
+
 
 	void rebuildGridFont() {
 		gridFont = new Font(gridFontFamily, Font.PLAIN, gridFontSize);
@@ -979,7 +1081,7 @@ public class TabbyCat {
 				CanvasConfig noteCanvas = projectData.getCanvases().getCanvases().get(notePair.a);
 				if (noteCanvas instanceof EventCanvasConfig) {
 					projectData.getEventData(noteCanvas.getName()).put(
-						new Point(projectData.getCursorT().get(), projectData.getSelectedRow().get()),
+						new Point(projectData.getCursorT().get(), notePair.b),
 						new StickyNote(text));
 				}
 				cardLayout.show(cardPanel, mainInterfaceCardKey);
@@ -991,6 +1093,8 @@ public class TabbyCat {
 		cardPanel.add(programChangeEventPanel, programChangeEventCardKey);
 		tuningChangeEventPanel = new TuningChangeEventPanel();
 		cardPanel.add(tuningChangeEventPanel, tuningChangeEventCardKey);
+		tupletEventPanel = new TupletEventPanel();
+		cardPanel.add(tupletEventPanel, tupletEventCardKey);
 		helpPanel = new HelpPanel();
 		cardPanel.add(helpPanel,helpCardKey);
 		settingsPanel = new SettingsPanel();
@@ -1127,6 +1231,7 @@ public class TabbyCat {
 		}
 		rebuildTextFont();
 		settingsPanel.refresh();
+		updateTupletCache();
 		updateMeasureLinePositions();
 		for (CanvasConfig canvasConfig : projectData.getCanvases().getCanvases()) {
 			if (canvasConfig instanceof StringCanvasConfig) {
@@ -1631,6 +1736,13 @@ public class TabbyCat {
 		int lassoRow0 = -1;
 		boolean isMouseLasso = false;
 
+		boolean isTupletSelectionMode = false;
+		int tupletSelectionT0 = -1;
+		String tupletSelectionCanvasName = null;
+		int tupletSelectionRow = -1;
+		int pendingTupletT0 = -1;
+		int pendingTupletT1 = -1;
+
 		double horizScrollAccum = 0.0;
 		double vertScrollAccum  = 0.0;
 		int viewY = 0;
@@ -2095,6 +2207,7 @@ public class TabbyCat {
 				fileHasBeenModified.set(true);
 				updateWindowTitle();
 			}
+			updateTupletCache();
 			updateMeasureLinePositions();
 			repaint();
 		}
@@ -2114,6 +2227,7 @@ public class TabbyCat {
 				fileHasBeenModified.set(true);
 				updateWindowTitle();
 			}
+			updateTupletCache();
 			updateMeasureLinePositions();
 			repaint();
 		}
@@ -2149,9 +2263,10 @@ public class TabbyCat {
 		}
 
 		void handleCharInput(char c) {
-			if (!fileHasBeenModified.get()) {				
+			if (isTupletSelectionMode) return;
+			if (!fileHasBeenModified.get()) {
 				fileHasBeenModified.set(true);
-				updateWindowTitle();				
+				updateWindowTitle();
 			}
 			
 			Pair<Integer,Integer> pair = 
@@ -2175,6 +2290,16 @@ public class TabbyCat {
 				} else if (c == 'U') {
 					tuningChangeEventPanel.refresh();
 					cardLayout.show(cardPanel, tuningChangeEventCardKey);
+				} else if (c == 'Q') {
+					if (isInGrid && !isSelectionMode.get()) {
+						if (isInsideTuplet(projectData.getCursorT().get())) return;
+						Pair<Integer,Integer> p = getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
+						isTupletSelectionMode = true;
+						tupletSelectionT0 = projectData.getCursorT().get();
+						tupletSelectionCanvasName = projectData.getCanvases().getCanvases().get(p.a).getName();
+						tupletSelectionRow = p.b;
+						repaint();
+					}
 				}
 			} else {
 				CanvasConfig canvasConfig = charCanvas;
@@ -2211,7 +2336,7 @@ public class TabbyCat {
 		}
 		
 		void ctrlL() {
-			if (isInGrid) {
+			if (isInGrid && !isTupletSelectionMode) {
 				toggleSelectionMode();
 			}
 		}
@@ -2366,6 +2491,11 @@ public class TabbyCat {
 		}
 
 		void cancelSelectionMode() {
+			if (isTupletSelectionMode) {
+				isTupletSelectionMode = false;
+				repaint();
+				return;
+			}
 			if (isSelectionMode.get()) {
 				isSelectionMode.set(false);
 				lassoCanvasNumber = -1;
@@ -2401,6 +2531,22 @@ public class TabbyCat {
 			repaint();
 		
 		}
+		void finalizeTupletSelection() {
+			int t0 = Math.min(tupletSelectionT0, projectData.getCursorT().get());
+			int tLast = Math.max(tupletSelectionT0, projectData.getCursorT().get()); // inclusive last cell
+			int t1 = tLast + 1; // exclusive end: cursor cell IS included in the tuplet
+			isTupletSelectionMode = false;
+			if (t0 == tLast) { repaint(); return; } // single-cell selection (nothing to group)
+			// Collision check: any existing tuplet that overlaps [t0, t1)?
+			NavigableMap<Integer, TupletEvent> candidates = cachedTuplets.headMap(t1, false);
+			boolean overlaps = candidates.entrySet().stream()
+					.anyMatch(e -> e.getValue().getEndT() > t0);
+			if (overlaps) { repaint(); return; }
+			pendingTupletT0 = t0;
+			pendingTupletT1 = t1;
+			cardLayout.show(cardPanel, tupletEventCardKey);
+		}
+
 		void ctrlLeft() {
 			if (isInGrid) {
 				handleGridMovement(CardinalDirection.CTRL_LEFT);
@@ -2566,7 +2712,7 @@ public class TabbyCat {
 				repaint();
 				break;
 			case LEFT:
-				projectData.getCursorT().updateAndGet(i->Math.max(0, i-1));
+				projectData.getCursorT().updateAndGet(i -> Math.max(0, i - 1));
 				if (projectData.getCursorT().get() < projectData.getViewT().get() + scrollTimeMargin
 						&& projectData.getViewT().get() > 0) {
 					projectData.getViewT().getAndDecrement();
@@ -2575,7 +2721,6 @@ public class TabbyCat {
 				break;
 			case RIGHT:
 				projectData.getCursorT().incrementAndGet();
-				
 				if (projectData.getCursorT().get() >= getMaxVisibleTime()) {
 					projectData.getViewT().getAndIncrement();
 				}
@@ -2670,6 +2815,10 @@ public class TabbyCat {
 			}
 		}
 		void enter() {
+			if (isTupletSelectionMode) {
+				finalizeTupletSelection();
+				return;
+			}
 			if (isInGrid) {
 				if (!instrumentClipboard.isEmpty() || !eventClipboard.isEmpty()) {
 					ctrlV();
@@ -3001,7 +3150,7 @@ public class TabbyCat {
 			trackStripWidth = 2 * (cellWidth + 4); // +4 per column so labels have room to center
 			int t0 = projectData.getViewT().get();
 			int tDelta = (int) ((W - trackStripWidth) / cellWidth);
-			int t1 = t0+tDelta;
+			int t1 = t0 + tDelta;
 
 			// --- Horizontal scrollbar (between menu bar and grid) ---
 			{
@@ -3170,6 +3319,25 @@ public class TabbyCat {
 				
 			}
 			
+			// Tuplet selection mode preview
+			if (isTupletSelectionMode && tupletSelectionCanvasName != null) {
+				for (int ci = 0; ci < projectData.getCanvases().getCanvases().size(); ci++) {
+					CanvasConfig tsc = projectData.getCanvases().getCanvases().get(ci);
+					if (tsc.getName().equals(tupletSelectionCanvasName)) {
+						Rectangle2D tb = canvasGrids.get(ci).getBounds2D();
+						int sT0 = Math.min(tupletSelectionT0, projectData.getCursorT().get());
+						int sT1 = Math.max(tupletSelectionT0, projectData.getCursorT().get());
+						int tRow = tupletSelectionRow;
+						g.setPaint(new Color(32, 120, 100, 120));
+						for (int tt = sT0; tt <= sT1; tt++) {
+							int tx = trackStripWidth + (tt - projectData.getViewT().get()) * cellWidth;
+							g.fillRect(tx, (int)(tb.getMinY() + tRow * rowHeight), cellWidth, rowHeight);
+						}
+						break;
+					}
+				}
+			}
+
 			float[] rbFractions = new float[]{0f, 1f/6, 2f/6, 3f/6, 4f/6, 5f/6, 1f};
 			Color[] rbColors = new Color[7];
 			for (int i = 0; i < 7; i++) rbColors[i] = Color.getHSBColor(i / 6f, 0.5f, (float)rainbowBrightness);
@@ -3227,6 +3395,23 @@ public class TabbyCat {
 
 					for (int row = 0; row < rowCount; row++) {
 						if (renderCanvas instanceof EventCanvasConfig) {
+							// Tuplet range background shading
+							TupletEvent tuplRender = getTupletAt(t);
+							if (tuplRender != null) {
+								Integer tuplT0Render = cachedTuplets.floorKey(t);
+								ControlEvent tuplEv = renderEvData.get(new Point(tuplT0Render, row));
+								if (tuplEv != null && tuplEv.getType() == ControlEventType.TUPLET) {
+									g.setPaint(new Color(32, 120, 100));
+									g.fillRect(x, (int)(bounds.getMinY() + row * rowHeight), cellWidth, rowHeight);
+									if (t == tuplT0Render) {
+										g.setFont(gridFont.deriveFont(Font.ITALIC));
+										g.setPaint(Color.WHITE);
+										String lbl = tuplRender.getSubdivisions() + ":" + (tuplRender.getEndT() - tuplT0Render);
+										g.drawString(lbl, x, (int)(bounds.getMinY() + (row + 1) * rowHeight - 2));
+										g.setFont(gridFont);
+									}
+								}
+							}
 							ControlEvent event = renderEvData.get(new Point(t,row));
 							if (event != null) {
 								switch (event.getType()) {
@@ -3289,8 +3474,11 @@ public class TabbyCat {
 									g.setFont(gridFont);
 									break;
 								}
+								case TUPLET:
+									// Background shading handled above; no additional text rendering here
+									break;
 								default:
-									break;					
+									break;
 								}					
 							}					
 						} else {
@@ -3304,19 +3492,43 @@ public class TabbyCat {
 						}
 					}					
 						
-					g.setStroke(new BasicStroke(2));
-					g.setPaint(Color.getHSBColor(0.85f, 0.25f, 1f));
-					
-					if (cachedMeasurePositions.containsKey(t)) {
-						g.draw(new Line2D.Double(
-								new Point2D.Double(x,bounds.getMinY()),
-								new Point2D.Double(x,bounds.getMaxY())));
-					}				
+					// Tuplet internal sub-beat markers at storage cells k=1..B-1
+					TupletEvent tuplHere = getTupletAt(t);
+					if (tuplHere != null) {
+						Integer tuplT0Here = cachedTuplets.floorKey(t);
+						int k = t - tuplT0Here;
+						if (k > 0 && k < tuplHere.getSubdivisions()) {
+							g.setStroke(new BasicStroke(1));
+							g.setPaint(new Color(80, 200, 160, 160));
+							g.draw(new Line2D.Double(x, bounds.getMinY(), x, bounds.getMaxY()));
+						}
+					}
 					x += cellWidth;
 				}
 
-			
-			
+				// Beat markers - real-time cell positions, may be fractional
+				g.setFont(gridFont);
+				for (double beatCell : cachedBeatMarkerCells) {
+					if (beatCell < t0 || beatCell >= t1) continue;
+					double mx = trackStripWidth + (beatCell - t0) * cellWidth;
+					g.setStroke(new BasicStroke(1));
+					g.setPaint(new Color(180, 180, 180, 100));
+					g.draw(new Line2D.Double(mx, bounds.getMinY(), mx, bounds.getMaxY()));
+					g.setPaint(Color.white);
+					g.drawString(".", (int) mx, (int)(bounds.getMaxY() + rowHeight));
+				}
+				// Measure lines - real-time cell positions, may be fractional
+				for (Map.Entry<Double, Integer> me : cachedMeasureCells.entrySet()) {
+					double cell = me.getKey();
+					if (cell < t0 || cell >= t1) continue;
+					double mx = trackStripWidth + (cell - t0) * cellWidth;
+					g.setStroke(new BasicStroke(2));
+					g.setPaint(Color.getHSBColor(0.85f, 0.25f, 1f));
+					g.draw(new Line2D.Double(mx, bounds.getMinY(), mx, bounds.getMaxY()));
+					g.setPaint(Color.white);
+					g.drawString("" + me.getValue(), (int) mx, (int)(bounds.getMaxY() + rowHeight));
+				}
+
 				if (!isSelectionMode.get() && lassoCanvasNumber >= 0) {
 					CanvasConfig curCanvas = projectData.getCanvases().getCanvases().get(canvasNumber);
 					if (curCanvas instanceof EventCanvasConfig) {
@@ -3472,20 +3684,7 @@ public class TabbyCat {
 				g.setStroke(new BasicStroke(1));
 			}
 
-			for (Rectangle2D measurePanel : measurePanels) {
-				x = trackStripWidth;
-				g.setPaint(Color.white);
-				for (int t = projectData.getViewT().get(); t<t1; t++) {
-					if (cachedMeasurePositions.containsKey(t)) {
-						int measure = cachedMeasurePositions.get(t);
-						g.drawString("" + measure, x, (int) measurePanel.getMaxY());
-					}
-					if (cachedBeatMarkerPositions.contains(t)) {
-						g.drawString(".", x, (int) measurePanel.getMaxY());
-					}
-					x += cellWidth;
-				}
-			}
+
 
 			// --- hint bar overlay at bottom ---
 			Pair<Integer,Integer> hintPair = getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
@@ -3787,8 +3986,7 @@ public class TabbyCat {
 			CanvasConfig tsCanvas = projectData.getCanvases().getCanvases().get(tsPair.a);
 			if (tsCanvas instanceof EventCanvasConfig) {
 				projectData.getEventData(tsCanvas.getName()).put(
-						new Point(projectData.getCursorT().get(),
-								projectData.getSelectedRow().get()),
+						new Point(projectData.getCursorT().get(), tsPair.b),
 						tse);
 			}
 			numerator.reset();
@@ -3832,7 +4030,7 @@ public class TabbyCat {
 			CanvasConfig tempoCanvas = projectData.getCanvases().getCanvases().get(tempoPair.a);
 			if (tempoCanvas instanceof EventCanvasConfig) {
 				projectData.getEventData(tempoCanvas.getName()).put(
-						new Point(projectData.getCursorT().get(), projectData.getSelectedRow().get()),
+						new Point(projectData.getCursorT().get(), tempoPair.b),
 						tempoEvent);
 			}
 			cardLayout.show(cardPanel, mainInterfaceCardKey);
@@ -3868,7 +4066,7 @@ public class TabbyCat {
 			CanvasConfig shuffleCanvas = projectData.getCanvases().getCanvases().get(shufflePair.a);
 			if (shuffleCanvas instanceof EventCanvasConfig) {
 				projectData.getEventData(shuffleCanvas.getName()).put(
-					new Point(projectData.getCursorT().get(), projectData.getSelectedRow().get()),
+					new Point(projectData.getCursorT().get(), shufflePair.b),
 					event);
 			}
 			cardLayout.show(cardPanel, mainInterfaceCardKey);
@@ -3913,9 +4111,9 @@ public class TabbyCat {
 					}
 				}
 			}
-			Point p = new Point(projectData.getCursorT().get(), projectData.getSelectedRow().get());
 			Pair<Integer,Integer> refreshPair = mainInterfacePanel.getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
 			CanvasConfig refreshCanvas = projectData.getCanvases().getCanvases().get(refreshPair.a);
+			Point p = new Point(projectData.getCursorT().get(), refreshPair.b);
 			ControlEvent existing = (refreshCanvas instanceof EventCanvasConfig)
 					? projectData.getEventData(refreshCanvas.getName()).get(p) : null;
 			if (existing != null && existing.getType() == ControlEventType.PROGRAM_CHANGE) {
@@ -3957,7 +4155,7 @@ public class TabbyCat {
 			CanvasConfig pcCanvas = projectData.getCanvases().getCanvases().get(pcPair.a);
 			if (pcCanvas instanceof EventCanvasConfig) {
 				projectData.getEventData(pcCanvas.getName()).put(
-					new Point(projectData.getCursorT().get(), projectData.getSelectedRow().get()), pc);
+					new Point(projectData.getCursorT().get(), pcPair.b), pc);
 			}
 			mainInterfacePanel.repaint();
 			cardLayout.show(cardPanel, mainInterfaceCardKey);
@@ -4010,9 +4208,9 @@ public class TabbyCat {
 					}
 				}
 			}
-			Point p = new Point(projectData.getCursorT().get(), projectData.getSelectedRow().get());
 			Pair<Integer,Integer> pair = mainInterfacePanel.getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
 			CanvasConfig refreshCanvas = projectData.getCanvases().getCanvases().get(pair.a);
+			Point p = new Point(projectData.getCursorT().get(), pair.b);
 			ControlEvent existing = (refreshCanvas instanceof EventCanvasConfig)
 					? projectData.getEventData(refreshCanvas.getName()).get(p) : null;
 			if (existing != null && existing.getType() == ControlEventType.TUNING_CHANGE) {
@@ -4061,7 +4259,7 @@ public class TabbyCat {
 			CanvasConfig tcCanvas = projectData.getCanvases().getCanvases().get(tcPair.a);
 			if (tcCanvas instanceof EventCanvasConfig) {
 				projectData.getEventData(tcCanvas.getName()).put(
-					new Point(projectData.getCursorT().get(), projectData.getSelectedRow().get()), tc);
+					new Point(projectData.getCursorT().get(), tcPair.b), tc);
 			}
 			mainInterfacePanel.repaint();
 			cardLayout.show(cardPanel, mainInterfaceCardKey);
@@ -4099,6 +4297,70 @@ public class TabbyCat {
 					}
 				}
 			}
+		}
+	}
+
+	class TupletEventPanel extends JPanel {
+		IntSpinner subdivisions = new IntSpinner("SUBDIVISIONS", 3, 1, Integer.MAX_VALUE);
+
+		public TupletEventPanel() {
+			InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+			ActionMap am = getActionMap();
+			im.put(k_Escape, "esc");
+			am.put("esc",    rToA(() -> { if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
+			im.put(k_Up,    "up");    am.put("up",    rToA(this::up));
+			im.put(k_Down,  "down");  am.put("down",  rToA(this::down));
+			im.put(k_Enter, "enter"); am.put("enter", rToA(this::enter));
+		}
+
+		void up()   { subdivisions.up();   repaint(); }
+		void down() { subdivisions.down(); repaint(); }
+
+		void enter() {
+			if (projectData == null) return;
+			int t0 = mainInterfacePanel.pendingTupletT0;
+			int t1 = mainInterfacePanel.pendingTupletT1;
+			String canvasName = mainInterfacePanel.tupletSelectionCanvasName;
+			int row = mainInterfacePanel.tupletSelectionRow;
+			if (t0 < 0 || t1 <= t0 || canvasName == null) {
+				cardLayout.show(cardPanel, mainInterfaceCardKey);
+				return;
+			}
+			int B = subdivisions.getValue();
+			// For B > A: check extended storage range [t1, t0+B) doesn't overlap existing tuplets
+			int storageEnd = Math.max(t1, t0 + B);
+			if (storageEnd > t1) {
+				java.util.NavigableMap<Integer, TupletEvent> ext = cachedTuplets.subMap(t1, true, storageEnd, false);
+				if (!ext.isEmpty()) { repaint(); return; }
+				// Also check the preceding tuplet doesn't extend into [t0, storageEnd)
+				java.util.NavigableMap<Integer, TupletEvent> before = cachedTuplets.headMap(t0, false);
+				if (!before.isEmpty()) {
+					Map.Entry<Integer, TupletEvent> prev = before.lastEntry();
+					int prevA = prev.getValue().getEndT() - prev.getKey();
+					int prevB = prev.getValue().getSubdivisions();
+					if (prev.getKey() + Math.max(prevA, prevB) > t0) { repaint(); return; }
+				}
+			}
+			TupletEvent te = new TupletEvent(B, t1);
+			projectData.getEventData(canvasName).put(new Point(t0, row), te);
+			updateTupletCache();
+			updateMeasureLinePositions();
+			mainInterfacePanel.repaint();
+			cardLayout.show(cardPanel, mainInterfaceCardKey);
+		}
+
+		@Override
+		public void paint(Graphics g_) {
+			Graphics2D g = (Graphics2D) g_;
+			g.setFont(textFont);
+			g.setPaint(Color.BLACK);
+			g.fill(getBounds());
+			g.setPaint(Color.WHITE);
+			int y = textFontMetrics.getMaxAscent() + 4;
+			int x = 4;
+			g.drawString("TUPLET", x, y);
+			y += textFontMetrics.getMaxAscent() + 8;
+			x = subdivisions.paint(g, x, y, true);
 		}
 	}
 
