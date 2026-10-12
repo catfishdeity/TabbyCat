@@ -950,11 +950,14 @@ public class TabbyCat {
 			Integer tupT0 = cachedTuplets.floorKey(t);
 			if (tupT0 != null) {
 				TupletEvent te = cachedTuplets.get(tupT0);
-				if (t < te.getEndT()) {
+				int A = te.getEndT() - tupT0;
+				int B = te.getSubdivisions();
+				if (t < tupT0 + Math.max(A, B)) {
 					int k = t - tupT0;
-					if (k < te.getSubdivisions()) {
-						step = (double)(te.getEndT() - tupT0) / te.getSubdivisions();
+					if (k < B) {
+						step = (double) A / B;
 					}
+					// k >= B (only when B < A): clock-only tick, step stays 1.0
 				}
 			}
 
@@ -1009,12 +1012,15 @@ public class TabbyCat {
 		return (t < start + te.getSubdivisions()) ? te : null;
 	}
 
-	// Clock range [t0, t0+A) — used by playback scheduler
+	// Clock range [t0, t0+max(A,B)) — used by playback scheduler.
+	// When B > A, storage cells [t0+A, t0+B) also fire at tuplet timing.
 	TupletEvent getTupletAtClock(int t) {
 		Integer start = cachedTuplets.floorKey(t);
 		if (start == null) return null;
 		TupletEvent te = cachedTuplets.get(start);
-		return (t < te.getEndT()) ? te : null;
+		int A = te.getEndT() - start;
+		int B = te.getSubdivisions();
+		return (t < start + Math.max(A, B)) ? te : null;
 	}
 
 	boolean isInsideTuplet(int t) { return getTupletAt(t) != null; }
