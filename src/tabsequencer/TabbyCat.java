@@ -772,7 +772,7 @@ public class TabbyCat {
 		playbackRestartNanos.set(System.nanoTime());
 		isPlaying.set(true);
 		if (playbackRenderTimer != null) playbackRenderTimer.stop();
-		playbackRenderTimer = new javax.swing.Timer(16, e -> {
+		playbackRenderTimer = new javax.swing.Timer(20, e -> {
 			if (!isPlaying.get()) {
 				((javax.swing.Timer)e.getSource()).stop();
 				playbackRenderTimer = null;
@@ -795,6 +795,12 @@ public class TabbyCat {
 					((StringCanvasConfig) c).clearRuntimeEdoStepOffsets();
 		}
 		if (playbackRenderTimer != null) { playbackRenderTimer.stop(); playbackRenderTimer = null; }
+		if (projectData != null) {
+			int visibleTicks = mainInterfacePanel.lastT1 - projectData.getViewT().get();
+			int cursorCol = visibleTicks / 4;
+			projectData.getViewT().set(Math.max(0, projectData.getPlaybackT0().get() - cursorCol));
+			SwingUtilities.invokeLater(() -> mainInterfacePanel.repaint());
+		}
 	}
 
 	void flushSynths() {
@@ -3292,7 +3298,7 @@ public class TabbyCat {
 				
 				selectedGridBounds = canvasGrids.get(canvasGridNum).getBounds2D();
 				
-				double selectedX = selectedGridBounds.getMinX() +
+				double selectedX = trackStripWidth +
 						(projectData.getCursorT().get()-t0)*cellWidth - subTickOffset;
 				double selectedY = selectedGridBounds.getMinY()+rowHeight*relativeRow;
 				
@@ -3306,12 +3312,26 @@ public class TabbyCat {
 				g.drawString(entry.getKey(), (int) entry.getValue().getX() + trackStripWidth, (int) entry.getValue().getY());
 			});
 			
+			// Compute smooth playback screen x once, reuse per canvas
+			double smoothPlayX;
+			if (isPlaying.get() && smoothTickDurationNanos > 0) {
+				long nowNs = System.nanoTime();
+				double frac = (double)(nowNs - smoothTickStartNanos) / (double)smoothTickDurationNanos;
+				frac = Math.max(0.0, Math.min(1.5, frac));
+				double spt = smoothTickBase + frac;
+				smoothPlayX = trackStripWidth + (spt - t0) * cellWidth - subTickOffset;
+			} else {
+				smoothPlayX = (projectData.getPlaybackT().get() - t0) * cellWidth + trackStripWidth - subTickOffset;
+			}
 			for (Shape canvasGrid : canvasGrids) {
 				Rectangle2D bounds = canvasGrid.getBounds2D();
-				int playbackX = (int)((projectData.getPlaybackT().get()-t0)*cellWidth + trackStripWidth - subTickOffset);
-				g.setPaint(new Color(110,110,50));
-				g.fill(new Rectangle2D.Double(playbackX, bounds.getMinY(), cellWidth, bounds.getHeight()));
-
+				if (isPlaying.get()) {
+					// During playback: smooth 2px line tracking real-time position
+					g.setPaint(new Color(220, 220, 80));
+					g.setStroke(new BasicStroke(2));
+					g.draw(new Line2D.Double(smoothPlayX, bounds.getMinY(), smoothPlayX, bounds.getMaxY()));
+					g.setStroke(new BasicStroke(1));
+				}
 			}
 			if (isSelectionMode.get() && lassoCanvasNumber == canvasGridNum) {
 				
@@ -3399,8 +3419,22 @@ public class TabbyCat {
 				g.draw(new Line2D.Double(playbackStartX+3, bounds.getMinY(), playbackStartX+3,bounds.getMaxY()));
 
 				int pt0X = (int)((projectData.getPlaybackT0().get()-t0)*cellWidth + trackStripWidth - subTickOffset);
-				g.setPaint(new Color(0x55, 0x66, 0x77));
-				g.fill(new Rectangle2D.Double(pt0X, bounds.getMinY(), cellWidth, bounds.getHeight()));
+				{
+					int tileSize = 20;
+					java.awt.image.BufferedImage tile = new java.awt.image.BufferedImage(tileSize, tileSize, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+					for (int py = 0; py < tileSize; py++) {
+						for (int px = 0; px < tileSize; px++) {
+							double d = ((px + py) % tileSize) / (double) tileSize;
+							double t = (1.0 - Math.cos(d * 2 * Math.PI)) / 2.0;
+							int cr = (int)(96 + t * 53);
+							int cg = (int)(96 + t * 53);
+							int cb = (int)(24 + t * 26);
+							tile.setRGB(px, py, new Color(cr, cg, cb, 160).getRGB());
+						}
+					}
+					g.setPaint(new java.awt.TexturePaint(tile, new Rectangle2D.Double(pt0X, bounds.getMinY(), tileSize, tileSize)));
+					g.fill(new Rectangle2D.Double(pt0X, bounds.getMinY(), cellWidth, bounds.getHeight()));
+				}
 
 				double repeatBarY0 = bounds.getMinY() + 2;
 				double repeatBarY1 = bounds.getMaxY() - 2;
