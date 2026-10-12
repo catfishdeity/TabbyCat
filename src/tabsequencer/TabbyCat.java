@@ -175,6 +175,7 @@ public class TabbyCat {
 	int trackStripWidth = 30;
 	static final int UI_SCALE = 2;
 	double displayScale = UI_SCALE;
+	int playbackRenderIntervalMs = 20;
 	double rainbowBrightness = 1.0;
 	double scrollbarBrightness = 1.0;
 	static final boolean IS_MAC = System.getProperty("os.name").toLowerCase().contains("mac");
@@ -772,7 +773,7 @@ public class TabbyCat {
 		playbackRestartNanos.set(System.nanoTime());
 		isPlaying.set(true);
 		if (playbackRenderTimer != null) playbackRenderTimer.stop();
-		playbackRenderTimer = new javax.swing.Timer(20, e -> {
+		playbackRenderTimer = new javax.swing.Timer(playbackRenderIntervalMs, e -> {
 			if (!isPlaying.get()) {
 				((javax.swing.Timer)e.getSource()).stop();
 				playbackRenderTimer = null;
@@ -4439,6 +4440,7 @@ public class TabbyCat {
 
 	class SettingsPanel extends JPanel {
 		FloatSpinner uiScale = new FloatSpinner("UI Scale", UI_SCALE, 0.1, 10.0, 0.1);
+		IntSpinner renderFpsSpinner = new IntSpinner("Render FPS", 50, 10, 120);
 		FloatSpinner rainbowBrightnessSpinner = new FloatSpinner("Rainbow Brightness", 1.0, 0.1, 1.0, 0.1);
 		FloatSpinner scrollbarBrightnessSpinner = new FloatSpinner("Scrollbar Brightness", 1.0, 0.1, 1.0, 0.1);
 		private String[] availableFonts = GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames();
@@ -4446,7 +4448,7 @@ public class TabbyCat {
 		private IntSpinner gridFontSizeSpinner = new IntSpinner("Grid Font Size", 12, 6, 48);
 		private int textFontFamilyIndex = 0;
 		private IntSpinner textFontSizeSpinner = new IntSpinner("UI Font Size", 14, 6, 48);
-		int settingsFocus = 0; // 0=Title 1=Artist 2=UI Scale 3=Rainbow Brightness 4=Scrollbar Brightness 5=Grid Font Family 6=Grid Font Size 7=UI Font Family 8=UI Font Size 9=Output Device
+		int settingsFocus = 0; // 0=Title 1=Artist 2=UI Scale 3=Render FPS 4=Rainbow Brightness 5=Scrollbar Brightness 6=Grid Font Family 7=Grid Font Size 8=UI Font Family 9=UI Font Size 10=Output Device
 		private StringBuffer songBuffer   = new StringBuffer();
 		private StringBuffer artistBuffer = new StringBuffer();
 
@@ -4491,6 +4493,7 @@ public class TabbyCat {
 
 		void refresh() {
 			uiScale.setValue(displayScale);
+			renderFpsSpinner.setValue(1000 / playbackRenderIntervalMs);
 			rainbowBrightnessSpinner.setValue(rainbowBrightness);
 			scrollbarBrightnessSpinner.setValue(scrollbarBrightness);
 			gridFontSizeSpinner.setValue(gridFontSize);
@@ -4510,14 +4513,14 @@ public class TabbyCat {
 
 		void up() {
 			settingsFocus--;
-			if (settingsFocus < 0) settingsFocus = 9;
-			if (projectData == null && settingsFocus < 2) settingsFocus = 9;
+			if (settingsFocus < 0) settingsFocus = 10;
+			if (projectData == null && settingsFocus < 2) settingsFocus = 10;
 			repaint();
 		}
 
 		void down() {
 			settingsFocus++;
-			if (settingsFocus > 9) settingsFocus = (projectData != null) ? 0 : 2;
+			if (settingsFocus > 10) settingsFocus = (projectData != null) ? 0 : 2;
 			if (projectData == null && settingsFocus < 2) settingsFocus = 2;
 			repaint();
 		}
@@ -4529,36 +4532,41 @@ public class TabbyCat {
 				if (projectData != null) projectData.setUiScale(uiScale.getValue());
 				repaint();
 			} else if (settingsFocus == 3) {
+				renderFpsSpinner.left();
+				playbackRenderIntervalMs = 1000 / renderFpsSpinner.getValue();
+				if (playbackRenderTimer != null) playbackRenderTimer.setDelay(playbackRenderIntervalMs);
+				repaint();
+			} else if (settingsFocus == 4) {
 				rainbowBrightnessSpinner.left();
 				rainbowBrightness = rainbowBrightnessSpinner.getValue();
 				if (projectData != null) projectData.setRainbowBrightness(rainbowBrightness);
 				repaint();
 				mainInterfacePanel.repaint();
-			} else if (settingsFocus == 4) {
+			} else if (settingsFocus == 5) {
 				scrollbarBrightnessSpinner.left();
 				scrollbarBrightness = scrollbarBrightnessSpinner.getValue();
 				if (projectData != null) projectData.setScrollbarBrightness(scrollbarBrightness);
 				repaint();
 				mainInterfacePanel.repaint();
-			} else if (settingsFocus == 5) {
+			} else if (settingsFocus == 6) {
 				fontFamilyIndex = (fontFamilyIndex - 1 + availableFonts.length) % availableFonts.length;
 				gridFontFamily = availableFonts[fontFamilyIndex];
 				if (projectData != null) projectData.setGridFontFamily(gridFontFamily);
 				rebuildGridFont();
 				refresh();
-			} else if (settingsFocus == 6) {
+			} else if (settingsFocus == 7) {
 				gridFontSizeSpinner.left();
 				gridFontSize = gridFontSizeSpinner.getValue();
 				if (projectData != null) projectData.setGridFontSize(gridFontSize);
 				rebuildGridFont();
 				refresh();
-			} else if (settingsFocus == 7) {
+			} else if (settingsFocus == 8) {
 				textFontFamilyIndex = (textFontFamilyIndex - 1 + availableFonts.length) % availableFonts.length;
 				textFontFamily = availableFonts[textFontFamilyIndex];
 				if (projectData != null) projectData.setTextFontFamily(textFontFamily);
 				rebuildTextFont();
 				refresh();
-			} else if (settingsFocus == 8) {
+			} else if (settingsFocus == 9) {
 				textFontSizeSpinner.left();
 				textFontSize = textFontSizeSpinner.getValue();
 				if (projectData != null) projectData.setTextFontSize(textFontSize);
@@ -4574,36 +4582,41 @@ public class TabbyCat {
 				if (projectData != null) projectData.setUiScale(uiScale.getValue());
 				repaint();
 			} else if (settingsFocus == 3) {
+				renderFpsSpinner.right();
+				playbackRenderIntervalMs = 1000 / renderFpsSpinner.getValue();
+				if (playbackRenderTimer != null) playbackRenderTimer.setDelay(playbackRenderIntervalMs);
+				repaint();
+			} else if (settingsFocus == 4) {
 				rainbowBrightnessSpinner.right();
 				rainbowBrightness = rainbowBrightnessSpinner.getValue();
 				if (projectData != null) projectData.setRainbowBrightness(rainbowBrightness);
 				repaint();
 				mainInterfacePanel.repaint();
-			} else if (settingsFocus == 4) {
+			} else if (settingsFocus == 5) {
 				scrollbarBrightnessSpinner.right();
 				scrollbarBrightness = scrollbarBrightnessSpinner.getValue();
 				if (projectData != null) projectData.setScrollbarBrightness(scrollbarBrightness);
 				repaint();
 				mainInterfacePanel.repaint();
-			} else if (settingsFocus == 5) {
+			} else if (settingsFocus == 6) {
 				fontFamilyIndex = (fontFamilyIndex + 1) % availableFonts.length;
 				gridFontFamily = availableFonts[fontFamilyIndex];
 				if (projectData != null) projectData.setGridFontFamily(gridFontFamily);
 				rebuildGridFont();
 				refresh();
-			} else if (settingsFocus == 6) {
+			} else if (settingsFocus == 7) {
 				gridFontSizeSpinner.right();
 				gridFontSize = gridFontSizeSpinner.getValue();
 				if (projectData != null) projectData.setGridFontSize(gridFontSize);
 				rebuildGridFont();
 				refresh();
-			} else if (settingsFocus == 7) {
+			} else if (settingsFocus == 8) {
 				textFontFamilyIndex = (textFontFamilyIndex + 1) % availableFonts.length;
 				textFontFamily = availableFonts[textFontFamilyIndex];
 				if (projectData != null) projectData.setTextFontFamily(textFontFamily);
 				rebuildTextFont();
 				refresh();
-			} else if (settingsFocus == 8) {
+			} else if (settingsFocus == 9) {
 				textFontSizeSpinner.right();
 				textFontSize = textFontSizeSpinner.getValue();
 				if (projectData != null) projectData.setTextFontSize(textFontSize);
@@ -4613,7 +4626,7 @@ public class TabbyCat {
 		}
 
 		void enter() {
-			if (settingsFocus == 9) {
+			if (settingsFocus == 10) {
 				audioOutputPanel.refresh();
 				cardLayout.show(cardPanel, audioOutputCardKey);
 			}
@@ -4667,18 +4680,22 @@ public class TabbyCat {
 			// --- UI Scale row ---
 			uiScale.paint(g, x, y, settingsFocus == 2);
 
+			// --- Render FPS row ---
+			y += lineH + 8;
+			renderFpsSpinner.paint(g, x, y, settingsFocus == 3);
+
 			// --- Rainbow Brightness row ---
 			y += lineH + 8;
-			rainbowBrightnessSpinner.paint(g, x, y, settingsFocus == 3);
+			rainbowBrightnessSpinner.paint(g, x, y, settingsFocus == 4);
 
 			// --- Scrollbar Brightness row ---
 			y += lineH + 8;
-			scrollbarBrightnessSpinner.paint(g, x, y, settingsFocus == 4);
+			scrollbarBrightnessSpinner.paint(g, x, y, settingsFocus == 5);
 
 			// --- Grid Font Family row ---
 			y += lineH + 8;
 			{
-				boolean focused = settingsFocus == 5;
+				boolean focused = settingsFocus == 6;
 				String lbl = "Grid Font:";
 				int lblW = textFontMetrics.stringWidth(lbl);
 				g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
@@ -4689,12 +4706,12 @@ public class TabbyCat {
 
 			// --- Grid Font Size row ---
 			y += lineH + 8;
-			gridFontSizeSpinner.paint(g, x, y, settingsFocus == 6);
+			gridFontSizeSpinner.paint(g, x, y, settingsFocus == 7);
 
 			// --- UI Font Family row ---
 			y += lineH + 8;
 			{
-				boolean focused = settingsFocus == 7;
+				boolean focused = settingsFocus == 8;
 				String lbl = "UI Font:";
 				int lblW = textFontMetrics.stringWidth(lbl);
 				g.setPaint(focused ? Color.WHITE : Color.DARK_GRAY);
@@ -4705,11 +4722,11 @@ public class TabbyCat {
 
 			// --- UI Font Size row ---
 			y += lineH + 8;
-			textFontSizeSpinner.paint(g, x, y, settingsFocus == 8);
+			textFontSizeSpinner.paint(g, x, y, settingsFocus == 9);
 
 			// --- Output Device row ---
 			y += lineH + 8;
-			boolean audioFocused = settingsFocus == 9;
+			boolean audioFocused = settingsFocus == 10;
 			String deviceLabel = "Output Device:";
 			String deviceName = (selectedAudioMixerInfo == null) ? "Default (system)" : selectedAudioMixerInfo.getName();
 			int deviceLabelW = textFontMetrics.stringWidth(deviceLabel);
