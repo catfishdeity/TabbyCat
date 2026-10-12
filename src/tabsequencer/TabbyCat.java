@@ -3119,15 +3119,6 @@ public class TabbyCat {
 			iterateHue.run();
 			g.drawString(settingsString,(int) settingsBounds.getMinX(),(int) settingsBounds.getMaxY());
 			at.translate(settingsBounds.getWidth()+5,0);
-			String helpString = "HELP";
-			Rectangle2D helpBounds = topFontMetrics.getStringBounds(helpString, g);
-			helpBounds = at.createTransformedShape(helpBounds).getBounds2D();
-			menuItemBounds.put(SequencePosition.HELP, helpBounds);
-			g.setPaint(!isInGrid && sequencePosition==SequencePosition.HELP?Color.GRAY:Color.BLACK);
-			g.fill(helpBounds);
-			iterateHue.run();
-			g.drawString(helpString,(int) helpBounds.getMinX(),(int) helpBounds.getMaxY());
-			at.translate(helpBounds.getWidth()+5,0);
 			String followString = followPlayback ? "FOLLOW:ON" : "FOLLOW:OFF";
 			Rectangle2D followBoundsRaw = topFontMetrics.getStringBounds(followString, g);
 			Rectangle2D followBounds_ = at.createTransformedShape(followBoundsRaw).getBounds2D();
@@ -3145,10 +3136,12 @@ public class TabbyCat {
 			if (!isInGrid && sequencePosition == SequencePosition.SET_REPEAT_START) { g.setPaint(Color.GRAY); g.fill(repeatStartBounds); }
 			g.setPaint(rsOn ? new Color(0xBF, 0x57, 0x00) : Color.WHITE);
 			{
-				// barTop = top of capital letters, barBottom = baseline (where drawString draws)
-				Rectangle2D nb = topFontMetrics.getStringBounds("N", g);
-				int barTop    = (int)(topBarHeight + nb.getY());
-				int barBottom = (int)(topBarHeight + nb.getMaxY());
+				// Use tight glyph bounds so bars align with the actual visual top/bottom of capital letters,
+				// not the padded maxAscent which sits above the glyphs.
+				java.awt.font.GlyphVector capGV = topFont.createGlyphVector(g.getFontRenderContext(), "N");
+				Rectangle2D capBounds = capGV.getGlyphVisualBounds(0).getBounds2D();
+				int barTop    = (int) Math.ceil(topBarHeight + capBounds.getY());
+				int barBottom = lastTopBarHeight;
 				int barH      = barBottom - barTop;
 				int rx = (int)repeatStartBounds.getMinX();
 				g.fillRect(rx, barTop, 4, barH);               // fat bar LEFT (start repeat)
@@ -3162,9 +3155,10 @@ public class TabbyCat {
 			if (!isInGrid && sequencePosition == SequencePosition.SET_REPEAT_END) { g.setPaint(Color.GRAY); g.fill(repeatEndBounds); }
 			g.setPaint(reOn ? new Color(0xBF, 0x57, 0x00) : Color.WHITE);
 			{
-				Rectangle2D nb = topFontMetrics.getStringBounds("N", g);
-				int barTop    = (int)(topBarHeight + nb.getY());
-				int barBottom = (int)(topBarHeight + nb.getMaxY());
+				java.awt.font.GlyphVector capGV = topFont.createGlyphVector(g.getFontRenderContext(), "N");
+				Rectangle2D capBounds = capGV.getGlyphVisualBounds(0).getBounds2D();
+				int barTop    = (int) Math.ceil(topBarHeight + capBounds.getY());
+				int barBottom = lastTopBarHeight;
 				int barH      = barBottom - barTop;
 				int rx2 = (int)repeatEndBounds.getMinX();
 				g.drawLine(rx2, barTop, rx2, barBottom);               // thin bar left
@@ -3172,7 +3166,18 @@ public class TabbyCat {
 			}
 
 			at.setToIdentity();
-			
+
+			String helpString = "HELP";
+			Rectangle2D helpBoundsRaw = topFontMetrics.getStringBounds(helpString, g);
+			AffineTransform atHelp = new AffineTransform();
+			atHelp.translate(W - helpBoundsRaw.getWidth() - 5, topBarHeight);
+			Rectangle2D helpBounds = atHelp.createTransformedShape(helpBoundsRaw).getBounds2D();
+			menuItemBounds.put(SequencePosition.HELP, helpBounds);
+			g.setPaint(!isInGrid && sequencePosition==SequencePosition.HELP?Color.GRAY:Color.BLACK);
+			g.fill(helpBounds);
+			iterateHue.run();
+			g.drawString(helpString,(int) helpBounds.getMinX(),(int) helpBounds.getMaxY());
+
 			int sbH = 5; // scrollbar strip height in drawing coords
 			int sbY = lastTopBarHeight + 2; // top of scrollbar strip
 			at.translate(0, sbY + sbH + 2); // just past scrollbar border; each canvas prepends its own 5px gap
