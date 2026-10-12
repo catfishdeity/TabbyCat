@@ -211,6 +211,10 @@ public class TabbyCat {
 	final AtomicBoolean playbackDaemonIsStarted = new AtomicBoolean(false);
 	final java.util.concurrent.atomic.AtomicLong playbackRestartNanos = new java.util.concurrent.atomic.AtomicLong(0);
 
+	volatile long smoothTickStartNanos = 0L;
+	volatile long smoothTickDurationNanos = 1_000_000L; // 1ms default, avoid divide-by-zero
+	volatile int smoothTickBase = 0;
+
 	final TreeMap<Integer, Integer> cachedMeasurePositions = new TreeMap<>(); // tick → measure# (navigation only)
 	final TreeMap<Double, Integer> cachedMeasureCells = new TreeMap<>();    // real-time cell → measure# (rendering)
 	final ArrayList<Double> cachedBeatMarkerCells = new ArrayList<>();      // real-time cell positions (rendering)
@@ -374,6 +378,9 @@ public class TabbyCat {
 				}
 				// k >= B: normal clock tick within the tuplet's clock range — leave thisSixteenthNanos unchanged
 			}
+			smoothTickBase = tBeforeIncrement;
+			smoothTickStartNanos = intendedFireTimeNanos;
+			smoothTickDurationNanos = Math.max(1L, thisSixteenthNanos);
 			long nextIntendedNanos = intendedFireTimeNanos + thisSixteenthNanos;
 			// Hybrid: park until 2ms before target, then spin for sub-ms precision
 			if (thisSixteenthNanos > 0) {
@@ -749,6 +756,8 @@ public class TabbyCat {
 
 	long lastStopTimeMs = 0;
 
+	javax.swing.Timer playbackRenderTimer = null;
+
 	void startPlayback() {
 		if (System.currentTimeMillis() - lastStopTimeMs > 30_000) {
 			flushSynths();
@@ -762,6 +771,15 @@ public class TabbyCat {
 		midiDaemon.submit(() -> rescanProgramsToT(startT));
 		playbackRestartNanos.set(System.nanoTime());
 		isPlaying.set(true);
+		if (playbackRenderTimer != null) playbackRenderTimer.stop();
+		playbackRenderTimer = new javax.swing.Timer(16, e -> {
+			if (!isPlaying.get()) {
+				((javax.swing.Timer)e.getSource()).stop();
+				playbackRenderTimer = null;
+			}
+			mainInterfacePanel.repaint();
+		});
+		playbackRenderTimer.start();
 	}
 
 	void stopPlayback() {
@@ -776,6 +794,7 @@ public class TabbyCat {
 				if (c instanceof StringCanvasConfig)
 					((StringCanvasConfig) c).clearRuntimeEdoStepOffsets();
 		}
+		if (playbackRenderTimer != null) { playbackRenderTimer.stop(); playbackRenderTimer = null; }
 	}
 
 	void flushSynths() {
@@ -3154,9 +3173,23 @@ public class TabbyCat {
 			int cellWidth = (int) getCellWidth();
 			int rowHeight = gridMetrics.getMaxAscent()+4;
 			trackStripWidth = 2 * (cellWidth + 4); // +4 per column so labels have room to center
-			int t0 = projectData.getViewT().get();
 			int tDelta = (int) ((W - trackStripWidth) / cellWidth);
-			int t1 = t0 + tDelta;
+			double subTickOffset = 0.0;
+			int t0;
+			if (isPlaying.get() && followPlayback && smoothTickDurationNanos > 0) {
+				long now = System.nanoTime();
+				double fraction = (double)(now - smoothTickStartNanos) / (double)smoothTickDurationNanos;
+				fraction = Math.max(0.0, Math.min(1.5, fraction));
+				double smoothPlaybackT = smoothTickBase + fraction;
+				int cursorCol = tDelta / 4;
+				double viewTFloat = smoothPlaybackT - cursorCol;
+				if (viewTFloat < 0) viewTFloat = 0;
+				t0 = (int)Math.floor(viewTFloat);
+				subTickOffset = (viewTFloat - t0) * cellWidth;
+			} else {
+				t0 = projectData.getViewT().get();
+			}
+			int t1 = t0 + tDelta + 1;
 
 			// --- Horizontal scrollbar (between menu bar and grid) ---
 			{
@@ -3223,7 +3256,7 @@ public class TabbyCat {
 				}
 
 				Path2D.Double p2d = new Path2D.Double();
-				x = trackStripWidth;
+				x = (int)(trackStripWidth - subTickOffset);
 				for (int t = t0; t <= t1; t++) {
 					p2d.append(new Line2D.Double(
 							new Point2D.Double(x, 0),
@@ -3259,8 +3292,8 @@ public class TabbyCat {
 				
 				selectedGridBounds = canvasGrids.get(canvasGridNum).getBounds2D();
 				
-				double selectedX = selectedGridBounds.getMinX() + 
-						(projectData.getCursorT().get()-projectData.getViewT().get())*cellWidth;
+				double selectedX = selectedGridBounds.getMinX() +
+						(projectData.getCursorT().get()-t0)*cellWidth - subTickOffset;
 				double selectedY = selectedGridBounds.getMinY()+rowHeight*relativeRow;
 				
 				selectionRectangle = new Rectangle2D.Double(selectedX,selectedY,cellWidth,rowHeight);
@@ -3275,7 +3308,7 @@ public class TabbyCat {
 			
 			for (Shape canvasGrid : canvasGrids) {
 				Rectangle2D bounds = canvasGrid.getBounds2D();
-				int playbackX = (projectData.getPlaybackT().get()-projectData.getViewT().get())*cellWidth + trackStripWidth;
+				int playbackX = (int)((projectData.getPlaybackT().get()-t0)*cellWidth + trackStripWidth - subTickOffset);
 				g.setPaint(new Color(110,110,50));
 				g.fill(new Rectangle2D.Double(playbackX, bounds.getMinY(), cellWidth, bounds.getHeight()));
 
@@ -3309,15 +3342,15 @@ public class TabbyCat {
 				g.setPaint(Color.GREEN);
 				for (Point p : outerSelectionCells) {
 					g.fill(new Rectangle2D.Double(
-							bounds.getMinX()+(p.x-projectData.getViewT().get())*cellWidth,
+							bounds.getMinX()+(p.x-t0)*cellWidth - subTickOffset,
 							bounds.getMinY()+(p.y)*rowHeight,
 							cellWidth,rowHeight));
-							
+
 				}
 				g.setPaint(Color.GREEN.darker());
 				for (Point p : innerSelectionCells) {
 					g.fill(new Rectangle2D.Double(
-							bounds.getMinX()+(p.x-projectData.getViewT().get())*cellWidth,
+							bounds.getMinX()+(p.x-t0)*cellWidth - subTickOffset,
 							bounds.getMinY()+(p.y)*rowHeight,
 							cellWidth,rowHeight));
 							
@@ -3336,7 +3369,7 @@ public class TabbyCat {
 						int tRow = tupletSelectionRow;
 						g.setPaint(new Color(32, 120, 100, 120));
 						for (int tt = sT0; tt <= sT1; tt++) {
-							int tx = trackStripWidth + (tt - projectData.getViewT().get()) * cellWidth;
+							int tx = (int)(trackStripWidth + (tt - t0) * cellWidth - subTickOffset);
 							g.fillRect(tx, (int)(tb.getMinY() + tRow * rowHeight), cellWidth, rowHeight);
 						}
 						break;
@@ -3358,14 +3391,14 @@ public class TabbyCat {
 			for (Shape canvasGrid : canvasGrids) {				
 				
 				Rectangle2D bounds = canvasGrid.getBounds2D();
-				int playbackStartX = (projectData.getPlaybackStartT().get()-projectData.getViewT().get())*cellWidth + trackStripWidth;
+				int playbackStartX = (int)((projectData.getPlaybackStartT().get()-t0)*cellWidth + trackStripWidth - subTickOffset);
 
 				g.setPaint(Color.orange.darker());
 				g.setStroke(new BasicStroke(1));
 				g.draw(new Line2D.Double(playbackStartX, bounds.getMinY(), playbackStartX,bounds.getMaxY()));
 				g.draw(new Line2D.Double(playbackStartX+3, bounds.getMinY(), playbackStartX+3,bounds.getMaxY()));
 
-				int pt0X = (projectData.getPlaybackT0().get()-projectData.getViewT().get())*cellWidth + trackStripWidth;
+				int pt0X = (int)((projectData.getPlaybackT0().get()-t0)*cellWidth + trackStripWidth - subTickOffset);
 				g.setPaint(new Color(0x55, 0x66, 0x77));
 				g.fill(new Rectangle2D.Double(pt0X, bounds.getMinY(), cellWidth, bounds.getHeight()));
 
@@ -3373,7 +3406,7 @@ public class TabbyCat {
 				double repeatBarY1 = bounds.getMaxY() - 2;
 				// repeatT0: start repeat — thin|thick  |▌  (fat on right)
 				if (projectData.getRepeatT0().get() >= 0) {
-					int r0X = (projectData.getRepeatT0().get()-projectData.getViewT().get())*cellWidth + trackStripWidth;
+					int r0X = (int)((projectData.getRepeatT0().get()-t0)*cellWidth + trackStripWidth - subTickOffset);
 					g.setStroke(new BasicStroke(1));
 					g.draw(new Line2D.Double(r0X,   repeatBarY0, r0X,   repeatBarY1));
 					g.setStroke(new BasicStroke(3));
@@ -3381,7 +3414,7 @@ public class TabbyCat {
 				}
 				// repeatT1: end repeat — thick|thin  ▐|  (fat on left)
 				if (projectData.getRepeatT1().get() >= 0) {
-					int r1X = (projectData.getRepeatT1().get()-projectData.getViewT().get())*cellWidth + trackStripWidth;
+					int r1X = (int)((projectData.getRepeatT1().get()-t0)*cellWidth + trackStripWidth - subTickOffset);
 					g.setStroke(new BasicStroke(3));
 					g.draw(new Line2D.Double(r1X-4, repeatBarY0, r1X-4, repeatBarY1));
 					g.setStroke(new BasicStroke(1));
@@ -3389,7 +3422,7 @@ public class TabbyCat {
 				}
 				g.setStroke(new BasicStroke(1));
 
-				x = trackStripWidth;
+				x = (int)(trackStripWidth - subTickOffset);
 				g.setPaint(Color.white);
 
 				CanvasConfig renderCanvas = projectData.getCanvases().getCanvases().get(canvasNumber);
@@ -3397,7 +3430,7 @@ public class TabbyCat {
 				int rowCount = renderCanvas.getRowCount();
 				Map<Point, ControlEvent> renderEvData = (renderCanvas instanceof EventCanvasConfig)
 						? projectData.getEventData(canvasName) : null;
-				for (int t = projectData.getViewT().get(); t<t1; t++) {
+				for (int t = t0; t<t1; t++) {
 
 					for (int row = 0; row < rowCount; row++) {
 						if (renderCanvas instanceof EventCanvasConfig) {
@@ -3516,7 +3549,7 @@ public class TabbyCat {
 				g.setFont(gridFont);
 				for (double beatCell : cachedBeatMarkerCells) {
 					if (beatCell < t0 || beatCell >= t1) continue;
-					double mx = trackStripWidth + (beatCell - t0) * cellWidth;
+					double mx = trackStripWidth + (beatCell - t0) * cellWidth - subTickOffset;
 					g.setStroke(new BasicStroke(1));
 					g.setPaint(new Color(180, 180, 180, 100));
 					g.draw(new Line2D.Double(mx, bounds.getMinY(), mx, bounds.getMaxY()));
@@ -3527,7 +3560,7 @@ public class TabbyCat {
 				for (Map.Entry<Double, Integer> me : cachedMeasureCells.entrySet()) {
 					double cell = me.getKey();
 					if (cell < t0 || cell >= t1) continue;
-					double mx = trackStripWidth + (cell - t0) * cellWidth;
+					double mx = trackStripWidth + (cell - t0) * cellWidth - subTickOffset;
 					g.setStroke(new BasicStroke(2));
 					g.setPaint(Color.getHSBColor(0.85f, 0.25f, 1f));
 					g.draw(new Line2D.Double(mx, bounds.getMinY(), mx, bounds.getMaxY()));
@@ -3550,7 +3583,7 @@ public class TabbyCat {
 								int yOffset = instrumentClipboard.keySet().stream().mapToInt(a->a.getRow()).max().getAsInt();
 								g.setPaint(Color.RED);
 								for (Entry<InstrumentDataKey, String> entry : instrumentClipboard.entrySet()) {
-									int x0 = (projectData.getCursorT().get()-projectData.getViewT().get())*cellWidth+(int)bounds.getMinX();					
+									int x0 = (int)((projectData.getCursorT().get()-t0)*cellWidth - subTickOffset + (int)bounds.getMinX());
 									int y0 = (relativeRow+1-yOffset)*rowHeight+(int)bounds.getMinY();
 									int x_ = entry.getKey().getTime()*cellWidth+x0;
 									int y_ = y0+entry.getKey().getRow()*rowHeight;

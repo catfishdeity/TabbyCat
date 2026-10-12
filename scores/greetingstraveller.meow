@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<tabProject xmlns="tabby" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" artistName="BAANOIR" cursorT="533" gridFontFamily="Monospaced" gridFontSize="12" playbackStartT="0" playbackT="500" rainbowBrightness="0.8" repeatT0="432" repeatT1="534" scrollbarBrightness="0.8" selectedCanvas="0" selectedRow="4" shuffle="0" songName="Greetings Traveler" tempo="168" uiScale="1.8" viewT="468" xsi:schemaLocation="tabby ../schemas/projectFiles.xsd">
+<tabProject xmlns="tabby" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" artistName="BAANOIR" cursorT="408" gridFontFamily="Monospaced" gridFontSize="12" playbackStartT="0" playbackT="400" rainbowBrightness="0.8" repeatT0="384" repeatT1="582" scrollbarBrightness="0.8" selectedCanvas="0" selectedRow="3" shuffle="0" songName="Greetings Traveler" tempo="168" uiScale="1.8" viewT="0" xsi:schemaLocation="tabby ../schemas/projectFiles.xsd">
     <canvases>
         <eventCanvas name="Events" numRows="3">
             <event r="2" t="0">
@@ -121,11 +121,81 @@
         <event r="6" t="403" v="-"/>
         <event r="6" t="406" v="-"/>
         <event r="6" t="405" v="-"/>
+        <event r="6" t="544" v="-"/>
+        <event r="6" t="543" v="-"/>
+        <event r="6" t="546" v="0"/>
+        <event r="6" t="545" v="-"/>
+        <event r="6" t="540" v="2"/>
+        <event r="6" t="539" v="-"/>
+        <event r="6" t="542" v="3"/>
+        <event r="6" t="541" v="-"/>
+        <event r="6" t="552" v="2"/>
+        <event r="6" t="551" v="-"/>
+        <event r="6" t="554" v="3"/>
+        <event r="6" t="553" v="-"/>
+        <event r="6" t="548" v="1"/>
+        <event r="6" t="547" v="-"/>
+        <event r="6" t="550" v="B"/>
+        <event r="6" t="549" v="-"/>
+        <event r="6" t="556" v="-"/>
+        <event r="6" t="555" v="-"/>
+        <event r="6" t="558" v="2"/>
+        <event r="6" t="557" v="-"/>
+        <event r="6" t="512" v="3"/>
+        <event r="6" t="511" v="-"/>
+        <event r="6" t="514" v="-"/>
+        <event r="6" t="513" v="-"/>
+        <event r="6" t="508" v="B"/>
+        <event r="6" t="507" v="-"/>
+        <event r="6" t="510" v="2"/>
+        <event r="6" t="509" v="-"/>
+        <event r="6" t="520" v="H9"/>
+        <event r="6" t="522" v="H9"/>
+        <event r="6" t="516" v="H9"/>
+        <event r="6" t="515" v="-"/>
+        <event r="6" t="518" v="H9"/>
+        <event r="6" t="528" v="H9"/>
+        <event r="6" t="530" v="H9"/>
+        <event r="6" t="524" v="H9"/>
+        <event r="6" t="526" v="H9"/>
+        <event r="6" t="536" v="1"/>
+        <event r="6" t="535" v="-"/>
+        <event r="6" t="538" v="B"/>
+        <event r="6" t="537" v="-"/>
+        <event r="6" t="532" v="H9"/>
+        <event r="6" t="534" v="0"/>
+        <event r="6" t="480" v="0"/>
         <event r="6" t="479" v="-"/>
+        <event r="6" t="482" v="1"/>
+        <event r="6" t="481" v="-"/>
         <event r="6" t="476" v="B"/>
         <event r="6" t="475" v="-"/>
         <event r="6" t="478" v="1"/>
         <event r="6" t="477" v="-"/>
+        <event r="6" t="488" v="3"/>
+        <event r="6" t="487" v="-"/>
+        <event r="6" t="490" v="-"/>
+        <event r="6" t="489" v="-"/>
+        <event r="6" t="484" v="B"/>
+        <event r="6" t="483" v="-"/>
+        <event r="6" t="486" v="2"/>
+        <event r="6" t="485" v="-"/>
+        <event r="6" t="496" v="B"/>
+        <event r="6" t="495" v="-"/>
+        <event r="6" t="498" v="2"/>
+        <event r="6" t="497" v="-"/>
+        <event r="6" t="492" v="0"/>
+        <event r="6" t="491" v="-"/>
+        <event r="6" t="494" v="1"/>
+        <event r="6" t="493" v="-"/>
+        <event r="6" t="504" v="0"/>
+        <event r="6" t="503" v="-"/>
+        <event r="6" t="506" v="1"/>
+        <event r="6" t="505" v="-"/>
+        <event r="6" t="500" v="3"/>
+        <event r="6" t="499" v="-"/>
+        <event r="6" t="502" v="-"/>
+        <event r="6" t="501" v="-"/>
         <event r="6" t="448" v="B"/>
         <event r="6" t="447" v="-"/>
         <event r="6" t="450" v="2"/>
@@ -557,6 +627,29 @@
         <event r="5" t="245" v="-"/>
         <event r="5" t="246" v="2"/>
         <event r="5" t="247" v="-"/>
+        <event r="5" t="536" v="1"/>
+        <event r="5" t="537" v="-"/>
+        <event r="5" t="538" v="B"/>
+        <event r="5" t="539" v="-"/>
+        <event r="5" t="540" v="2"/>
+        <event r="5" t="541" v="-"/>
+        <event r="5" t="542" v="3"/>
+        <event r="5" t="543" v="-"/>
+        <event r="5" t="544" v="-"/>
+        <event r="5" t="545" v="-"/>
+        <event r="5" t="546" v="0"/>
+        <event r="5" t="547" v="-"/>
+        <event r="5" t="548" v="1"/>
+        <event r="5" t="549" v="-"/>
+        <event r="5" t="550" v="B"/>
+        <event r="5" t="551" v="-"/>
+        <event r="5" t="552" v="2"/>
+        <event r="5" t="553" v="-"/>
+        <event r="5" t="554" v="3"/>
+        <event r="5" t="555" v="-"/>
+        <event r="5" t="556" v="-"/>
+        <event r="5" t="557" v="-"/>
+        <event r="5" t="558" v="2"/>
         <event r="5" t="440" v="3"/>
         <event r="5" t="441" v="-"/>
         <event r="5" t="442" v="-"/>
@@ -609,6 +702,29 @@
         <event r="5" t="437" v="-"/>
         <event r="5" t="438" v="2"/>
         <event r="5" t="439" v="-"/>
+        <event r="5" t="504" v="0"/>
+        <event r="5" t="505" v="-"/>
+        <event r="5" t="506" v="1"/>
+        <event r="5" t="507" v="-"/>
+        <event r="5" t="508" v="B"/>
+        <event r="5" t="509" v="-"/>
+        <event r="5" t="510" v="2"/>
+        <event r="5" t="511" v="-"/>
+        <event r="5" t="512" v="3"/>
+        <event r="5" t="513" v="-"/>
+        <event r="5" t="514" v="-"/>
+        <event r="5" t="515" v="-"/>
+        <event r="5" t="516" v="0"/>
+        <event r="5" t="518" v="0"/>
+        <event r="5" t="520" v="0"/>
+        <event r="5" t="522" v="0"/>
+        <event r="5" t="524" v="0"/>
+        <event r="5" t="526" v="0"/>
+        <event r="5" t="528" v="0"/>
+        <event r="5" t="530" v="0"/>
+        <event r="5" t="532" v="0"/>
+        <event r="5" t="534" v="0"/>
+        <event r="5" t="535" v="-"/>
         <event r="5" t="472" v="2"/>
         <event r="5" t="473" v="-"/>
         <event r="5" t="474" v="2"/>
@@ -617,6 +733,30 @@
         <event r="5" t="477" v="-"/>
         <event r="5" t="478" v="1"/>
         <event r="5" t="479" v="-"/>
+        <event r="5" t="480" v="0"/>
+        <event r="5" t="481" v="-"/>
+        <event r="5" t="482" v="1"/>
+        <event r="5" t="483" v="-"/>
+        <event r="5" t="484" v="B"/>
+        <event r="5" t="485" v="-"/>
+        <event r="5" t="486" v="2"/>
+        <event r="5" t="487" v="-"/>
+        <event r="5" t="488" v="3"/>
+        <event r="5" t="489" v="-"/>
+        <event r="5" t="490" v="-"/>
+        <event r="5" t="491" v="-"/>
+        <event r="5" t="492" v="0"/>
+        <event r="5" t="493" v="-"/>
+        <event r="5" t="494" v="1"/>
+        <event r="5" t="495" v="-"/>
+        <event r="5" t="496" v="B"/>
+        <event r="5" t="497" v="-"/>
+        <event r="5" t="498" v="2"/>
+        <event r="5" t="499" v="-"/>
+        <event r="5" t="500" v="3"/>
+        <event r="5" t="501" v="-"/>
+        <event r="5" t="502" v="-"/>
+        <event r="5" t="503" v="-"/>
     </instrumentTabData>
     <instrumentTabData name="Drums">
         <event r="0" t="456" v="O"/>
@@ -700,19 +840,49 @@
         <event r="2" t="356" v="P"/>
         <event r="0" t="412" v="O"/>
         <event r="2" t="352" v="P"/>
+        <event r="3" t="492" v="K"/>
+        <event r="1" t="554" v="S"/>
+        <event r="3" t="493" v="K"/>
+        <event r="3" t="494" v="K"/>
+        <event r="3" t="487" v="K"/>
+        <event r="3" t="499" v="K"/>
+        <event r="3" t="495" v="K"/>
+        <event r="3" t="496" v="K"/>
+        <event r="3" t="497" v="K"/>
+        <event r="3" t="498" v="K"/>
         <event r="3" t="475" v="K"/>
         <event r="3" t="478" v="K"/>
         <event r="1" t="533" v="S"/>
         <event r="3" t="474" v="K"/>
+        <event r="3" t="483" v="K"/>
+        <event r="3" t="484" v="K"/>
+        <event r="3" t="485" v="K"/>
+        <event r="0" t="578" v="O"/>
+        <event r="3" t="486" v="K"/>
+        <event r="3" t="480" v="K"/>
+        <event r="1" t="542" v="S"/>
+        <event r="3" t="481" v="K"/>
+        <event r="3" t="482" v="K"/>
         <event r="3" t="524" v="K"/>
         <event r="3" t="526" v="K"/>
         <event r="3" t="520" v="K"/>
         <event r="3" t="522" v="K"/>
         <event r="3" t="532" v="K"/>
+        <event r="3" t="534" v="K"/>
         <event r="3" t="528" v="K"/>
         <event r="3" t="530" v="K"/>
+        <event r="3" t="507" v="K"/>
+        <event r="3" t="508" v="K"/>
+        <event r="3" t="509" v="K"/>
+        <event r="3" t="510" v="K"/>
+        <event r="3" t="504" v="K"/>
+        <event r="3" t="505" v="K"/>
+        <event r="3" t="506" v="K"/>
         <event r="3" t="516" v="K"/>
+        <event r="1" t="578" v="S"/>
         <event r="3" t="518" v="K"/>
+        <event r="3" t="511" v="K"/>
+        <event r="1" t="576" v="L"/>
         <event r="0" t="520" v="C"/>
         <event r="0" t="522" v="C"/>
         <event r="3" t="423" v="K"/>
@@ -721,12 +891,14 @@
         <event r="3" t="425" v="K"/>
         <event r="0" t="518" v="C"/>
         <event r="3" t="426" v="K"/>
+        <event r="1" t="488" v="S"/>
         <event r="3" t="435" v="K"/>
         <event r="0" t="528" v="C"/>
         <event r="3" t="436" v="K"/>
         <event r="3" t="437" v="K"/>
         <event r="0" t="530" v="C"/>
         <event r="3" t="438" v="K"/>
+        <event r="1" t="500" v="S"/>
         <event r="0" t="524" v="C"/>
         <event r="3" t="432" v="K"/>
         <event r="3" t="433" v="K"/>
@@ -757,27 +929,54 @@
         <event r="3" t="460" v="K"/>
         <event r="3" t="461" v="K"/>
         <event r="1" t="523" v="S"/>
+        <event r="0" t="554" v="O"/>
         <event r="3" t="462" v="K"/>
         <event r="1" t="517" v="S"/>
+        <event r="0" t="548" v="C"/>
         <event r="3" t="456" v="K"/>
         <event r="3" t="457" v="K"/>
         <event r="1" t="519" v="S"/>
+        <event r="0" t="550" v="O"/>
         <event r="3" t="458" v="K"/>
         <event r="1" t="529" v="S"/>
         <event r="1" t="531" v="S"/>
         <event r="3" t="463" v="K"/>
         <event r="1" t="525" v="S"/>
         <event r="1" t="527" v="S"/>
+        <event r="0" t="558" v="X"/>
         <event r="3" t="444" v="K"/>
         <event r="3" t="445" v="K"/>
+        <event r="0" t="538" v="O"/>
         <event r="3" t="446" v="K"/>
         <event r="3" t="439" v="K"/>
         <event r="0" t="532" v="C"/>
+        <event r="0" t="534" v="O"/>
         <event r="3" t="451" v="K"/>
+        <event r="0" t="546" v="O"/>
         <event r="3" t="447" v="K"/>
         <event r="3" t="448" v="K"/>
         <event r="3" t="449" v="K"/>
+        <event r="0" t="542" v="O"/>
         <event r="3" t="450" v="K"/>
+        <event r="1" t="512" v="S"/>
+        <event r="3" t="558" v="K"/>
+        <event r="3" t="551" v="K"/>
+        <event r="3" t="552" v="K"/>
+        <event r="3" t="553" v="K"/>
+        <event r="3" t="539" v="K"/>
+        <event r="3" t="540" v="K"/>
+        <event r="3" t="541" v="K"/>
+        <event r="3" t="535" v="K"/>
+        <event r="3" t="536" v="K"/>
+        <event r="3" t="537" v="K"/>
+        <event r="3" t="538" v="K"/>
+        <event r="3" t="547" v="K"/>
+        <event r="3" t="548" v="K"/>
+        <event r="3" t="549" v="K"/>
+        <event r="3" t="550" v="K"/>
+        <event r="3" t="546" v="K"/>
+        <event r="3" t="576" v="K"/>
+        <event r="3" t="578" v="K"/>
         <event r="0" t="88" v="R"/>
         <event r="0" t="96" v="O"/>
         <event r="0" t="92" v="R"/>
