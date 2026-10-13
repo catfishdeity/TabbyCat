@@ -16,6 +16,7 @@ import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
 import tabsequencer.InstrumentDataKey;
+import tabsequencer.NoteCell;
 import tabsequencer.events.ControlEvent;
 import tabsequencer.events.ProgramChange;
 import tabsequencer.events.ShuffleEvent;
@@ -28,7 +29,7 @@ import tabsequencer.events.TupletEvent;
 public class ProjectFileData {
 	private final CanvasesConfig canvases;
 	private final Map<String, Map<Point, ControlEvent>> eventDataByCanvas;
-	private final Map<InstrumentDataKey, String> instrumentData;
+	private final Map<InstrumentDataKey, NoteCell> instrumentData;
 	private final AtomicInteger cursorT, repeatT0, repeatT1, playbackStartT, selectedRow, selectedCanvas, viewT, tempo, playbackT, initialTempo, shuffle, playbackT0;
 
 	private String songName = "Untitled";
@@ -161,7 +162,7 @@ public class ProjectFileData {
 		e.appendChild(canvases.toXMLElement(doc, "canvases", eventDataByCanvas));
 
 		// Instrument tab data
-		Map<String, List<Entry<InstrumentDataKey, String>>> grouped =
+		Map<String, List<Entry<InstrumentDataKey, NoteCell>>> grouped =
 				instrumentData.entrySet().stream().collect(Collectors.groupingBy(a -> a.getKey().getInstrumentName()));
 		grouped.keySet().forEach(name -> {
 			Element instrumentDataElement = doc.createElement("instrumentTabData");
@@ -172,7 +173,11 @@ public class ProjectFileData {
 				instrumentDataElement.appendChild(eventElement);
 				eventElement.setAttribute("t", entry.getKey().getTime() + "");
 				eventElement.setAttribute("r", entry.getKey().getRow() + "");
-				eventElement.setAttribute("v", entry.getValue());
+				eventElement.setAttribute("v", entry.getValue().token);
+				eventElement.setAttribute("vel", String.format("%02X", entry.getValue().velocity));
+				eventElement.setAttribute("pan", String.format("%02X", entry.getValue().pan));
+				if (entry.getValue().offsetMs != 0)
+					eventElement.setAttribute("ofs", String.valueOf(entry.getValue().offsetMs));
 			});
 		});
 
@@ -248,8 +253,18 @@ public class ProjectFileData {
 				int time = Integer.parseInt(instrumentEventNode.getAttribute("t"));
 				int row = Integer.parseInt(instrumentEventNode.getAttribute("r"));
 				String value = instrumentEventNode.getAttribute("v");
+				String velAttr = instrumentEventNode.getAttribute("vel");
+				String panAttr = instrumentEventNode.getAttribute("pan");
+				int velocity = NoteCell.DEFAULT_VELOCITY;
+				int pan = NoteCell.DEFAULT_PAN;
+				if (!velAttr.isEmpty()) { try { velocity = Integer.parseInt(velAttr, 16); } catch (NumberFormatException ignored) {} }
+				if (!panAttr.isEmpty()) { try { pan = Integer.parseInt(panAttr, 16); } catch (NumberFormatException ignored) {} }
+				velocity = Math.max(0, Math.min(127, velocity));
+				pan = Math.max(0, Math.min(127, pan));
+				String ofsAttr = instrumentEventNode.getAttribute("ofs");
+				int offsetMs = ofsAttr.isEmpty() ? 0 : Integer.parseInt(ofsAttr);
 				InstrumentDataKey key = new InstrumentDataKey(name, time, row);
-				projectData.instrumentData.put(key, value);
+				projectData.instrumentData.put(key, new NoteCell(value, velocity, pan, offsetMs));
 			}
 		}
 
@@ -341,7 +356,7 @@ public class ProjectFileData {
 		return eventDataByCanvas;
 	}
 
-	public Map<InstrumentDataKey, String> getInstrumentData() {
+	public Map<InstrumentDataKey, NoteCell> getInstrumentData() {
 		return instrumentData;
 	}
 

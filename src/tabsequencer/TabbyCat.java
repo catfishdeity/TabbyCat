@@ -2,6 +2,7 @@ package tabsequencer;
 
 import java.awt.image.BufferedImage;
 import javax.imageio.ImageIO;
+import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Canvas;
@@ -292,6 +293,10 @@ public class TabbyCat {
 	KeyStroke k_CtrlE  = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " E");
 	KeyStroke k_AltUp   = KeyStroke.getKeyStroke("alt UP");
 	KeyStroke k_AltDown = KeyStroke.getKeyStroke("alt DOWN");
+	KeyStroke k_ModeNote   = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " shift N");
+	KeyStroke k_ModeVel    = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " shift V");
+	KeyStroke k_ModePan    = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " shift P");
+	KeyStroke k_ModeOffset = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " shift T");
 	KeyStroke k_CtrlZ = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " Z");
 	KeyStroke k_CtrlR = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " R");
 	
@@ -342,7 +347,8 @@ public class TabbyCat {
 				if (projectData.getPlaybackT().get() == 0) {
 					projectData.getTempo().set(projectData.getInitialTempo().get());
 				}
-				Future<?> midiFuture = midiDaemon.submit(() -> handleProgramEvents());
+				final long thisTickFireTime = intendedFireTimeNanos;
+				Future<?> midiFuture = midiDaemon.submit(() -> handleProgramEvents(thisTickFireTime));
 				try { midiFuture.get(); } catch (Exception e) { e.printStackTrace(); }
 				SwingUtilities.invokeLater(() -> mainInterfacePanel.repaint());
 			} catch (Exception e) {
@@ -499,7 +505,7 @@ public class TabbyCat {
 		}
 	}
 
-	void handleProgramEvents() {
+	void handleProgramEvents(long tickFireTimeNanos) {
 		int t = projectData.getPlaybackT().get();
 		if (t == 0) {
 			rescanProgramsToT(0);
@@ -545,7 +551,8 @@ public class TabbyCat {
 				StringCanvasConfig stringCanvas = (StringCanvasConfig) canvas; 
 				for (int row = 0; row < stringCanvas.getRowCount(); row++) {
 					InstrumentDataKey key = new InstrumentDataKey(stringCanvas.getName(),t,row);
-					String val = projectData.getInstrumentData().get(key);
+					NoteCell valCell = projectData.getInstrumentData().get(key);
+					String val = valCell != null ? valCell.token : null;
 					int channelNum = row%15 >= 9 ? row%15+1:row%15;
 					try {
 						Synthesizer synth = getSynth(stringCanvas,row);
@@ -566,9 +573,11 @@ public class TabbyCat {
 		.filter(e->e.getKey().getTime() == t)
 		.forEach(e -> {
 			InstrumentDataKey dataKey = e.getKey();
-			String value = e.getValue();
+			NoteCell noteCell = e.getValue();
+			String value = noteCell.token;
 			projectData.getCanvasConfig(dataKey.getInstrumentName()).ifPresent(canvasConfig -> {
 				if (canvasConfig.isMuted()) return;
+				Runnable fireNote = null;
 				if (canvasConfig instanceof DrumCanvasConfig) {
 					DrumCanvasConfig drumConfig = (DrumCanvasConfig) canvasConfig;
 					int resolvedMidi = -1;
@@ -576,32 +585,30 @@ public class TabbyCat {
 					if (resolvedMidi < 0 || resolvedMidi > 127) resolvedMidi = drumConfig.getMidiNumber(value).orElse(-1);
 					if (resolvedMidi >= 0) {
 						final int midiNumber = resolvedMidi;
-						try {
-							Synthesizer synth = getSynth(drumConfig);
-							MidiChannel ch = synth.getChannels()[9];
-							String rowKey = drumConfig.getName() + ":" + dataKey.getRow();
-							Pair<MidiChannel,Integer> prev = activeDrumNotes.get(rowKey);
-							if (prev != null) prev.a.noteOff(prev.b);
-							ch.noteOn(midiNumber, 100);
-							activeDrumNotes.put(rowKey, new Pair<>(ch, midiNumber));
-						} catch (Exception e1) {
-							e1.printStackTrace();
-						}
+						fireNote = () -> {
+							try {
+								Synthesizer synth = getSynth(drumConfig);
+								MidiChannel ch = synth.getChannels()[9];
+								String rowKey = drumConfig.getName() + ":" + dataKey.getRow();
+								Pair<MidiChannel,Integer> prev = activeDrumNotes.get(rowKey);
+								if (prev != null) prev.a.noteOff(prev.b);
+								ch.controlChange(10, noteCell.pan);
+								ch.noteOn(midiNumber, noteCell.velocity);
+								activeDrumNotes.put(rowKey, new Pair<>(ch, midiNumber));
+							} catch (Exception e1) {
+								e1.printStackTrace();
+							}
+						};
 					}
 				} else {
 					StringCanvasConfig guitarConfig = (StringCanvasConfig) canvasConfig;
 					if (value.charAt(0) != '-') {
-
-						guitarConfig.getFrequency(value,dataKey.getRow()).ifPresent(freq -> {
+						fireNote = () -> guitarConfig.getFrequency(value, dataKey.getRow()).ifPresent(freq -> {
 							try {
-								
 								int channelNum = dataKey.getRow()%15 >= 9 ?
 										dataKey.getRow()%15+1:dataKey.getRow()%15;
-								
-								
-								Synthesizer synth = getSynth(guitarConfig,dataKey.getRow());
+								Synthesizer synth = getSynth(guitarConfig, dataKey.getRow());
 								MidiChannel channel = synth.getChannels()[channelNum];
-								
 								double n = (12 * Math.log(freq/440)/Math.log(2) + 69);
 								int midiNote = (int) Math.round(n);
 								double semitoneOffset = n - midiNote;
@@ -612,19 +619,28 @@ public class TabbyCat {
 								int lsb = pitchBend & 0x7F;
 								int msb = (pitchBend >> 7) & 0x7F;
 								try {
-									ShortMessage pb = new ShortMessage();					
+									ShortMessage pb = new ShortMessage();
 									pb.setMessage(ShortMessage.PITCH_BEND, channelNum, lsb, msb);
 									synth.getReceiver().send(pb, -1);
-									channel.noteOn(midiNote, 100);
-									activeStringNotes.put(channel,midiNote);
+									channel.controlChange(10, noteCell.pan);
+									channel.noteOn(midiNote, noteCell.velocity);
+									activeStringNotes.put(channel, midiNote);
 								} catch (Exception ex) {
 									ex.printStackTrace();
 								}
 							} catch (Exception ex) {
 								ex.printStackTrace();
-							}							
+							}
 						});
-					} 
+					}
+				}
+				if (fireNote == null) return;
+				if (noteCell.offsetMs == 0) {
+					fireNote.run();
+				} else {
+					long noteFireNanos = tickFireTimeNanos + (long)noteCell.offsetMs * 1_000_000L;
+					long delayNanos = Math.max(0L, noteFireNanos - System.nanoTime());
+					midiDaemon.schedule(fireNote, delayNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
 				}
 			});
 		});
@@ -1059,7 +1075,7 @@ public class TabbyCat {
 		liveEvent.clear();
 		for (Map.Entry<String, Map<Point, ControlEvent>> e : snap.eventDataByCanvas.entrySet())
 			liveEvent.put(e.getKey(), new HashMap<>(e.getValue()));
-		Map<InstrumentDataKey, String> liveInstr = projectData.getInstrumentData();
+		Map<InstrumentDataKey, NoteCell> liveInstr = projectData.getInstrumentData();
 		liveInstr.clear();
 		liveInstr.putAll(snap.instrumentData);
 		fileHasBeenModified.set(true);
@@ -1603,8 +1619,8 @@ public class TabbyCat {
 
 	private static class GridSnapshot {
 		final Map<String, Map<Point, ControlEvent>> eventDataByCanvas;
-		final Map<InstrumentDataKey, String> instrumentData;
-		GridSnapshot(Map<String, Map<Point, ControlEvent>> eventSrc, Map<InstrumentDataKey, String> instrSrc) {
+		final Map<InstrumentDataKey, NoteCell> instrumentData;
+		GridSnapshot(Map<String, Map<Point, ControlEvent>> eventSrc, Map<InstrumentDataKey, NoteCell> instrSrc) {
 			Map<String, Map<Point, ControlEvent>> evCopy = new HashMap<>();
 			for (Map.Entry<String, Map<Point, ControlEvent>> e : eventSrc.entrySet())
 				evCopy.put(e.getKey(), new HashMap<>(e.getValue()));
@@ -1639,12 +1655,14 @@ public class TabbyCat {
 		boolean isInGrid = false;
 		AtomicBoolean isSelectionMode = new AtomicBoolean(false);
 		
-		final Map<InstrumentDataKey, String> instrumentClipboard = new HashMap<>();
+		final Map<InstrumentDataKey, NoteCell> instrumentClipboard = new HashMap<>();
 		final Map<Point, ControlEvent> eventClipboard = new HashMap<>();
 		
 		int lassoCanvasNumber = -1;
 		int lassoT0 = -1;
 		int lassoRow0 = -1;
+		String modePartialBuffer = null;
+		InstrumentDataKey modePartialKey = null;
 		boolean isMouseLasso = false;
 
 		boolean isTupletSelectionMode = false;
@@ -1789,6 +1807,14 @@ public class TabbyCat {
 				inputMap.put(k,""+c);
 				actionMap.put(""+c, rToA(()->handleCharInput(c_)));
 			}
+			inputMap.put(k_ModeNote, "modenote");
+			actionMap.put("modenote", rToA(()->handleCharInput('n')));
+			inputMap.put(k_ModeVel, "modevel");
+			actionMap.put("modevel", rToA(()->handleCharInput('v')));
+			inputMap.put(k_ModePan, "modepan");
+			actionMap.put("modepan", rToA(()->handleCharInput('p')));
+			inputMap.put(k_ModeOffset, "modeoffset");
+			actionMap.put("modeoffset", rToA(()->handleCharInput('o')));
 
 			this.addMouseListener(new MouseAdapter() {
 				@Override
@@ -1920,6 +1946,30 @@ public class TabbyCat {
 							cardLayout.show(cardPanel, deleteConfirmCardKey);
 							repaint();
 							return;
+						}
+						if (sb.length > 5 && sb[5] != null && sb[5].contains(mx, my)) {
+							CanvasConfig modeCanvas = projectData.getCanvases().getCanvases().get(si);
+							modeCanvas.setEditMode(CanvasEditMode.NOTE);
+							modePartialBuffer = null; modePartialKey = null;
+							repaint(); return;
+						}
+						if (sb.length > 6 && sb[6] != null && sb[6].contains(mx, my)) {
+							CanvasConfig modeCanvas = projectData.getCanvases().getCanvases().get(si);
+							modeCanvas.setEditMode(CanvasEditMode.VELOCITY);
+							modePartialBuffer = null; modePartialKey = null;
+							repaint(); return;
+						}
+						if (sb.length > 7 && sb[7] != null && sb[7].contains(mx, my)) {
+							CanvasConfig modeCanvas = projectData.getCanvases().getCanvases().get(si);
+							modeCanvas.setEditMode(CanvasEditMode.PAN);
+							modePartialBuffer = null; modePartialKey = null;
+							repaint(); return;
+						}
+						if (sb.length > 8 && sb[8] != null && sb[8].contains(mx, my)) {
+							CanvasConfig modeCanvas = projectData.getCanvases().getCanvases().get(si);
+							modeCanvas.setEditMode(CanvasEditMode.OFFSET);
+							modePartialBuffer = null; modePartialKey = null;
+							repaint(); return;
 						}
 					}
 
@@ -2061,9 +2111,9 @@ public class TabbyCat {
 					return;
 				}
 				pushUndo();
-				for (int t = projectData.getCursorT().get()+1; 
+				for (int t = projectData.getCursorT().get()+1;
 						projectData.getInstrumentData().get(new InstrumentDataKey(canvasConfig.getName(),t,relativeRow)) != null &&
-						projectData.getInstrumentData().get(new InstrumentDataKey(canvasConfig.getName(),t,relativeRow)).charAt(0) == '-' ;
+						projectData.getInstrumentData().get(new InstrumentDataKey(canvasConfig.getName(),t,relativeRow)).token.charAt(0) == '-' ;
 						t++) {
 					InstrumentDataKey dk = new InstrumentDataKey(canvasConfig.getName(),t,relativeRow);
 					projectData.getInstrumentData().remove(dk);
@@ -2074,7 +2124,7 @@ public class TabbyCat {
 						projectData.getInstrumentData().get(new InstrumentDataKey(canvasConfig.getName(),t,relativeRow)) == null;
 						t--) {
 					InstrumentDataKey dk = new InstrumentDataKey(canvasConfig.getName(),t,relativeRow);
-					projectData.getInstrumentData().put(dk,"-");
+					projectData.getInstrumentData().put(dk, NoteCell.defaultOf("-"));
 				}
 				repaint();
 			}
@@ -2176,9 +2226,9 @@ public class TabbyCat {
 						new Point(projectData.getCursorT().get(), row));
 			} else if (bsCanvas instanceof DrumCanvasConfig) {
 				InstrumentDataKey dataKey = new InstrumentDataKey(bsCanvas.getName(), projectData.getCursorT().get(), row);
-				String cur = projectData.getInstrumentData().get(dataKey);
-				if (cur != null && cur.length() > 1)
-					projectData.getInstrumentData().put(dataKey, cur.substring(0, cur.length() - 1));
+				NoteCell cur = projectData.getInstrumentData().get(dataKey);
+				if (cur != null && cur.token.length() > 1)
+					projectData.getInstrumentData().put(dataKey, cur.withToken(cur.token.substring(0, cur.token.length() - 1)));
 				else
 					projectData.getInstrumentData().remove(dataKey);
 			} else {
@@ -2294,20 +2344,73 @@ public class TabbyCat {
 				}
 			} else {
 				CanvasConfig canvasConfig = charCanvas;
+				// Mode switch shortcuts
+				if (c == 'n') { canvasConfig.setEditMode(CanvasEditMode.NOTE); modePartialBuffer = null; modePartialKey = null; repaint(); return; }
+				if (c == 'v') { canvasConfig.setEditMode(CanvasEditMode.VELOCITY); modePartialBuffer = null; modePartialKey = null; repaint(); return; }
+				if (c == 'p') { canvasConfig.setEditMode(CanvasEditMode.PAN); modePartialBuffer = null; modePartialKey = null; repaint(); return; }
+				if (c == 'o') { canvasConfig.setEditMode(CanvasEditMode.OFFSET); modePartialBuffer = null; modePartialKey = null; repaint(); return; }
+
 				InstrumentDataKey dataKey = new InstrumentDataKey(canvasConfig.getName(),projectData.getCursorT().get(),row);
-				String token0 = projectData.getInstrumentData().getOrDefault(dataKey,"");
-				String token1 = token0+c;
-				if (canvasConfig instanceof DrumCanvasConfig) {
-					// Drum canvases accept any input; numeric values (0-127) play as direct MIDI notes
-					pushUndo();
-					projectData.getInstrumentData().put(dataKey, token1);
-					playPreviewNote(canvasConfig, token1, row);
+				// Clear partial buffer if cursor moved to a different cell
+				if (modePartialKey != null && !modePartialKey.equals(dataKey)) {
+					modePartialBuffer = null;
+					modePartialKey = null;
+				}
+				CanvasEditMode canvasMode = canvasConfig.getEditMode();
+				if (canvasMode == CanvasEditMode.OFFSET) {
+					return; // OFFSET mode: nudge-only via Alt+Up/Down, no char entry
+				} else if (canvasMode == CanvasEditMode.VELOCITY || canvasMode == CanvasEditMode.PAN) {
+					// V/P mode: only edit existing notes, no new note creation
+					NoteCell cell = projectData.getInstrumentData().get(dataKey);
+					if (cell == null) return;
+					char cu = Character.toUpperCase(c);
+					if (!isHexChar(cu)) return;
+					if (modePartialBuffer != null && modePartialBuffer.length() == 1) {
+						// Second hex char — commit
+						int val = Integer.parseInt(modePartialBuffer + cu, 16);
+						val = Math.max(0, Math.min(127, val));
+						pushUndo();
+						if (canvasMode == CanvasEditMode.VELOCITY) {
+							projectData.getInstrumentData().put(dataKey, cell.withVelocity(val));
+						} else {
+							projectData.getInstrumentData().put(dataKey, cell.withPan(val));
+						}
+						modePartialBuffer = null;
+						modePartialKey = null;
+						// Auto-advance cursor
+						projectData.getCursorT().incrementAndGet();
+						if (projectData.getCursorT().get() >= getMaxVisibleTime()) {
+							projectData.getViewT().getAndIncrement();
+						}
+					} else {
+						// First hex char — store partial
+						modePartialBuffer = String.valueOf(cu);
+						modePartialKey = dataKey;
+					}
 					repaint();
-				} else if (canvasConfig.willAccept(token1,row)) {
-					pushUndo();
-					projectData.getInstrumentData().put(dataKey, token1);
-					playPreviewNote(canvasConfig, token1, row);
-					repaint();
+				} else {
+					// NOTE mode — normal note entry
+					NoteCell existing = projectData.getInstrumentData().get(dataKey);
+					String token0 = existing != null ? existing.token : "";
+					String token1 = token0+c;
+					if (canvasConfig instanceof DrumCanvasConfig) {
+						// Drum canvases accept any input; numeric values (0-127) play as direct MIDI notes
+						pushUndo();
+						int vel = existing != null ? existing.velocity : getInitialVelocity(projectData.getCursorT().get());
+						int pan = existing != null ? existing.pan : NoteCell.DEFAULT_PAN;
+						int ofs = existing != null ? existing.offsetMs : NoteCell.DEFAULT_OFFSET_MS;
+						projectData.getInstrumentData().put(dataKey, new NoteCell(token1, vel, pan, ofs));
+						playPreviewNote(canvasConfig, token1, row);
+						repaint();
+					} else if (canvasConfig.willAccept(token1,row)) {
+						pushUndo();
+						int vel = existing != null ? existing.velocity : getInitialVelocity(projectData.getCursorT().get());
+						int pan = existing != null ? existing.pan : NoteCell.DEFAULT_PAN;
+						int ofs = existing != null ? existing.offsetMs : NoteCell.DEFAULT_OFFSET_MS;
+						projectData.getInstrumentData().put(dataKey, new NoteCell(token1, vel, pan, ofs));
+						playPreviewNote(canvasConfig, token1, row);
+						repaint();
+					}
 				}
 			}
 			
@@ -2351,12 +2454,12 @@ public class TabbyCat {
 				}
 			}
 			// Shift instrument data: entries at t and beyond move right by 1
-			Map<InstrumentDataKey, String> instrData = projectData.getInstrumentData();
-			List<Map.Entry<InstrumentDataKey, String>> instrToShift = new ArrayList<>();
-			for (Map.Entry<InstrumentDataKey, String> e : instrData.entrySet())
+			Map<InstrumentDataKey, NoteCell> instrData = projectData.getInstrumentData();
+			List<Map.Entry<InstrumentDataKey, NoteCell>> instrToShift = new ArrayList<>();
+			for (Map.Entry<InstrumentDataKey, NoteCell> e : instrData.entrySet())
 				if (e.getKey().getTime() >= t) instrToShift.add(e);
 			instrToShift.sort((a, b) -> b.getKey().getTime() - a.getKey().getTime()); // descending
-			for (Map.Entry<InstrumentDataKey, String> e : instrToShift) {
+			for (Map.Entry<InstrumentDataKey, NoteCell> e : instrToShift) {
 				instrData.remove(e.getKey());
 				instrData.put(new InstrumentDataKey(e.getKey().getInstrumentName(), e.getKey().getTime() + 1, e.getKey().getRow()), e.getValue());
 			}
@@ -2384,12 +2487,12 @@ public class TabbyCat {
 				}
 			}
 			// Remove notes at t; shift notes after t left by 1
-			Map<InstrumentDataKey, String> instrData = projectData.getInstrumentData();
-			List<Map.Entry<InstrumentDataKey, String>> instrToProcess = new ArrayList<>();
-			for (Map.Entry<InstrumentDataKey, String> e : instrData.entrySet())
+			Map<InstrumentDataKey, NoteCell> instrData = projectData.getInstrumentData();
+			List<Map.Entry<InstrumentDataKey, NoteCell>> instrToProcess = new ArrayList<>();
+			for (Map.Entry<InstrumentDataKey, NoteCell> e : instrData.entrySet())
 				if (e.getKey().getTime() >= t) instrToProcess.add(e);
 			instrToProcess.sort((a, b) -> a.getKey().getTime() - b.getKey().getTime()); // ascending
-			for (Map.Entry<InstrumentDataKey, String> e : instrToProcess) {
+			for (Map.Entry<InstrumentDataKey, NoteCell> e : instrToProcess) {
 				instrData.remove(e.getKey());
 				if (e.getKey().getTime() > t)
 					instrData.put(new InstrumentDataKey(e.getKey().getInstrumentName(), e.getKey().getTime() - 1, e.getKey().getRow()), e.getValue());
@@ -2455,7 +2558,7 @@ public class TabbyCat {
 				} else {
 					CanvasConfig canvas = projectData.getCanvases().getCanvases().get(p.a);
 										
-					Map<InstrumentDataKey,String> copied = new HashMap<>();
+					Map<InstrumentDataKey,NoteCell> copied = new HashMap<>();
 					int minT = Integer.MAX_VALUE;
 					int minR = Integer.MAX_VALUE;
 					for (int t = tMin; t <= tMax; t++) {
@@ -2468,10 +2571,10 @@ public class TabbyCat {
 							}
 						}
 					}
-					Map<InstrumentDataKey,String> normalized= new HashMap<>();
+					Map<InstrumentDataKey,NoteCell> normalized= new HashMap<>();
 					for (InstrumentDataKey dk : copied.keySet()) {
-						normalized.put(new InstrumentDataKey(dk.getInstrumentName(),dk.getTime()-minT,dk.getRow()-minR), 
-								copied.get(dk));												
+						normalized.put(new InstrumentDataKey(dk.getInstrumentName(),dk.getTime()-minT,dk.getRow()-minR),
+								copied.get(dk));
 					}
 					instrumentClipboard.putAll(normalized);
 				}
@@ -2526,14 +2629,14 @@ public class TabbyCat {
 						if (lassoCanvasConfig.getType() == canvasConfig.getType()) {
 							int yOffset = instrumentClipboard.keySet().stream().mapToInt(a->a.getRow()).max().getAsInt();
 
-							for (Entry<InstrumentDataKey, String> entry : instrumentClipboard.entrySet()) {
+							for (Entry<InstrumentDataKey, NoteCell> entry : instrumentClipboard.entrySet()) {
 
 								int t = entry.getKey().getTime()+projectData.getCursorT().get();
 								int r = entry.getKey().getRow()+p.b-yOffset;
-								
+
 								InstrumentDataKey dk = new InstrumentDataKey(entry.getKey().getInstrumentName(),t,r);
-								System.out.println(dk+" "+entry.getValue());
-								if (canvasConfig.willAccept(entry.getValue(), r)) {
+								System.out.println(dk+" "+entry.getValue().token);
+								if (canvasConfig.willAccept(entry.getValue().token, r)) {
 									projectData.getInstrumentData().put(dk, entry.getValue());
 								}
 
@@ -2690,15 +2793,38 @@ public class TabbyCat {
 			if (projectData == null || !isInGrid) return;
 			Pair<Integer,Integer> pair = getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
 			CanvasConfig canvas = projectData.getCanvases().getCanvases().get(pair.a);
-			if (!(canvas instanceof DrumCanvasConfig)) return;
+			if (!(canvas instanceof DrumCanvasConfig) && !(canvas instanceof StringCanvasConfig)) return;
 			InstrumentDataKey dataKey = new InstrumentDataKey(canvas.getName(), projectData.getCursorT().get(), pair.b);
-			String cur = projectData.getInstrumentData().get(dataKey);
-			if (cur == null) return;
+			NoteCell curCell = projectData.getInstrumentData().get(dataKey);
+			if (curCell == null) return;
+			CanvasEditMode mode = canvas.getEditMode();
+			if (mode == CanvasEditMode.VELOCITY) {
+				int vel = Math.max(0, Math.min(127, curCell.velocity + delta));
+				pushUndo();
+				projectData.getInstrumentData().put(dataKey, curCell.withVelocity(vel));
+				repaint();
+				return;
+			}
+			if (mode == CanvasEditMode.PAN) {
+				int pan = Math.max(0, Math.min(127, curCell.pan + delta));
+				pushUndo();
+				projectData.getInstrumentData().put(dataKey, curCell.withPan(pan));
+				repaint();
+				return;
+			}
+			if (mode == CanvasEditMode.OFFSET) {
+				pushUndo();
+				projectData.getInstrumentData().put(dataKey, curCell.withOffsetMs(curCell.offsetMs + delta));
+				repaint();
+				return;
+			}
+			// NOTE mode — drum MIDI note nudge only
+			if (!(canvas instanceof DrumCanvasConfig)) return;
 			int note;
-			try { note = Integer.parseInt(cur); } catch (NumberFormatException e) { return; }
+			try { note = Integer.parseInt(curCell.token); } catch (NumberFormatException e) { return; }
 			note = Math.max(0, Math.min(127, note + delta));
 			pushUndo();
-			projectData.getInstrumentData().put(dataKey, String.valueOf(note));
+			projectData.getInstrumentData().put(dataKey, curCell.withToken(String.valueOf(note)));
 			playPreviewNote(canvas, String.valueOf(note), pair.b);
 			repaint();
 		}
@@ -3079,6 +3205,33 @@ public class TabbyCat {
 			}
 		}
 		
+		int getInitialVelocity(int newT) {
+			// First: max velocity of all notes at the same time tick
+			int maxAtT = -1;
+			for (Map.Entry<InstrumentDataKey, NoteCell> e : projectData.getInstrumentData().entrySet()) {
+				if (e.getKey().getTime() == newT)
+					maxAtT = Math.max(maxAtT, e.getValue().velocity);
+			}
+			if (maxAtT >= 0) return maxAtT;
+			// Second: velocity of most recent note before newT (max velocity at that tick)
+			int closestT = -1;
+			for (InstrumentDataKey k : projectData.getInstrumentData().keySet()) {
+				if (k.getTime() < newT && k.getTime() > closestT) closestT = k.getTime();
+			}
+			if (closestT >= 0) {
+				int maxV = 0;
+				for (Map.Entry<InstrumentDataKey, NoteCell> e : projectData.getInstrumentData().entrySet()) {
+					if (e.getKey().getTime() == closestT) maxV = Math.max(maxV, e.getValue().velocity);
+				}
+				return maxV;
+			}
+			return NoteCell.DEFAULT_VELOCITY;
+		}
+
+		boolean isHexChar(char c) {
+			return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F');
+		}
+
 		Pair<Integer,Integer> getCanvasNumberAndRelativeRow(int row2) {
 			int canvasGridNum = 0;
 			int relativeRow = 0;
@@ -3280,7 +3433,7 @@ public class TabbyCat {
 
 			int cellWidth = (int) getCellWidth();
 			int rowHeight = gridMetrics.getMaxAscent()+4;
-			trackStripWidth = 2 * (cellWidth + 4); // +4 per column so labels have room to center
+			trackStripWidth = 3 * (cellWidth + 4); // +4 per column so labels have room to center
 			int tDelta = (int) ((W - trackStripWidth) / cellWidth);
 			double subTickOffset = 0.0;
 			int t0;
@@ -3543,8 +3696,41 @@ public class TabbyCat {
 			float[] rbFractions = new float[]{0f, 1f/6, 2f/6, 3f/6, 4f/6, 5f/6, 1f};
 			Color[] rbColors = new Color[7];
 			for (int i = 0; i < 7; i++) rbColors[i] = Color.getHSBColor(i / 6f, 0.5f, (float)rainbowBrightness);
-			g.setPaint(new java.awt.LinearGradientPaint(trackStripWidth, 0, (float)W, 0, rbFractions, rbColors));
-			canvasGrids.forEach(g::draw);
+			// Mode tint overlay (drawn before content, behind notes)
+			java.awt.Composite prevComposite = g.getComposite();
+			g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.13f));
+			for (int ci = 0; ci < projectData.getCanvases().getCanvases().size(); ci++) {
+				CanvasConfig tintCanvas = projectData.getCanvases().getCanvases().get(ci);
+				if (tintCanvas instanceof StringCanvasConfig || tintCanvas instanceof DrumCanvasConfig) {
+					CanvasEditMode tintMode = tintCanvas.getEditMode();
+					Color tint = null;
+					if (tintMode == CanvasEditMode.VELOCITY) tint = new Color(255, 220, 0);
+					else if (tintMode == CanvasEditMode.PAN) tint = new Color(220, 0, 220);
+					else if (tintMode == CanvasEditMode.OFFSET) tint = new Color(0, 220, 220);
+					if (tint != null) {
+						Rectangle2D tb = canvasGrids.get(ci).getBounds2D();
+						g.setPaint(tint);
+						g.fill(tb);
+					}
+				}
+			}
+			g.setComposite(prevComposite);
+			{
+				java.awt.Paint rainbowPaint = new java.awt.LinearGradientPaint(trackStripWidth, 0, (float)W, 0, rbFractions, rbColors);
+				List<CanvasConfig> allCanvases = projectData.getCanvases().getCanvases();
+				for (int ci = 0; ci < canvasGrids.size(); ci++) {
+					CanvasConfig cc = allCanvases.get(ci);
+					java.awt.Paint gridPaint = rainbowPaint;
+					if (cc instanceof StringCanvasConfig || cc instanceof DrumCanvasConfig) {
+						CanvasEditMode gm = cc.getEditMode();
+						if (gm == CanvasEditMode.VELOCITY)     gridPaint = new Color(255, 220, 0);
+						else if (gm == CanvasEditMode.PAN)     gridPaint = new Color(160, 0, 220);
+						else if (gm == CanvasEditMode.OFFSET)  gridPaint = new Color(236, 88, 0);
+					}
+					g.setPaint(gridPaint);
+					g.draw(canvasGrids.get(ci));
+				}
+			}
 			g.setPaint(Color.RED);
 			g.draw(selectedGridBounds);
 			g.setPaint(Color.RED);
@@ -3705,10 +3891,47 @@ public class TabbyCat {
 							}					
 						} else {
 							InstrumentDataKey dataKey = new InstrumentDataKey(canvasName,t,row);
-							if (projectData.getInstrumentData().containsKey(dataKey)) {
-								String val = projectData.getInstrumentData().get(dataKey);
-								g.setPaint(Color.WHITE);
-								g.drawString(val,x+(rowHeight-gridMetrics.stringWidth(val))/2,
+							NoteCell cell = projectData.getInstrumentData().get(dataKey);
+							if (cell != null) {
+								CanvasConfig renderCanvasConfig = projectData.getCanvases().getCanvases().get(canvasNumber);
+								CanvasEditMode renderMode = renderCanvasConfig.getEditMode();
+								String displayVal;
+								Color displayColor = Color.WHITE;
+								if (renderMode == CanvasEditMode.VELOCITY) {
+									if (modePartialKey != null && modePartialKey.equals(dataKey) && modePartialBuffer != null) {
+										displayVal = modePartialBuffer + "_";
+										displayColor = Color.WHITE;
+									} else {
+										displayVal = String.format("%02X", cell.velocity);
+										float velHue = cell.velocity / 128f * (5f / 6f);
+										displayColor = Color.getHSBColor(velHue, 0.5f, (float) rainbowBrightness);
+									}
+								} else if (renderMode == CanvasEditMode.PAN) {
+									if (modePartialKey != null && modePartialKey.equals(dataKey) && modePartialBuffer != null) {
+										displayVal = modePartialBuffer + "_";
+									} else {
+										displayVal = String.format("%02X", cell.pan);
+									}
+								} else if (renderMode == CanvasEditMode.OFFSET) {
+									int ofs = cell.offsetMs;
+									displayVal = ofs == 0 ? "0" : (ofs > 0 ? "+" + ofs : String.valueOf(ofs));
+								} else {
+									displayVal = cell.token;
+									// Validate token — red if invalid
+									boolean valid = true;
+									if (renderCanvasConfig instanceof DrumCanvasConfig) {
+										DrumCanvasConfig dc = (DrumCanvasConfig) renderCanvasConfig;
+										int resolved = -1;
+										try { resolved = Integer.parseInt(cell.token); } catch (NumberFormatException ignored) {}
+										if (resolved < 0 || resolved > 127) resolved = dc.getMidiNumber(cell.token).orElse(-1);
+										valid = resolved >= 0 || cell.token.isEmpty();
+									} else if (renderCanvasConfig instanceof StringCanvasConfig) {
+										valid = cell.token.equals("-") || ((StringCanvasConfig) renderCanvasConfig).getFrequency(cell.token, row).isPresent();
+									}
+									displayColor = valid ? Color.WHITE : Color.RED;
+								}
+								g.setPaint(displayColor);
+								g.drawString(displayVal, x+(rowHeight-gridMetrics.stringWidth(displayVal))/2,
 										(int) (bounds.getMinY()+(row+1)*rowHeight-2));
 							}
 						}
@@ -3791,13 +4014,13 @@ public class TabbyCat {
 							if (lassoCanvasConfig.getType() == canvasConfig.getType()) {
 								int yOffset = instrumentClipboard.keySet().stream().mapToInt(a->a.getRow()).max().getAsInt();
 								g.setPaint(Color.RED);
-								for (Entry<InstrumentDataKey, String> entry : instrumentClipboard.entrySet()) {
+								for (Entry<InstrumentDataKey, NoteCell> entry : instrumentClipboard.entrySet()) {
 									int x0 = (int)((projectData.getCursorT().get()-t0)*cellWidth - subTickOffset + (int)bounds.getMinX());
 									int y0 = (relativeRow+1-yOffset)*rowHeight+(int)bounds.getMinY();
 									int x_ = entry.getKey().getTime()*cellWidth+x0;
 									int y_ = y0+entry.getKey().getRow()*rowHeight;
 									if (y_ > bounds.getMinY()) {
-										g.drawString(entry.getValue(),x_+(cellWidth-gridFontMetrics.stringWidth(entry.getValue()))/2,y_);
+										g.drawString(entry.getValue().token,x_+(cellWidth-gridFontMetrics.stringWidth(entry.getValue().token))/2,y_);
 									}
 								};								
 							}
@@ -3819,7 +4042,7 @@ public class TabbyCat {
 				double sy = cgb.getMinY();
 				double sh = cgb.getHeight();
 				double stripH = Math.max(sh, 3.0 * rowHeight);
-				int colW = trackStripWidth / 2;
+				int colW = trackStripWidth / 3;
 
 				// black fill + vertical rainbow border
 				g.setPaint(Color.BLACK);
@@ -3837,10 +4060,10 @@ public class TabbyCat {
 				int ascent  = gridMetrics.getMaxAscent();
 				int descent = gridMetrics.getMaxDescent();
 
-				// Click bounds — [0]=up [1]=down [2]=edit [3]=mute [4]=delete
+				// Click bounds — [0]=up [1]=down [2]=edit [3]=mute [4]=delete [5]=note [6]=vel [7]=pan [8]=offset
 				// Disabled arrows use zero-size rect (unclickable)
-				Rectangle2D[] sb = new Rectangle2D[5];
-				for (int i = 0; i < 5; i++) sb[i] = new Rectangle2D.Double(0, 0, 0, 0);
+				Rectangle2D[] sb = new Rectangle2D[9];
+				for (int i = 0; i < 9; i++) sb[i] = new Rectangle2D.Double(0, 0, 0, 0);
 
 				// Helper: baseline y for text vertically centered in a cell rect
 				// ly = cellTop + (cellHeight + ascent - descent) / 2
@@ -3876,9 +4099,10 @@ public class TabbyCat {
 					g.drawString("X", lx, ly);
 				}
 
-				// Col 1: [m] row 0, [e] row 1 — shared lx so both are perfectly aligned
+				// Col 1: [m] row 0, [e] row 1, [±t] row 2 (drum/string only)
 				{
-					int col1LabelW = Math.max(gridMetrics.stringWidth("[m]"), gridMetrics.stringWidth("[e]"));
+					String ofsLabel = "[\u00B1t]";
+					int col1LabelW = Math.max(gridMetrics.stringWidth("[m]"), Math.max(gridMetrics.stringWidth("[e]"), gridMetrics.stringWidth(ofsLabel)));
 					int col1Lx = (int)(colW + (colW - col1LabelW) / 2.0);
 
 					Rectangle2D rM = new Rectangle2D.Double(colW, sy, colW, rowHeight);
@@ -3892,6 +4116,35 @@ public class TabbyCat {
 					int lyE = (int)(rE.getMinY() + (rowHeight + ascent - descent) / 2.0);
 					g.setPaint(Color.WHITE);
 					g.drawString("[e]", col1Lx, lyE);
+
+					if (sc instanceof StringCanvasConfig || sc instanceof DrumCanvasConfig) {
+						Rectangle2D rT = new Rectangle2D.Double(colW, sy + 2*rowHeight, colW, rowHeight);
+						sb[8] = rT;
+						int lyT = (int)(rT.getMinY() + (rowHeight + ascent - descent) / 2.0);
+						boolean offsetActive = sc.getEditMode() == CanvasEditMode.OFFSET;
+						g.setPaint(offsetActive ? new Color(0, 220, 220) : new Color(100, 100, 100));
+						g.drawString(ofsLabel, col1Lx, lyT);
+					}
+				}
+
+				// Col 2: [n][v][p] mode buttons — only for drum/string canvases
+				if (sc instanceof StringCanvasConfig || sc instanceof DrumCanvasConfig) {
+					CanvasEditMode curMode = sc.getEditMode();
+					String[] modeLabels = {"[n]", "[v]", "[p]"};
+					CanvasEditMode[] modes = {CanvasEditMode.NOTE, CanvasEditMode.VELOCITY, CanvasEditMode.PAN};
+					Color[] modeColors = {Color.WHITE, new Color(255, 220, 50), new Color(220, 80, 220)};
+					int[] sbIdx = {5, 6, 7};
+					int col2LabelW = gridMetrics.stringWidth("[n]");
+					for (String lbl : modeLabels) col2LabelW = Math.max(col2LabelW, gridMetrics.stringWidth(lbl));
+					int col2Lx = (int)(2*colW + (colW - col2LabelW) / 2.0);
+					for (int mi = 0; mi < 3; mi++) {
+						Rectangle2D rMode = new Rectangle2D.Double(2*colW, sy + mi * rowHeight, colW, rowHeight);
+						sb[sbIdx[mi]] = rMode;
+						int lyMode = (int)(rMode.getMinY() + (rowHeight + ascent - descent) / 2.0);
+						boolean isActive = curMode == modes[mi];
+						g.setPaint(isActive ? modeColors[mi] : new Color(100, 100, 100));
+						g.drawString(modeLabels[mi], col2Lx, lyMode);
+					}
 				}
 
 				lastStripBounds.add(sb);
@@ -5079,10 +5332,10 @@ public class TabbyCat {
 			if (!newName.equals(oldName)) {
 				targetCanvas.setName(newName);
 				if (projectData != null) {
-					Map<InstrumentDataKey, String> data = projectData.getInstrumentData();
+					Map<InstrumentDataKey, NoteCell> data = projectData.getInstrumentData();
 					List<InstrumentDataKey> keys = new java.util.ArrayList<>(data.keySet().stream()
 						.filter(k -> k.getInstrumentName().equals(oldName)).collect(Collectors.toList()));
-					for (InstrumentDataKey k : keys) { String val = data.remove(k); data.put(new InstrumentDataKey(newName, k.getTime(), k.getRow()), val); }
+					for (InstrumentDataKey k : keys) { NoteCell val = data.remove(k); data.put(new InstrumentDataKey(newName, k.getTime(), k.getRow()), val); }
 				}
 			}
 		}
@@ -5843,10 +6096,10 @@ public class TabbyCat {
 			if (!newName.equals(oldName)) {
 				targetCanvas.setName(newName);
 				if (projectData != null) {
-					Map<InstrumentDataKey, String> data = projectData.getInstrumentData();
+					Map<InstrumentDataKey, NoteCell> data = projectData.getInstrumentData();
 					List<InstrumentDataKey> keys = new java.util.ArrayList<>(data.keySet().stream()
 						.filter(k -> k.getInstrumentName().equals(oldName)).collect(Collectors.toList()));
-					for (InstrumentDataKey k : keys) { String val = data.remove(k); data.put(new InstrumentDataKey(newName, k.getTime(), k.getRow()), val); }
+					for (InstrumentDataKey k : keys) { NoteCell val = data.remove(k); data.put(new InstrumentDataKey(newName, k.getTime(), k.getRow()), val); }
 				}
 			}
 		}

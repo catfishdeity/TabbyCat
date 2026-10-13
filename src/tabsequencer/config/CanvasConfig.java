@@ -6,6 +6,8 @@ import java.util.Optional;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
+import tabsequencer.CanvasEditMode;
+
 public abstract class CanvasConfig {
 	public abstract CanvasType getType();
 	protected File soundfontFile;
@@ -60,4 +62,8 @@ public abstract class CanvasConfig {
 	protected boolean muted = false;
 	public boolean isMuted() { return muted; }
 	public void setMuted(boolean muted) { this.muted = muted; }
+
+	protected CanvasEditMode editMode = CanvasEditMode.NOTE;
+	public CanvasEditMode getEditMode() { return editMode; }
+	public void setEditMode(CanvasEditMode editMode) { this.editMode = editMode; }
 }
