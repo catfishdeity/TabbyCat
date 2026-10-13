@@ -154,13 +154,6 @@ public class TabbyCat {
 	static final String newProjectCardKey = "NEW PROJECT";
 	static final String mainInterfaceCardKey = "MAIN INTERFACE";
 	static final String saveProjectCardKey = "SAVE PROJECT";
-	static final String timeSignatureEventCardKey = "TIME SIGNATURE";
-	static final String tempoEventCardKey = "TEMPO EVENT";
-	static final String shuffleEventCardKey = "SHUFFLE EVENT";
-	static final String notesEventCardKey = "NEW NOTE";
-	static final String programChangeEventCardKey = "PROGRAM CHANGE";
-	static final String tuningChangeEventCardKey = "TUNING CHANGE EVENT";
-	static final String tupletEventCardKey = "TUPLET EVENT";
 	static final String helpCardKey = "HELP";
 	static final String settingsCardKey = "SETTINGS";
 	static final String audioOutputCardKey = "AUDIO OUTPUT";
@@ -211,7 +204,8 @@ public class TabbyCat {
 	private final ArrayDeque<GridSnapshot> undoStack = new ArrayDeque<>();
 	private final ArrayDeque<GridSnapshot> redoStack = new ArrayDeque<>();
 	private static final int MAX_UNDO_DEPTH = 100;
-		
+	InlineEntryPanel activeInlinePanel = null;
+
 	final AtomicBoolean isPlaying = new AtomicBoolean(false);
 	final AtomicBoolean playbackDaemonIsStarted = new AtomicBoolean(false);
 	final java.util.concurrent.atomic.AtomicLong playbackRestartNanos = new java.util.concurrent.atomic.AtomicLong(0);
@@ -1071,6 +1065,15 @@ public class TabbyCat {
 		mainInterfacePanel.repaint();
 	}
 
+	void enterInlineMode(InlineEntryPanel panel) {
+		activeInlinePanel = panel;
+		mainInterfacePanel.repaint();
+	}
+	void exitInlineMode() {
+		activeInlinePanel = null;
+		mainInterfacePanel.repaint();
+	}
+
 	public void updateTupletCache() {
 		TreeMap<Integer, TupletEvent> result = new TreeMap<>();
 		if (projectData != null) {
@@ -1158,11 +1161,8 @@ public class TabbyCat {
 		saveProjectPanel = new SaveProjectPanel();
 		cardPanel.add(saveProjectPanel,saveProjectCardKey);
 		timeSignatureEventPanel = new TimeSignatureEventPanel();
-		cardPanel.add(timeSignatureEventPanel,timeSignatureEventCardKey);
 		tempoEventPanel = new TempoEventPanel();
-		cardPanel.add(tempoEventPanel,tempoEventCardKey);
 		shuffleEventPanel = new ShuffleEventPanel();
-		cardPanel.add(shuffleEventPanel, shuffleEventCardKey);
 		notesEventPanel = new TextInputPanel(
 			"Add note:",
 			text -> {
@@ -1174,17 +1174,13 @@ public class TabbyCat {
 						new Point(projectData.getCursorT().get(), notePair.b),
 						new StickyNote(text));
 				}
-				cardLayout.show(cardPanel, mainInterfaceCardKey);
+				exitInlineMode();
 			},
-			() -> cardLayout.show(cardPanel, mainInterfaceCardKey)
+			() -> exitInlineMode()
 		);
-		cardPanel.add(notesEventPanel,notesEventCardKey);
 		programChangeEventPanel = new ProgramChangeEventPanel();
-		cardPanel.add(programChangeEventPanel, programChangeEventCardKey);
 		tuningChangeEventPanel = new TuningChangeEventPanel();
-		cardPanel.add(tuningChangeEventPanel, tuningChangeEventCardKey);
 		tupletEventPanel = new TupletEventPanel();
-		cardPanel.add(tupletEventPanel, tupletEventCardKey);
 		helpPanel = new HelpPanel();
 		cardPanel.add(helpPanel,helpCardKey);
 		settingsPanel = new SettingsPanel();
@@ -1826,6 +1822,15 @@ public class TabbyCat {
 		}
 	}
 
+	interface InlineEntryPanel {
+		void inlineUp();
+		void inlineDown();
+		void inlineLeft();
+		void inlineRight();
+		void inlineEnter();
+		void paintInline(Graphics2D g, int x, int y, int w, int h);
+	}
+
 	enum SequencePosition {
 		NEW, OPEN, SAVE, SAVE_AS, UNDO, REDO, TEMPO, SHUFFLE, TAPPER, SETTINGS, HELP, FOLLOW, SET_REPEAT_START, SET_REPEAT_END;
 	}
@@ -1885,13 +1890,13 @@ public class TabbyCat {
 			ActionMap actionMap = this.getActionMap();
 
 			inputMap.put(k_Up,"up");
-			actionMap.put("up", rToA(this::up));
+			actionMap.put("up", rToA(() -> { if (activeInlinePanel != null) { activeInlinePanel.inlineUp(); repaint(); return; } up(); }));
 			inputMap.put(k_Down,"down");
-			actionMap.put("down", rToA(this::down));
+			actionMap.put("down", rToA(() -> { if (activeInlinePanel != null) { activeInlinePanel.inlineDown(); repaint(); return; } down(); }));
 			inputMap.put(k_Left,"left");
-			actionMap.put("left", rToA(this::left));
+			actionMap.put("left", rToA(() -> { if (activeInlinePanel != null) { activeInlinePanel.inlineLeft(); repaint(); return; } left(); }));
 			inputMap.put(k_Right,"right");
-			actionMap.put("right", rToA(this::right));
+			actionMap.put("right", rToA(() -> { if (activeInlinePanel != null) { activeInlinePanel.inlineRight(); repaint(); return; } right(); }));
 			
 			inputMap.put(k_ShiftUp,"shiftup");
 			actionMap.put("shiftup", rToA(this::shiftUp));
@@ -1921,7 +1926,7 @@ public class TabbyCat {
 			actionMap.put("playnextmeasure", rToA(this::playTToNextMeasure));
 			
 			inputMap.put(k_Escape,"escape");
-			actionMap.put("escape", rToA(this::cancelSelectionMode));
+			actionMap.put("escape", rToA(() -> { if (activeInlinePanel != null) { exitInlineMode(); return; } cancelSelectionMode(); }));
 			inputMap.put(k_CtrlL,"ctrll");
 			actionMap.put("ctrll", rToA(this::ctrlL));
 			inputMap.put(k_CtrlC,"ctrlc");
@@ -1946,13 +1951,13 @@ public class TabbyCat {
 			actionMap.put("ctrlr", rToA(this::ctrlR));
 
 			inputMap.put(k_Enter,"enter");
-			actionMap.put("enter", rToA(this::enter));
-			
+			actionMap.put("enter", rToA(() -> { if (activeInlinePanel != null) { activeInlinePanel.inlineEnter(); return; } enter(); }));
+
 			inputMap.put(k_Comma,"comma");
 			actionMap.put("comma", rToA(this::comma));
-			
+
 			inputMap.put(k_Space,"space");
-			actionMap.put("space", rToA(TabbyCat.this::togglePlayStatus));
+			actionMap.put("space", rToA(() -> { if (activeInlinePanel instanceof TextInputPanel) { ((TextInputPanel)activeInlinePanel).appendInline(' '); repaint(); return; } TabbyCat.this.togglePlayStatus(); }));
 			inputMap.put(k_ShiftSpace,"shiftspace");
 			actionMap.put("shiftspace", rToA(TabbyCat.this::playFromStart));
 			
@@ -2239,6 +2244,11 @@ public class TabbyCat {
 		}
 
 		void hyphen() {
+			if (activeInlinePanel instanceof TextInputPanel) {
+				((TextInputPanel) activeInlinePanel).appendInline('-');
+				repaint();
+				return;
+			}
 			if (isInGrid) {
 				Pair<Integer,Integer> pair = 
 						getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
@@ -2315,6 +2325,11 @@ public class TabbyCat {
 
 
 		void backspace() {
+			if (activeInlinePanel instanceof TextInputPanel) {
+				((TextInputPanel) activeInlinePanel).backspaceInline();
+				repaint();
+				return;
+			}
 			if (!instrumentClipboard.isEmpty() || !eventClipboard.isEmpty()) {
 				ctrlC();
 				return;
@@ -2399,6 +2414,11 @@ public class TabbyCat {
 		}
 
 		void handleCharInput(char c) {
+			if (activeInlinePanel instanceof TextInputPanel) {
+				((TextInputPanel) activeInlinePanel).appendInline(c);
+				repaint();
+				return;
+			}
 			if (isTupletSelectionMode) return;
 			if (!fileHasBeenModified.get()) {
 				fileHasBeenModified.set(true);
@@ -2413,19 +2433,20 @@ public class TabbyCat {
 			if (charCanvas instanceof EventCanvasConfig) {
 				//event canvas
 				if (c == 'T') {
-					cardLayout.show(cardPanel, timeSignatureEventCardKey);
+					enterInlineMode(timeSignatureEventPanel);
 				} else if (c == 'S') {
-					cardLayout.show(cardPanel, tempoEventCardKey);
+					enterInlineMode(tempoEventPanel);
 				} else if (c == 'F') {
-					cardLayout.show(cardPanel, shuffleEventCardKey);
+					enterInlineMode(shuffleEventPanel);
 				} else if (c == 'N') {
-					cardLayout.show(cardPanel, notesEventCardKey);
+					notesEventPanel.reset();
+					enterInlineMode(notesEventPanel);
 				} else if (c == 'P') {
 					programChangeEventPanel.refresh();
-					cardLayout.show(cardPanel, programChangeEventCardKey);
+					enterInlineMode(programChangeEventPanel);
 				} else if (c == 'U') {
 					tuningChangeEventPanel.refresh();
-					cardLayout.show(cardPanel, tuningChangeEventCardKey);
+					enterInlineMode(tuningChangeEventPanel);
 				} else if (c == 'Q') {
 					if (isInGrid && !isSelectionMode.get()) {
 						if (isInsideTuplet(projectData.getCursorT().get())) return;
@@ -2694,7 +2715,7 @@ public class TabbyCat {
 			if (overlaps) { repaint(); return; }
 			pendingTupletT0 = t0;
 			pendingTupletT1 = t1;
-			cardLayout.show(cardPanel, tupletEventCardKey);
+			enterInlineMode(tupletEventPanel);
 		}
 
 		void ctrlLeft() {
@@ -2935,7 +2956,11 @@ public class TabbyCat {
 		}
 		
 		void comma() {
-			
+			if (activeInlinePanel instanceof TextInputPanel) {
+				((TextInputPanel) activeInlinePanel).appendInline(',');
+				repaint();
+				return;
+			}
 			isInGrid = !isInGrid;
 			repaint();
 		}
@@ -3614,6 +3639,19 @@ public class TabbyCat {
 				CanvasConfig renderCanvas = projectData.getCanvases().getCanvases().get(canvasNumber);
 				String canvasName = renderCanvas.getName();
 				int rowCount = renderCanvas.getRowCount();
+
+				// Inline event entry: replace cell area with the active entry form
+				if (activeInlinePanel != null && canvasNumber == canvasGridNum
+						&& renderCanvas instanceof EventCanvasConfig) {
+					activeInlinePanel.paintInline(g,
+							(int) trackStripWidth,
+							(int) bounds.getMinY(),
+							(int) (W - trackStripWidth),
+							(int) bounds.getHeight());
+					canvasNumber++;
+					continue;
+				}
+
 				Map<Point, ControlEvent> renderEvData = (renderCanvas instanceof EventCanvasConfig)
 						? projectData.getEventData(canvasName) : null;
 				for (int t = t0; t<t1; t++) {
@@ -4174,28 +4212,11 @@ public class TabbyCat {
 		}
 	}
 	
-	class TimeSignatureEventPanel extends JPanel {
+	class TimeSignatureEventPanel extends JPanel implements InlineEntryPanel {
 
 		boolean flag = false;
 		IntSpinner numerator   = new IntSpinner("Numerator",   4, 1, 999);
 		IntSpinner denominator = new IntSpinner("Denominator", 4, new int[]{2, 4, 8, 16});
-
-		public TimeSignatureEventPanel() {
-			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-			ActionMap actionMap = this.getActionMap();
-			inputMap.put(k_Escape,"esc");
-			actionMap.put("esc", rToA(()->{ if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
-			inputMap.put(k_Left,"left");
-			actionMap.put("left", rToA(this::left));
-			inputMap.put(k_Right,"right");
-			actionMap.put("right", rToA(this::right));
-			inputMap.put(k_Up,"up");
-			actionMap.put("up", rToA(this::up));
-			inputMap.put(k_Down,"down");
-			actionMap.put("down", rToA(this::down));
-			inputMap.put(k_Enter,"enter");
-			actionMap.put("enter", rToA(this::enter));
-		}
 
 		void up()    { (flag ? denominator : numerator).up();   repaint(); }
 		void down()  { (flag ? denominator : numerator).down(); repaint(); }
@@ -4218,8 +4239,21 @@ public class TabbyCat {
 			numerator.reset();
 			denominator.reset();
 			updateMeasureLinePositions();
-			mainInterfacePanel.repaint();
-			cardLayout.show(cardPanel, mainInterfaceCardKey);
+			exitInlineMode();
+		}
+
+		public void inlineUp()    { up(); }
+		public void inlineDown()  { down(); }
+		public void inlineLeft()  { left(); }
+		public void inlineRight() { right(); }
+		public void inlineEnter() { enter(); }
+		public void paintInline(Graphics2D g, int x, int y, int w, int h) {
+			g.setFont(textFont);
+			g.setPaint(Color.BLACK);
+			g.fillRect(x, y, w, h);
+			int drawY = y + textFontMetrics.getMaxAscent() * 2;
+			int x2 = numerator.paint(g, x + 2, drawY, !flag);
+			denominator.paint(g, x2 + 20, drawY, flag);
 		}
 
 		@Override
@@ -4234,21 +4268,9 @@ public class TabbyCat {
 		}
 	}
 	
-	class TempoEventPanel extends JPanel {
+	class TempoEventPanel extends JPanel implements InlineEntryPanel {
 		IntSpinner tempo = new IntSpinner("TEMPO", 120, 20, 1000);
 
-		public TempoEventPanel() {
-			InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-			ActionMap actionMap = this.getActionMap();
-			inputMap.put(k_Escape,"esc");
-			actionMap.put("esc", rToA(()->{ if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
-			inputMap.put(k_Up,"up");
-			actionMap.put("up", rToA(this::up));
-			inputMap.put(k_Down,"down");
-			actionMap.put("down", rToA(this::down));
-			inputMap.put(k_Enter,"enter");
-			actionMap.put("enter", rToA(this::enter));
-		}
 		void enter() {
 			TempoEvent tempoEvent = new TempoEvent(tempo.getValue());
 			tempo.reset();
@@ -4260,10 +4282,22 @@ public class TabbyCat {
 						new Point(projectData.getCursorT().get(), tempoPair.b),
 						tempoEvent);
 			}
-			cardLayout.show(cardPanel, mainInterfaceCardKey);
+			exitInlineMode();
 		}
 		void up()   { tempo.up();   repaint(); }
 		void down() { tempo.down(); repaint(); }
+
+		public void inlineUp()    { up(); }
+		public void inlineDown()  { down(); }
+		public void inlineLeft()  {}
+		public void inlineRight() {}
+		public void inlineEnter() { enter(); }
+		public void paintInline(Graphics2D g, int x, int y, int w, int h) {
+			g.setPaint(Color.BLACK);
+			g.fillRect(x, y, w, h);
+			g.setFont(textFont);
+			tempo.paint(g, x + 2, y + textFontMetrics.getMaxAscent(), true);
+		}
 
 		@Override
 		public void paint(Graphics g_) {
@@ -4274,18 +4308,9 @@ public class TabbyCat {
 		}
 	}
 	
-	class ShuffleEventPanel extends JPanel {
+	class ShuffleEventPanel extends JPanel implements InlineEntryPanel {
 		IntSpinner shuffle = new IntSpinner("SHUFFLE", 0, -90, 90);
 
-		public ShuffleEventPanel() {
-			InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-			ActionMap am = getActionMap();
-			im.put(k_Escape, "esc");
-			am.put("esc",    rToA(() -> { if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
-			im.put(k_Up,    "up");    am.put("up",    rToA(this::up));
-			im.put(k_Down,  "down");  am.put("down",  rToA(this::down));
-			im.put(k_Enter, "enter"); am.put("enter", rToA(this::enter));
-		}
 		void enter() {
 			ShuffleEvent event = new ShuffleEvent(shuffle.getValue());
 			shuffle.reset();
@@ -4297,10 +4322,22 @@ public class TabbyCat {
 					new Point(projectData.getCursorT().get(), shufflePair.b),
 					event);
 			}
-			cardLayout.show(cardPanel, mainInterfaceCardKey);
+			exitInlineMode();
 		}
 		void up()   { shuffle.up();   repaint(); }
 		void down() { shuffle.down(); repaint(); }
+
+		public void inlineUp()    { up(); }
+		public void inlineDown()  { down(); }
+		public void inlineLeft()  {}
+		public void inlineRight() {}
+		public void inlineEnter() { enter(); }
+		public void paintInline(Graphics2D g, int x, int y, int w, int h) {
+			g.setPaint(Color.BLACK);
+			g.fillRect(x, y, w, h);
+			g.setFont(textFont);
+			shuffle.paint(g, x + 2, y + textFontMetrics.getMaxAscent(), true);
+		}
 
 		@Override
 		public void paint(Graphics g_) {
@@ -4311,24 +4348,12 @@ public class TabbyCat {
 		}
 	}
 
-	class ProgramChangeEventPanel extends JPanel {
+	class ProgramChangeEventPanel extends JPanel implements InlineEntryPanel {
 		int focus = 0; // 0 = canvas, 1 = bank, 2 = program
 		List<String> canvasOptions = new ArrayList<>();
 		int canvasIndex = 0;
 		IntSpinner bank    = new IntSpinner("BANK",    0, 0, 16383);
 		IntSpinner program = new IntSpinner("PROGRAM", 0, 0, 127);
-
-		public ProgramChangeEventPanel() {
-			InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-			ActionMap am = getActionMap();
-			im.put(k_Escape, "esc");
-			am.put("esc",    rToA(() -> { if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
-			im.put(k_Left,  "left");  am.put("left",  rToA(this::left));
-			im.put(k_Right, "right"); am.put("right", rToA(this::right));
-			im.put(k_Up,    "up");    am.put("up",    rToA(this::up));
-			im.put(k_Down,  "down");  am.put("down",  rToA(this::down));
-			im.put(k_Enter, "enter"); am.put("enter", rToA(this::enter));
-		}
 
 		void refresh() {
 			canvasOptions.clear();
@@ -4386,8 +4411,28 @@ public class TabbyCat {
 				projectData.getEventData(pcCanvas.getName()).put(
 					new Point(projectData.getCursorT().get(), pcPair.b), pc);
 			}
-			mainInterfacePanel.repaint();
-			cardLayout.show(cardPanel, mainInterfaceCardKey);
+			exitInlineMode();
+		}
+
+		public void inlineUp()    { up(); }
+		public void inlineDown()  { down(); }
+		public void inlineLeft()  { left(); }
+		public void inlineRight() { right(); }
+		public void inlineEnter() { enter(); }
+		public void paintInline(Graphics2D g, int x, int y, int w, int h) {
+			g.setFont(textFont);
+			g.setPaint(Color.BLACK);
+			g.fillRect(x, y, w, h);
+			int drawY = y + textFontMetrics.getMaxAscent() * 2;
+			int dx = x + 2;
+			String canvasDisplay = canvasOptions.isEmpty() ? "(none)" : canvasOptions.get(canvasIndex);
+			String canvasLabel = "CANVAS: " + canvasDisplay;
+			g.setPaint(focus == 0 ? Color.WHITE : Color.GRAY);
+			g.drawString(canvasLabel, dx, drawY);
+			dx += textFontMetrics.stringWidth(canvasLabel) + 20;
+			dx = bank.paint(g, dx, drawY, focus == 1);
+			dx += 20;
+			program.paint(g, dx, drawY, focus == 2);
 		}
 
 		@Override
@@ -4409,24 +4454,12 @@ public class TabbyCat {
 		}
 	}
 
-	class TuningChangeEventPanel extends JPanel {
+	class TuningChangeEventPanel extends JPanel implements InlineEntryPanel {
 		int focus = 0; // 0 = canvas, 1 = row, 2 = offset
 		List<String> canvasOptions = new ArrayList<>();
 		int canvasIndex = 0;
 		int rowIndex = 0;
 		IntSpinner offset = new IntSpinner("OFFSET", 0, -127, 127);
-
-		public TuningChangeEventPanel() {
-			InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-			ActionMap am = getActionMap();
-			im.put(k_Escape, "esc");
-			am.put("esc",    rToA(() -> { if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
-			im.put(k_Left,  "left");  am.put("left",  rToA(this::left));
-			im.put(k_Right, "right"); am.put("right", rToA(this::right));
-			im.put(k_Up,    "up");    am.put("up",    rToA(this::up));
-			im.put(k_Down,  "down");  am.put("down",  rToA(this::down));
-			im.put(k_Enter, "enter"); am.put("enter", rToA(this::enter));
-		}
 
 		void refresh() {
 			canvasOptions.clear();
@@ -4491,8 +4524,43 @@ public class TabbyCat {
 				projectData.getEventData(tcCanvas.getName()).put(
 					new Point(projectData.getCursorT().get(), tcPair.b), tc);
 			}
-			mainInterfacePanel.repaint();
-			cardLayout.show(cardPanel, mainInterfaceCardKey);
+			exitInlineMode();
+		}
+
+		public void inlineUp()    { up(); }
+		public void inlineDown()  { down(); }
+		public void inlineLeft()  { left(); }
+		public void inlineRight() { right(); }
+		public void inlineEnter() { enter(); }
+		public void paintInline(Graphics2D g, int x, int y, int w, int h) {
+			g.setFont(textFont);
+			g.setPaint(Color.BLACK);
+			g.fillRect(x, y, w, h);
+			int drawY = y + textFontMetrics.getMaxAscent() * 2;
+			int dx = x + 2;
+			String canvasDisplay = canvasOptions.isEmpty() ? "(none)" : canvasOptions.get(canvasIndex);
+			String canvasLabel = "CANVAS: " + canvasDisplay;
+			g.setPaint(focus == 0 ? Color.WHITE : Color.GRAY);
+			g.drawString(canvasLabel, dx, drawY);
+			dx += textFontMetrics.stringWidth(canvasLabel) + 20;
+			String rowLabel = "ROW: " + rowIndex;
+			g.setPaint(focus == 1 ? Color.WHITE : Color.GRAY);
+			g.drawString(rowLabel, dx, drawY);
+			dx += textFontMetrics.stringWidth(rowLabel) + 20;
+			dx = offset.paint(g, dx, drawY, focus == 2);
+			dx += 20;
+			String tcName = canvasOptions.isEmpty() ? null : canvasOptions.get(canvasIndex);
+			if (tcName != null) {
+				java.util.Optional<CanvasConfig> cc = projectData.getCanvasConfig(tcName);
+				if (cc.isPresent() && cc.get() instanceof StringCanvasConfig) {
+					StringCanvasConfig sc = (StringCanvasConfig) cc.get();
+					if (rowIndex < sc.getEdoSteps().length) {
+						String baseLabel = "BASE: " + sc.getEdoSteps()[rowIndex];
+						g.setPaint(new Color(150, 150, 150));
+						g.drawString(baseLabel, dx, drawY);
+					}
+				}
+			}
 		}
 
 		@Override
@@ -4530,18 +4598,8 @@ public class TabbyCat {
 		}
 	}
 
-	class TupletEventPanel extends JPanel {
+	class TupletEventPanel extends JPanel implements InlineEntryPanel {
 		IntSpinner subdivisions = new IntSpinner("SUBDIVISIONS", 3, 1, Integer.MAX_VALUE);
-
-		public TupletEventPanel() {
-			InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-			ActionMap am = getActionMap();
-			im.put(k_Escape, "esc");
-			am.put("esc",    rToA(() -> { if (projectData != null) cardLayout.show(cardPanel, mainInterfaceCardKey); }));
-			im.put(k_Up,    "up");    am.put("up",    rToA(this::up));
-			im.put(k_Down,  "down");  am.put("down",  rToA(this::down));
-			im.put(k_Enter, "enter"); am.put("enter", rToA(this::enter));
-		}
 
 		void up()   { subdivisions.up();   repaint(); }
 		void down() { subdivisions.down(); repaint(); }
@@ -4553,7 +4611,7 @@ public class TabbyCat {
 			String canvasName = mainInterfacePanel.tupletSelectionCanvasName;
 			int row = mainInterfacePanel.tupletSelectionRow;
 			if (t0 < 0 || t1 <= t0 || canvasName == null) {
-				cardLayout.show(cardPanel, mainInterfaceCardKey);
+				exitInlineMode();
 				return;
 			}
 			int B = subdivisions.getValue();
@@ -4576,8 +4634,24 @@ public class TabbyCat {
 			projectData.getEventData(canvasName).put(new Point(t0, row), te);
 			updateTupletCache();
 			updateMeasureLinePositions();
-			mainInterfacePanel.repaint();
-			cardLayout.show(cardPanel, mainInterfaceCardKey);
+			exitInlineMode();
+		}
+
+		public void inlineUp()    { up(); }
+		public void inlineDown()  { down(); }
+		public void inlineLeft()  {}
+		public void inlineRight() {}
+		public void inlineEnter() { enter(); }
+		public void paintInline(Graphics2D g, int x, int y, int w, int h) {
+			g.setFont(textFont);
+			g.setPaint(Color.BLACK);
+			g.fillRect(x, y, w, h);
+			g.setPaint(Color.WHITE);
+			int lineH = textFontMetrics.getMaxAscent();
+			int drawY = y + lineH + 4;
+			g.drawString("TUPLET", x + 4, drawY);
+			drawY += lineH + 8;
+			subdivisions.paint(g, x + 4, drawY, true);
 		}
 
 		@Override
@@ -6512,7 +6586,7 @@ public class TabbyCat {
 		}
 	}
 
-	class TextInputPanel extends JPanel {
+	class TextInputPanel extends JPanel implements InlineEntryPanel {
 		private final String label;
 		private final java.util.function.Consumer<String> onConfirm;
 		private final Runnable onCancel;
@@ -6524,47 +6598,41 @@ public class TabbyCat {
 			this.label     = label;
 			this.onConfirm = onConfirm;
 			this.onCancel  = onCancel;
-
-			InputMap  im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-			ActionMap am = getActionMap();
-
-			im.put(k_Escape,    "esc");
-			am.put("esc",       rToA(() -> { reset(); onCancel.run(); }));
-			im.put(k_Enter,     "enter");
-			am.put("enter",     rToA(this::confirm));
-			im.put(k_Backspace, "backspace");
-			am.put("backspace", rToA(this::backspace));
-			im.put(k_Space,     "space");
-			am.put("space",     rToA(() -> append(' ')));
-
-			for (char c = 'A'; c <= 'Z'; c++) {
-				String upper = String.valueOf(c);
-				char   lower = upper.toLowerCase().charAt(0);
-				char   c_    = c;
-				im.put(KeyStroke.getKeyStroke(upper),            lower + "");
-				im.put(KeyStroke.getKeyStroke("shift " + upper), upper);
-				am.put(lower + "", rToA(() -> append(lower)));
-				am.put(upper,      rToA(() -> append(c_)));
-			}
-			for (char c = '0'; c <= '9'; c++) {
-				char c_ = c;
-				im.put(KeyStroke.getKeyStroke("" + c), "" + c);
-				am.put("" + c, rToA(() -> append(c_)));
-			}
-			for (char c : new char[]{'.', ',', '!', '?', '\'', '-', '_'}) {
-				char c_ = c;
-				im.put(KeyStroke.getKeyStroke(c), "" + c);
-				am.put("" + c, rToA(() -> append(c_)));
-			}
 		}
 
 		public void reset()            { buffer.setLength(0); repaint(); }
 		public void reset(String text) { buffer.setLength(0); buffer.append(text); repaint(); }
 		public String getText()        { return buffer.toString(); }
 
-		private void append(char c) { buffer.append(c); repaint(); }
-		private void backspace()    { if (buffer.length() > 0) { buffer.deleteCharAt(buffer.length()-1); repaint(); } }
+		private void append(char c) { buffer.append(c); if (activeInlinePanel == this) mainInterfacePanel.repaint(); else repaint(); }
+		private void backspace()    { if (buffer.length() > 0) { buffer.deleteCharAt(buffer.length()-1); if (activeInlinePanel == this) mainInterfacePanel.repaint(); else repaint(); } }
 		private void confirm()      { String t = buffer.toString(); reset(); onConfirm.accept(t); }
+
+		// Inline mode entry points (called from MainInterfacePanel when activeInlinePanel == this)
+		public void appendInline(char c) { buffer.append(c); }
+		public void backspaceInline()    { if (buffer.length() > 0) buffer.deleteCharAt(buffer.length()-1); }
+
+		public void inlineUp()    {}
+		public void inlineDown()  {}
+		public void inlineLeft()  {}
+		public void inlineRight() {}
+		public void inlineEnter() { confirm(); }
+		public void paintInline(Graphics2D g, int x, int y, int w, int h) {
+			g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+			g.setFont(textFont);
+			g.setPaint(Color.BLACK);
+			g.fillRect(x, y, w, h);
+			int rowH = textFontMetrics.getMaxAscent();
+			int drawY = y + rowH;
+			int labelW = textFontMetrics.stringWidth(label);
+			g.setPaint(Color.WHITE);
+			g.drawString(label, x + 2, drawY);
+			g.setPaint(new Color(255, 255, 100));
+			g.drawString(" " + buffer.toString() + "|", x + 2 + labelW, drawY);
+			drawY += rowH * 2;
+			g.setPaint(Color.GRAY);
+			g.drawString("Enter: confirm     Esc: cancel", x + 2, drawY);
+		}
 
 		@Override
 		public void paint(Graphics g_) {
