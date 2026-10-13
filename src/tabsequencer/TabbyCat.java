@@ -118,6 +118,7 @@ import tabsequencer.events.ShuffleEvent;
 import tabsequencer.events.TempoEvent;
 import tabsequencer.events.TimeSignatureDenominator;
 import tabsequencer.events.TimeSignatureEvent;
+import java.util.ArrayDeque;
 
 public class TabbyCat {
 
@@ -207,6 +208,9 @@ public class TabbyCat {
 	
 	final AtomicReference<File> activeFile = new AtomicReference<>(null);
 	final AtomicBoolean fileHasBeenModified = new AtomicBoolean(false);
+	private final ArrayDeque<GridSnapshot> undoStack = new ArrayDeque<>();
+	private final ArrayDeque<GridSnapshot> redoStack = new ArrayDeque<>();
+	private static final int MAX_UNDO_DEPTH = 100;
 		
 	final AtomicBoolean isPlaying = new AtomicBoolean(false);
 	final AtomicBoolean playbackDaemonIsStarted = new AtomicBoolean(false);
@@ -294,6 +298,8 @@ public class TabbyCat {
 	KeyStroke k_CtrlS = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " S");
 	KeyStroke k_CtrlShiftS = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " shift S");
 	KeyStroke k_CtrlI = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " I");
+	KeyStroke k_CtrlZ = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " Z");
+	KeyStroke k_CtrlR = KeyStroke.getKeyStroke((IS_MAC ? "meta" : "ctrl") + " R");
 	
 	KeyStroke k_Space      = KeyStroke.getKeyStroke("SPACE");
 	KeyStroke k_ShiftSpace = KeyStroke.getKeyStroke("shift SPACE");
@@ -1038,6 +1044,33 @@ public class TabbyCat {
 		cachedBeatMarkerCells.addAll(bCells);
 	}
 
+	private GridSnapshot snapshot() {
+		return new GridSnapshot(projectData.getEventDataByCanvas(), projectData.getInstrumentData());
+	}
+
+	private void pushUndo() {
+		if (projectData == null) return;
+		undoStack.push(snapshot());
+		if (undoStack.size() > MAX_UNDO_DEPTH) undoStack.pollLast();
+		redoStack.clear();
+	}
+
+	private void applySnapshot(GridSnapshot snap) {
+		if (projectData == null) return;
+		Map<String, Map<Point, ControlEvent>> liveEvent = projectData.getEventDataByCanvas();
+		liveEvent.clear();
+		for (Map.Entry<String, Map<Point, ControlEvent>> e : snap.eventDataByCanvas.entrySet())
+			liveEvent.put(e.getKey(), new HashMap<>(e.getValue()));
+		Map<InstrumentDataKey, String> liveInstr = projectData.getInstrumentData();
+		liveInstr.clear();
+		liveInstr.putAll(snap.instrumentData);
+		fileHasBeenModified.set(true);
+		updateWindowTitle();
+		updateTupletCache();
+		updateMeasureLinePositions();
+		mainInterfacePanel.repaint();
+	}
+
 	public void updateTupletCache() {
 		TreeMap<Integer, TupletEvent> result = new TreeMap<>();
 		if (projectData != null) {
@@ -1136,6 +1169,7 @@ public class TabbyCat {
 				Pair<Integer,Integer> notePair = mainInterfacePanel.getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
 				CanvasConfig noteCanvas = projectData.getCanvases().getCanvases().get(notePair.a);
 				if (noteCanvas instanceof EventCanvasConfig) {
+					pushUndo();
 					projectData.getEventData(noteCanvas.getName()).put(
 						new Point(projectData.getCursorT().get(), notePair.b),
 						new StickyNote(text));
@@ -1216,6 +1250,7 @@ public class TabbyCat {
 			projectData.setArtistName("Artist");
 			projectData.setUiScale(displayScale);
 			activeFile.set(null);
+			undoStack.clear(); redoStack.clear();
 			warmupSynths();
 			cardLayout.show(cardPanel, mainInterfaceCardKey);
 		}
@@ -1308,6 +1343,7 @@ public class TabbyCat {
 			}
 			// EventCanvasConfig has no synth
 		}
+		undoStack.clear(); redoStack.clear();
 		warmupSynths();
 		return root;
 	}
@@ -1575,6 +1611,7 @@ public class TabbyCat {
 				activeFile.set(null);
 				fileHasBeenModified.set(false);
 				updateWindowTitle();
+				undoStack.clear(); redoStack.clear();
 				warmupSynths();
 				cardLayout.show(cardPanel, mainInterfaceCardKey);
 				updateMeasureLinePositions();
@@ -1777,8 +1814,20 @@ public class TabbyCat {
 	}
 	
 
+	private static class GridSnapshot {
+		final Map<String, Map<Point, ControlEvent>> eventDataByCanvas;
+		final Map<InstrumentDataKey, String> instrumentData;
+		GridSnapshot(Map<String, Map<Point, ControlEvent>> eventSrc, Map<InstrumentDataKey, String> instrSrc) {
+			Map<String, Map<Point, ControlEvent>> evCopy = new HashMap<>();
+			for (Map.Entry<String, Map<Point, ControlEvent>> e : eventSrc.entrySet())
+				evCopy.put(e.getKey(), new HashMap<>(e.getValue()));
+			this.eventDataByCanvas = evCopy;
+			this.instrumentData = new HashMap<>(instrSrc);
+		}
+	}
+
 	enum SequencePosition {
-		NEW, OPEN, SAVE, SAVE_AS, TEMPO, SHUFFLE, TAPPER, SETTINGS, HELP, FOLLOW, SET_REPEAT_START, SET_REPEAT_END;
+		NEW, OPEN, SAVE, SAVE_AS, UNDO, REDO, TEMPO, SHUFFLE, TAPPER, SETTINGS, HELP, FOLLOW, SET_REPEAT_START, SET_REPEAT_END;
 	}
 
 	enum CardinalDirection {
@@ -1891,6 +1940,10 @@ public class TabbyCat {
 			actionMap.put("ctrlshifts", rToA(this::showSaveAs));
 			inputMap.put(k_CtrlI,"ctrli");
 			actionMap.put("ctrli", rToA(this::ctrlI));
+			inputMap.put(k_CtrlZ, "ctrlz");
+			actionMap.put("ctrlz", rToA(this::ctrlZ));
+			inputMap.put(k_CtrlR, "ctrlr");
+			actionMap.put("ctrlr", rToA(this::ctrlR));
 
 			inputMap.put(k_Enter,"enter");
 			actionMap.put("enter", rToA(this::enter));
@@ -2198,6 +2251,7 @@ public class TabbyCat {
 				if (canvasConfig instanceof DrumCanvasConfig) {
 					return;
 				}
+				pushUndo();
 				for (int t = projectData.getCursorT().get()+1; 
 						projectData.getInstrumentData().get(new InstrumentDataKey(canvasConfig.getName(),t,relativeRow)) != null &&
 						projectData.getInstrumentData().get(new InstrumentDataKey(canvasConfig.getName(),t,relativeRow)).charAt(0) == '-' ;
@@ -2265,11 +2319,12 @@ public class TabbyCat {
 				ctrlC();
 				return;
 			}
+			pushUndo();
 			if (!fileHasBeenModified.get()) {
 				fileHasBeenModified.set(true);
 				updateWindowTitle();
 			}
-			Pair<Integer,Integer> pair = 
+			Pair<Integer,Integer> pair =
 					getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
 			int canvasNumber = pair.a;
 			int row = pair.b;
@@ -2294,6 +2349,7 @@ public class TabbyCat {
 
 		void delete() {
 			if (!isInGrid) return;
+			pushUndo();
 			Pair<Integer,Integer> pair = getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
 			int canvasNumber = pair.a;
 			int row = pair.b;
@@ -2387,6 +2443,7 @@ public class TabbyCat {
 				String token0 = projectData.getInstrumentData().getOrDefault(dataKey,"");
 				String token1 = token0+c;
 				if (canvasConfig.willAccept(token1,row)) {
+					pushUndo();
 					projectData.getInstrumentData().put(dataKey, token1);
 					playPreviewNote(canvasConfig, token1, row);
 					repaint();
@@ -2415,6 +2472,18 @@ public class TabbyCat {
 			repaint();
 		}
 		
+		void ctrlZ() {
+			if (projectData == null || undoStack.isEmpty()) return;
+			redoStack.push(snapshot());
+			applySnapshot(undoStack.pop());
+		}
+
+		void ctrlR() {
+			if (projectData == null || redoStack.isEmpty()) return;
+			undoStack.push(snapshot());
+			applySnapshot(redoStack.pop());
+		}
+
 		void ctrlL() {
 			if (isInGrid && !isTupletSelectionMode) {
 				toggleSelectionMode();
@@ -2487,9 +2556,9 @@ public class TabbyCat {
 		
 		void ctrlX() {
 			ctrlC();
-			
+			pushUndo();
 			Pair<Integer,Integer> p = getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
-			
+
 			int tMin = Math.min(projectData.getCursorT().get(),lassoT0);
 			int tMax = Math.max(projectData.getCursorT().get(),lassoT0);
 			int rowMin = Math.min(lassoRow0, p.b);
@@ -2524,6 +2593,7 @@ public class TabbyCat {
 					}
 				} else {
 					if (!instrumentClipboard.isEmpty()) {
+						pushUndo();
 						CanvasConfig canvasConfig = projectData.getCanvases().getCanvases().get(p.a);
 						CanvasConfig lassoCanvasConfig = projectData.getCanvases().getCanvases().get(lassoCanvasNumber);
 						if (lassoCanvasConfig.getType() == canvasConfig.getType()) {
@@ -2918,6 +2988,12 @@ public class TabbyCat {
 			case SAVE_AS:
 				mainInterfacePanel.showSaveAs();
 				break;
+			case UNDO:
+				ctrlZ();
+				break;
+			case REDO:
+				ctrlR();
+				break;
 			case SETTINGS:
 				settingsPanel.refresh();
 				cardLayout.show(cardPanel, settingsCardKey);
@@ -3130,6 +3206,28 @@ public class TabbyCat {
 			g.fill(saveAsBounds);
 			iterateHue.run();
 			g.drawString("SAVE AS",(int) saveAsBounds.getMinX(),(int) saveAsBounds.getMaxY());
+			iterateHue.run();
+			boolean canUndo = !undoStack.isEmpty();
+			Rectangle2D undoBounds = topFontMetrics.getStringBounds("UNDO", g);
+			undoBounds = at.createTransformedShape(undoBounds).getBounds2D();
+			menuItemBounds.put(SequencePosition.UNDO, undoBounds);
+			at.translate(undoBounds.getWidth() + 5, 0);
+			g.setPaint(!isInGrid && sequencePosition == SequencePosition.UNDO ? Color.GRAY : Color.BLACK);
+			g.fill(undoBounds);
+			iterateHue.run();
+			g.setPaint(canUndo ? Color.WHITE : new Color(80, 80, 80));
+			g.drawString("UNDO", (int) undoBounds.getMinX(), (int) undoBounds.getMaxY());
+			iterateHue.run();
+			boolean canRedo = !redoStack.isEmpty();
+			Rectangle2D redoBounds = topFontMetrics.getStringBounds("REDO", g);
+			redoBounds = at.createTransformedShape(redoBounds).getBounds2D();
+			menuItemBounds.put(SequencePosition.REDO, redoBounds);
+			at.translate(redoBounds.getWidth() + 5, 0);
+			g.setPaint(!isInGrid && sequencePosition == SequencePosition.REDO ? Color.GRAY : Color.BLACK);
+			g.fill(redoBounds);
+			iterateHue.run();
+			g.setPaint(canRedo ? Color.WHITE : new Color(80, 80, 80));
+			g.drawString("REDO", (int) redoBounds.getMinX(), (int) redoBounds.getMaxY());
 			iterateHue.run();
 			String tempoString = String.format("TEMPO %03d",projectData.getTempo().get());
 			Rectangle2D tempoBounds = topFontMetrics.getStringBounds(tempoString, g);
@@ -4112,6 +4210,7 @@ public class TabbyCat {
 			Pair<Integer,Integer> tsPair = mainInterfacePanel.getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
 			CanvasConfig tsCanvas = projectData.getCanvases().getCanvases().get(tsPair.a);
 			if (tsCanvas instanceof EventCanvasConfig) {
+				pushUndo();
 				projectData.getEventData(tsCanvas.getName()).put(
 						new Point(projectData.getCursorT().get(), tsPair.b),
 						tse);
@@ -4156,6 +4255,7 @@ public class TabbyCat {
 			Pair<Integer,Integer> tempoPair = mainInterfacePanel.getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
 			CanvasConfig tempoCanvas = projectData.getCanvases().getCanvases().get(tempoPair.a);
 			if (tempoCanvas instanceof EventCanvasConfig) {
+				pushUndo();
 				projectData.getEventData(tempoCanvas.getName()).put(
 						new Point(projectData.getCursorT().get(), tempoPair.b),
 						tempoEvent);
@@ -4192,6 +4292,7 @@ public class TabbyCat {
 			Pair<Integer,Integer> shufflePair = mainInterfacePanel.getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
 			CanvasConfig shuffleCanvas = projectData.getCanvases().getCanvases().get(shufflePair.a);
 			if (shuffleCanvas instanceof EventCanvasConfig) {
+				pushUndo();
 				projectData.getEventData(shuffleCanvas.getName()).put(
 					new Point(projectData.getCursorT().get(), shufflePair.b),
 					event);
@@ -4281,6 +4382,7 @@ public class TabbyCat {
 			Pair<Integer,Integer> pcPair = mainInterfacePanel.getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
 			CanvasConfig pcCanvas = projectData.getCanvases().getCanvases().get(pcPair.a);
 			if (pcCanvas instanceof EventCanvasConfig) {
+				pushUndo();
 				projectData.getEventData(pcCanvas.getName()).put(
 					new Point(projectData.getCursorT().get(), pcPair.b), pc);
 			}
@@ -4385,6 +4487,7 @@ public class TabbyCat {
 			Pair<Integer,Integer> tcPair = mainInterfacePanel.getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
 			CanvasConfig tcCanvas = projectData.getCanvases().getCanvases().get(tcPair.a);
 			if (tcCanvas instanceof EventCanvasConfig) {
+				pushUndo();
 				projectData.getEventData(tcCanvas.getName()).put(
 					new Point(projectData.getCursorT().get(), tcPair.b), tc);
 			}
@@ -4468,6 +4571,7 @@ public class TabbyCat {
 					if (prev.getKey() + Math.max(prevA, prevB) > t0) { repaint(); return; }
 				}
 			}
+			pushUndo();
 			TupletEvent te = new TupletEvent(B, t1);
 			projectData.getEventData(canvasName).put(new Point(t0, row), te);
 			updateTupletCache();
