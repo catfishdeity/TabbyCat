@@ -760,9 +760,6 @@ public class TabbyCat {
 	javax.swing.Timer playbackRenderTimer = null;
 
 	void startPlayback() {
-		if (System.currentTimeMillis() - lastStopTimeMs > 30_000) {
-			flushSynths();
-		}
 		if (!playbackDaemonIsStarted.get()) {
 			playbackDaemonIsStarted.set(true);
 			playbackDaemon.submit(() -> playbackDaemonFunction(System.nanoTime()));
@@ -851,6 +848,33 @@ public class TabbyCat {
 		} finally {
 			System.clearProperty("javax.sound.sampled.SourceDataLine");
 		}
+	}
+
+	void warmupSynths() {
+		if (projectData == null) return;
+		List<CanvasConfig> canvases = new java.util.ArrayList<>(projectData.getCanvases().getCanvases());
+		Thread wt = new Thread(() -> {
+			for (CanvasConfig c : canvases) {
+				try {
+					if (c instanceof StringCanvasConfig) {
+						StringCanvasConfig sc = (StringCanvasConfig) c;
+						for (int row = 0; row < sc.getRowCount(); row++) {
+							Synthesizer synth = getSynth(sc, row);
+							MidiChannel ch = synth.getChannels()[0];
+							ch.noteOn(60, 1);
+							ch.noteOff(60);
+						}
+					} else if (c instanceof DrumCanvasConfig) {
+						Synthesizer synth = getSynth((DrumCanvasConfig) c);
+						MidiChannel ch = synth.getChannels()[9];
+						ch.noteOn(36, 1);
+						ch.noteOff(36);
+					}
+				} catch (Exception ignored) {}
+			}
+		}, "synth-warmup");
+		wt.setDaemon(true);
+		wt.start();
 	}
 
 	void resetSynths() {
@@ -1185,7 +1209,15 @@ public class TabbyCat {
 			} catch (Exception ignored) {}
 		}
 		if (projectData == null) {
-			cardLayout.show(cardPanel, newProjectCardKey);
+			List<CanvasConfig> canvases = new java.util.ArrayList<>();
+			canvases.add(new EventCanvasConfig("Events", 3));
+			projectData = new ProjectFileData(new CanvasesConfig(canvases));
+			projectData.setSongName("New Song");
+			projectData.setArtistName("Artist");
+			projectData.setUiScale(displayScale);
+			activeFile.set(null);
+			warmupSynths();
+			cardLayout.show(cardPanel, mainInterfaceCardKey);
 		}
 
 		frame.setVisible(true);
@@ -1276,6 +1308,7 @@ public class TabbyCat {
 			}
 			// EventCanvasConfig has no synth
 		}
+		warmupSynths();
 		return root;
 	}
 
@@ -1542,6 +1575,7 @@ public class TabbyCat {
 				activeFile.set(null);
 				fileHasBeenModified.set(false);
 				updateWindowTitle();
+				warmupSynths();
 				cardLayout.show(cardPanel, mainInterfaceCardKey);
 				updateMeasureLinePositions();
 			}
@@ -1902,8 +1936,8 @@ public class TabbyCat {
 			this.addMouseListener(new MouseAdapter() {
 				@Override
 				public void mousePressed(MouseEvent e) {
-					requestFocusInWindow();
 					if (SwingUtilities.isRightMouseButton(e) && (!instrumentClipboard.isEmpty() || !eventClipboard.isEmpty())) {
+						requestFocusInWindow();
 						ctrlV();
 						return;
 					}
@@ -1913,14 +1947,28 @@ public class TabbyCat {
 					if (scaledY < lastTopBarHeight) {
 						for (Map.Entry<SequencePosition, Rectangle2D> entry : menuItemBounds.entrySet()) {
 							if (entry.getValue().contains(scaledX, scaledY)) {
-								sequencePosition = entry.getKey();
-								isInGrid = false;
-								enter();
+								SequencePosition clicked = entry.getKey();
+								if (clicked == SequencePosition.TEMPO || clicked == SequencePosition.SHUFFLE) {
+									requestFocusInWindow();
+									sequencePosition = clicked;
+									isInGrid = false;
+									enter();
+								} else {
+									SequencePosition savedPos = sequencePosition;
+									boolean savedIsInGrid = isInGrid;
+									sequencePosition = clicked;
+									isInGrid = false;
+									enter();
+									sequencePosition = savedPos;
+									isInGrid = savedIsInGrid;
+									repaint();
+								}
 								return;
 							}
 						}
 						return;
 					}
+					requestFocusInWindow();
 					if (lastScrollbarBounds != null && lastScrollbarBounds.contains(scaledX, scaledY)) {
 						isScrollbarDragging = true;
 						scrollbarDragStartX = scaledX;
@@ -3813,7 +3861,7 @@ public class TabbyCat {
 					globalHints.append(mod).append("]: rpt end   ");
 					globalHints.append("space: play   \u21e7space: play\u21ba   ");
 					globalHints.append(mod).append("S: save   ");
-					globalHints.append(mod).append("I: import");
+					globalHints.append(mod).append("I: edit canvas");
 				}
 				if (!instrumentClipboard.isEmpty() || !eventClipboard.isEmpty()) {
 					globalHints.append("   ").append(mod).append("V: paste");
@@ -6443,47 +6491,69 @@ public class TabbyCat {
 	private static final List<Pair<String,Color>> LINES;
 	static {
 		List<Pair<String,Color>> l = new ArrayList<>();
-		l.add(new Pair<>("MENU BAR  (press , from grid to enter menu)", HEADER_COLOR));
-		l.add(new Pair<>("  Left / Right          Navigate menu items", ENTRY_COLOR));
-		l.add(new Pair<>("  Up / Down             Adjust value (TEMPO or SHUFFLE selected)", ENTRY_COLOR));
-		l.add(new Pair<>("  Enter                 Activate selected item", ENTRY_COLOR));
-		l.add(new Pair<>("  Space                 Play / Pause", ENTRY_COLOR));
-		l.add(new Pair<>("  ,                     Return to grid", ENTRY_COLOR));
+		String mc = IS_MAC ? "Cmd" : "Ctrl";
+		String ma = IS_MAC ? "Cmd" : "Alt";
+		l.add(new Pair<>("GRID — NAVIGATION", HEADER_COLOR));
+		l.add(new Pair<>("  Arrow keys              Move cursor", ENTRY_COLOR));
+		l.add(new Pair<>("  Click                   Move cursor to cell", ENTRY_COLOR));
+		l.add(new Pair<>("  " + mc + " + Click             Move playback to cell", ENTRY_COLOR));
+		l.add(new Pair<>("  Shift \u2190 / \u2192           Jump to prev / next measure", ENTRY_COLOR));
+		l.add(new Pair<>("  Shift \u2191 / \u2193           Jump to first / last row", ENTRY_COLOR));
+		l.add(new Pair<>("  Ctrl Shift \u2190 / \u2192      Jump to start / end of sequence", ENTRY_COLOR));
+		l.add(new Pair<>("  " + ma + " \u2190 / \u2192              Move playback position 1 cell", ENTRY_COLOR));
+		l.add(new Pair<>("  " + ma + " Shift \u2190 / \u2192        Jump playback by measure", ENTRY_COLOR));
+		l.add(new Pair<>("  Home                    Jump to start", ENTRY_COLOR));
+		l.add(new Pair<>("  End                     Jump to last event", ENTRY_COLOR));
+		l.add(new Pair<>("  Page Up / Page Down     Scroll 80% of window", ENTRY_COLOR));
 		l.add(new Pair<>("", ENTRY_COLOR));
-		l.add(new Pair<>("GRID  (press , from menu to enter grid)", HEADER_COLOR));
-		l.add(new Pair<>("  Arrow keys            Move cursor", ENTRY_COLOR));
-		l.add(new Pair<>("  Click                 Move cursor to cell", ENTRY_COLOR));
-		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " Click              Move playback position to cell", ENTRY_COLOR));
-		l.add(new Pair<>("  Shift Left / Right    Jump to prev / next measure", ENTRY_COLOR));
-		l.add(new Pair<>("  Shift Up / Down       Jump to first / last row", ENTRY_COLOR));
-		l.add(new Pair<>("  Ctrl Shift Left/Right Jump to start / end of sequence", ENTRY_COLOR));
-		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Alt") + " Left / Right          Move playback position", ENTRY_COLOR));
-		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Alt") + " Shift Left / Right    Jump playback by measure", ENTRY_COLOR));
-		l.add(new Pair<>("  A-Z, 0-9              Enter note at cursor", ENTRY_COLOR));
-		l.add(new Pair<>("  - (hyphen)            Insert slide (string grids)", ENTRY_COLOR));
-		l.add(new Pair<>("  Backspace             Delete note at cursor", ENTRY_COLOR));
-		l.add(new Pair<>("  Delete                Clear cell (always)", ENTRY_COLOR));
-		l.add(new Pair<>("  Home                  Jump to start", ENTRY_COLOR));
-		l.add(new Pair<>("  End                   Jump to last event", ENTRY_COLOR));
-		l.add(new Pair<>("  Page Up / Page Down   Scroll 80% of window", ENTRY_COLOR));
-		l.add(new Pair<>("  Right-click           Set play start / Paste (if clipboard)", ENTRY_COLOR));
-		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " [                Set / clear repeat start (\u2590|)", ENTRY_COLOR));
-		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " ]                Set / clear repeat end   (|\u258c)", ENTRY_COLOR));
-		l.add(new Pair<>("  Space                 Play / Pause", ENTRY_COLOR));
-		l.add(new Pair<>("  ,                     Exit to menu bar", ENTRY_COLOR));
+		l.add(new Pair<>("GRID — ENTRY", HEADER_COLOR));
+		l.add(new Pair<>("  A-Z, 0-9                Enter note at cursor", ENTRY_COLOR));
+		l.add(new Pair<>("  - (hyphen)              Insert sustain (string canvases)", ENTRY_COLOR));
+		l.add(new Pair<>("  Backspace               Delete note at cursor", ENTRY_COLOR));
+		l.add(new Pair<>("  Delete                  Clear cell", ENTRY_COLOR));
 		l.add(new Pair<>("", ENTRY_COLOR));
-		l.add(new Pair<>("SELECTION  (" + (IS_MAC ? "Cmd" : "Ctrl") + "+L to begin)", HEADER_COLOR));
-		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " L                Start / end selection", ENTRY_COLOR));
-		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " C                Copy selection", ENTRY_COLOR));
-		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " X                Cut selection", ENTRY_COLOR));
-		l.add(new Pair<>("  " + (IS_MAC ? "Cmd" : "Ctrl") + " V                Paste", ENTRY_COLOR));
+		l.add(new Pair<>("GRID — PLAYBACK", HEADER_COLOR));
+		l.add(new Pair<>("  Space                   Play / Pause", ENTRY_COLOR));
+		l.add(new Pair<>("  Shift + Space           Play from start", ENTRY_COLOR));
+		l.add(new Pair<>("  Right-click             Set playback start (or paste if clipboard)", ENTRY_COLOR));
 		l.add(new Pair<>("", ENTRY_COLOR));
-		l.add(new Pair<>("NEW PROJECT SCREEN", HEADER_COLOR));
-		l.add(new Pair<>("  Up / Down             Navigate fields", ENTRY_COLOR));
-		l.add(new Pair<>("  A-Z                   Type song / artist name", ENTRY_COLOR));
-		l.add(new Pair<>("  0-9                   Set canvas quantity", ENTRY_COLOR));
-		l.add(new Pair<>("  Backspace             Delete character", ENTRY_COLOR));
-		l.add(new Pair<>("  Enter                 Confirm (on last row)", ENTRY_COLOR));
+		l.add(new Pair<>("GRID — REPEAT MARKERS", HEADER_COLOR));
+		l.add(new Pair<>("  " + mc + " [                   Set / clear repeat start (\u2590|)", ENTRY_COLOR));
+		l.add(new Pair<>("  " + mc + " ]                   Set / clear repeat end   (|\u258c)", ENTRY_COLOR));
+		l.add(new Pair<>("", ENTRY_COLOR));
+		l.add(new Pair<>("GRID — SELECTION  (" + mc + "+L to begin)", HEADER_COLOR));
+		l.add(new Pair<>("  " + mc + " + L               Start / end lasso selection", ENTRY_COLOR));
+		l.add(new Pair<>("  " + mc + " + C               Copy selection", ENTRY_COLOR));
+		l.add(new Pair<>("  " + mc + " + X               Cut selection", ENTRY_COLOR));
+		l.add(new Pair<>("  " + mc + " + V               Paste", ENTRY_COLOR));
+		l.add(new Pair<>("  Escape                  Cancel selection", ENTRY_COLOR));
+		l.add(new Pair<>("", ENTRY_COLOR));
+		l.add(new Pair<>("GRID — SAVING & CANVAS EDITOR", HEADER_COLOR));
+		l.add(new Pair<>("  " + mc + " + S               Save", ENTRY_COLOR));
+		l.add(new Pair<>("  " + mc + " + Shift + S       Save As", ENTRY_COLOR));
+		l.add(new Pair<>("  " + mc + " + I               Open editor for current canvas", ENTRY_COLOR));
+		l.add(new Pair<>("  , (comma)               Enter menu bar", ENTRY_COLOR));
+		l.add(new Pair<>("", ENTRY_COLOR));
+		l.add(new Pair<>("EVENT CANVAS — SPECIAL KEYS", HEADER_COLOR));
+		l.add(new Pair<>("  T                       Insert time signature", ENTRY_COLOR));
+		l.add(new Pair<>("  S                       Insert tempo change", ENTRY_COLOR));
+		l.add(new Pair<>("  F                       Insert shuffle change", ENTRY_COLOR));
+		l.add(new Pair<>("  N                       Insert note event", ENTRY_COLOR));
+		l.add(new Pair<>("  P                       Insert program change", ENTRY_COLOR));
+		l.add(new Pair<>("  U                       Insert tuning change", ENTRY_COLOR));
+		l.add(new Pair<>("  Q                       Enter tuplet selection mode", ENTRY_COLOR));
+		l.add(new Pair<>("", ENTRY_COLOR));
+		l.add(new Pair<>("TUPLET MODE  (after pressing Q on event canvas)", HEADER_COLOR));
+		l.add(new Pair<>("  \u2190 / \u2192                  Extend / shrink tuplet range", ENTRY_COLOR));
+		l.add(new Pair<>("  Enter                   Confirm and open tuplet editor", ENTRY_COLOR));
+		l.add(new Pair<>("  Escape                  Cancel", ENTRY_COLOR));
+		l.add(new Pair<>("", ENTRY_COLOR));
+		l.add(new Pair<>("MENU BAR  (press , from grid)", HEADER_COLOR));
+		l.add(new Pair<>("  \u2190 / \u2192                  Navigate items", ENTRY_COLOR));
+		l.add(new Pair<>("  \u2191 / \u2193                  Adjust TEMPO or SHUFFLE value", ENTRY_COLOR));
+		l.add(new Pair<>("  Enter                   Activate selected item", ENTRY_COLOR));
+		l.add(new Pair<>("  Space                   Play / Pause", ENTRY_COLOR));
+		l.add(new Pair<>("  , (comma)               Return to grid", ENTRY_COLOR));
 		LINES = Collections.unmodifiableList(l);
 	}
 
