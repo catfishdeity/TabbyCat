@@ -2625,24 +2625,14 @@ public class TabbyCat {
 					if (!instrumentClipboard.isEmpty()) {
 						pushUndo();
 						CanvasConfig canvasConfig = projectData.getCanvases().getCanvases().get(p.a);
-						CanvasConfig lassoCanvasConfig = projectData.getCanvases().getCanvases().get(lassoCanvasNumber);
-						if (lassoCanvasConfig.getType() == canvasConfig.getType()) {
-							int yOffset = instrumentClipboard.keySet().stream().mapToInt(a->a.getRow()).max().getAsInt();
-
-							for (Entry<InstrumentDataKey, NoteCell> entry : instrumentClipboard.entrySet()) {
-
-								int t = entry.getKey().getTime()+projectData.getCursorT().get();
-								int r = entry.getKey().getRow()+p.b-yOffset;
-
-								InstrumentDataKey dk = new InstrumentDataKey(entry.getKey().getInstrumentName(),t,r);
-								System.out.println(dk+" "+entry.getValue().token);
-								if (canvasConfig.willAccept(entry.getValue().token, r)) {
-									projectData.getInstrumentData().put(dk, entry.getValue());
-								}
-
-							};								
+						for (Entry<InstrumentDataKey, NoteCell> entry : instrumentClipboard.entrySet()) {
+							int t = entry.getKey().getTime() + projectData.getCursorT().get();
+							int r = entry.getKey().getRow() + p.b;
+							InstrumentDataKey dk = new InstrumentDataKey(canvasConfig.getName(), t, r);
+							if (canvasConfig.willAccept(entry.getValue().token, r)) {
+								projectData.getInstrumentData().put(dk, entry.getValue());
+							}
 						}
-
 					}
 				}
 			}
@@ -4012,11 +4002,10 @@ public class TabbyCat {
 							CanvasConfig canvasConfig = projectData.getCanvases().getCanvases().get(canvasNumber);
 							CanvasConfig lassoCanvasConfig = projectData.getCanvases().getCanvases().get(lassoCanvasNumber);
 							if (lassoCanvasConfig.getType() == canvasConfig.getType()) {
-								int yOffset = instrumentClipboard.keySet().stream().mapToInt(a->a.getRow()).max().getAsInt();
 								g.setPaint(Color.RED);
 								for (Entry<InstrumentDataKey, NoteCell> entry : instrumentClipboard.entrySet()) {
 									int x0 = (int)((projectData.getCursorT().get()-t0)*cellWidth - subTickOffset + (int)bounds.getMinX());
-									int y0 = (relativeRow+1-yOffset)*rowHeight+(int)bounds.getMinY();
+									int y0 = (relativeRow+1)*rowHeight+(int)bounds.getMinY();
 									int x_ = entry.getKey().getTime()*cellWidth+x0;
 									int y_ = y0+entry.getKey().getRow()*rowHeight;
 									if (y_ > bounds.getMinY()) {

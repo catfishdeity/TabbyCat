@@ -96,6 +96,10 @@ public class DrumCanvasConfig extends CanvasConfig {
 		if (row >= rowTypes.size()) {
 			return false;
 		}
+		try {
+			int midi = Integer.parseInt(token);
+			return midi >= 0 && midi <= 127;
+		} catch (NumberFormatException ignored) {}
 		for (PercToken percToken : tokens) {
 			if (percToken.getToken().toUpperCase().contentEquals(token.toUpperCase())) {
 				if (percToken.getPosition() == rowTypes.get(row)) {
