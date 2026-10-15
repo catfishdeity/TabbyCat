@@ -1770,7 +1770,7 @@ public class TabbyCat {
 			actionMap.put("comma", rToA(this::comma));
 
 			inputMap.put(k_Space,"space");
-			actionMap.put("space", rToA(() -> { if (activeInlinePanel instanceof TextInputPanel) { ((TextInputPanel)activeInlinePanel).appendInline(' '); repaint(); return; } TabbyCat.this.togglePlayStatus(); }));
+			actionMap.put("space", rToA(() -> { if (activeInlinePanel instanceof TextInputPanel) return; TabbyCat.this.togglePlayStatus(); }));
 			inputMap.put(k_ShiftSpace,"shiftspace");
 			actionMap.put("shiftspace", rToA(TabbyCat.this::playFromStart));
 			
@@ -1815,6 +1815,21 @@ public class TabbyCat {
 			actionMap.put("modepan", rToA(()->handleCharInput('p')));
 			inputMap.put(k_ModeOffset, "modeoffset");
 			actionMap.put("modeoffset", rToA(()->handleCharInput('o')));
+
+			// Route all printable KEY_TYPED characters to TextInputPanel when active.
+			// This handles lowercase, uppercase (shift+letter), and arbitrary punctuation
+			// that the InputMap's KEY_PRESSED bindings can't deliver with correct case.
+			java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(e -> {
+				if (activeInlinePanel instanceof TextInputPanel && e.getID() == java.awt.event.KeyEvent.KEY_TYPED) {
+					char c = e.getKeyChar();
+					if (c != java.awt.event.KeyEvent.CHAR_UNDEFINED && !Character.isISOControl(c)) {
+						((TextInputPanel) activeInlinePanel).appendInline(c);
+						repaint();
+						return true;
+					}
+				}
+				return false;
+			});
 
 			this.addMouseListener(new MouseAdapter() {
 				@Override
@@ -2093,11 +2108,7 @@ public class TabbyCat {
 		}
 
 		void hyphen() {
-			if (activeInlinePanel instanceof TextInputPanel) {
-				((TextInputPanel) activeInlinePanel).appendInline('-');
-				repaint();
-				return;
-			}
+			if (activeInlinePanel instanceof TextInputPanel) return;
 			if (isInGrid) {
 				Pair<Integer,Integer> pair = 
 						getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
@@ -2298,11 +2309,7 @@ public class TabbyCat {
 		}
 
 		void handleCharInput(char c) {
-			if (activeInlinePanel instanceof TextInputPanel) {
-				((TextInputPanel) activeInlinePanel).appendInline(c);
-				repaint();
-				return;
-			}
+			if (activeInlinePanel instanceof TextInputPanel) return;
 			if (isTupletSelectionMode) return;
 			if (!fileHasBeenModified.get()) {
 				fileHasBeenModified.set(true);
@@ -2997,11 +3004,7 @@ public class TabbyCat {
 		}
 		
 		void comma() {
-			if (activeInlinePanel instanceof TextInputPanel) {
-				((TextInputPanel) activeInlinePanel).appendInline(',');
-				repaint();
-				return;
-			}
+			if (activeInlinePanel instanceof TextInputPanel) return;
 			isInGrid = !isInGrid;
 			repaint();
 		}
