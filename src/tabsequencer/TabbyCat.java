@@ -219,6 +219,7 @@ public class TabbyCat {
 	final TreeMap<Double, Integer> cachedMeasureCells = new TreeMap<>();    // real-time cell → measure# (rendering)
 	final ArrayList<Double> cachedBeatMarkerCells = new ArrayList<>();      // real-time cell positions (rendering)
 	final TreeMap<Integer, TupletEvent> cachedTuplets = new TreeMap<>();
+	private volatile int cachedAutoRepeatEnd = 1;
 
 	final ExecutorService playbackDaemon = Executors.newSingleThreadExecutor(r -> {
 		Thread t = new Thread(r, "playback-daemon");
@@ -328,8 +329,15 @@ public class TabbyCat {
 		for (InstrumentDataKey k : projectData.getInstrumentData().keySet()) {
 			if (k.getTime() > max) max = k.getTime();
 		}
-		Integer nextMeasureStart = cachedMeasurePositions.higherKey(max);
-		return (nextMeasureStart != null) ? nextMeasureStart : max + 1;
+		Integer next1 = cachedMeasurePositions.higherKey(max);
+		if (next1 == null) return max + 1;
+		Integer next2 = cachedMeasurePositions.higherKey(next1);
+		return (next2 != null) ? next2 : next1;
+	}
+
+	void updateAutoRepeatEnd() {
+		if (projectData == null) { cachedAutoRepeatEnd = 1; return; }
+		cachedAutoRepeatEnd = getLastContentT();
 	}
 
 	void playbackDaemonFunction(long intendedFireTimeNanos) {
@@ -358,10 +366,9 @@ public class TabbyCat {
 			int tBeforeIncrement = projectData.getPlaybackT().getAndUpdate(i -> {
 				int r0 = projectData.getRepeatT0().get();
 				int r1 = projectData.getRepeatT1().get();
-				if (r0 < 0 && r1 < 0) return i + 1;
 				int loopStart = (r0 >= 0) ? r0 : 0;
-				int loopEnd   = (r1 >= 0) ? r1 : getLastContentT();
-				return (loopEnd > 0 && i + 1 == loopEnd) ? loopStart : i + 1;
+				int loopEnd   = (r1 >= 0) ? r1 : cachedAutoRepeatEnd;
+				return (loopEnd > loopStart && i + 1 >= loopEnd) ? loopStart : i + 1;
 			});
 			double deviceScale_ = mainInterfacePanel.getGraphicsConfiguration().getDefaultTransform().getScaleX();
 			int visibleCols = (int)(mainInterfacePanel.getWidth() * deviceScale_ / displayScale / mainInterfacePanel.getCellWidth());
@@ -1053,6 +1060,7 @@ public class TabbyCat {
 		cachedMeasureCells.putAll(mCells);
 		cachedBeatMarkerCells.clear();
 		cachedBeatMarkerCells.addAll(bCells);
+		updateAutoRepeatEnd();
 	}
 
 	private GridSnapshot snapshot() {
@@ -1818,13 +1826,19 @@ public class TabbyCat {
 			// This handles lowercase, uppercase (shift+letter), and arbitrary punctuation
 			// that the InputMap's KEY_PRESSED bindings can't deliver with correct case.
 			java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(e -> {
-				if (activeInlinePanel instanceof TextInputPanel && e.getID() == java.awt.event.KeyEvent.KEY_TYPED) {
+				if (e.getID() == java.awt.event.KeyEvent.KEY_TYPED) {
 					char c = e.getKeyChar();
 					if (c != java.awt.event.KeyEvent.CHAR_UNDEFINED && !Character.isISOControl(c)) {
-						if (swallowNextTyped) { swallowNextTyped = false; return true; }
-						((TextInputPanel) activeInlinePanel).appendInline(c);
-						repaint();
-						return true;
+						if (activeInlinePanel instanceof TextInputPanel) {
+							if (swallowNextTyped) { swallowNextTyped = false; return true; }
+							((TextInputPanel) activeInlinePanel).appendInline(c);
+							repaint();
+							return true;
+						}
+						if (eventCanvasSettingsPanel != null && eventCanvasSettingsPanel.isShowing()) {
+							eventCanvasSettingsPanel.appendToName(c);
+							return true;
+						}
 					}
 				}
 				return false;
@@ -2406,6 +2420,7 @@ public class TabbyCat {
 						int pan = existing != null ? existing.pan : NoteCell.DEFAULT_PAN;
 						int ofs = existing != null ? existing.offsetMs : NoteCell.DEFAULT_OFFSET_MS;
 						projectData.getInstrumentData().put(dataKey, new NoteCell(token1, vel, pan, ofs));
+						updateAutoRepeatEnd();
 						playPreviewNote(canvasConfig, token1, row);
 						repaint();
 					} else if (canvasConfig.willAccept(token1,row)) {
@@ -2414,6 +2429,7 @@ public class TabbyCat {
 						int pan = existing != null ? existing.pan : NoteCell.DEFAULT_PAN;
 						int ofs = existing != null ? existing.offsetMs : NoteCell.DEFAULT_OFFSET_MS;
 						projectData.getInstrumentData().put(dataKey, new NoteCell(token1, vel, pan, ofs));
+						updateAutoRepeatEnd();
 						playPreviewNote(canvasConfig, token1, row);
 						repaint();
 					}
@@ -4109,11 +4125,13 @@ public class TabbyCat {
 					int col1LabelW = Math.max(gridMetrics.stringWidth("[m]"), Math.max(gridMetrics.stringWidth("[e]"), gridMetrics.stringWidth(ofsLabel)));
 					int col1Lx = (int)(colW + (colW - col1LabelW) / 2.0);
 
-					Rectangle2D rM = new Rectangle2D.Double(colW, sy, colW, rowHeight);
-					sb[3] = rM;
-					int lyM = (int)(rM.getMinY() + (rowHeight + ascent - descent) / 2.0);
-					g.setPaint(sc.isMuted() ? new Color(0xBF, 0x57, 0x00) : Color.WHITE);
-					g.drawString("[m]", col1Lx, lyM);
+					if (!(sc instanceof EventCanvasConfig)) {
+						Rectangle2D rM = new Rectangle2D.Double(colW, sy, colW, rowHeight);
+						sb[3] = rM;
+						int lyM = (int)(rM.getMinY() + (rowHeight + ascent - descent) / 2.0);
+						g.setPaint(sc.isMuted() ? new Color(0xBF, 0x57, 0x00) : Color.WHITE);
+						g.drawString("[m]", col1Lx, lyM);
+					}
 
 					Rectangle2D rE = new Rectangle2D.Double(colW, sy + rowHeight, colW, rowHeight);
 					sb[2] = rE;
@@ -6954,6 +6972,7 @@ public class TabbyCat {
 	class EventCanvasSettingsPanel extends JPanel {
 		private EventCanvasConfig targetCanvas = null;
 		private final IntSpinner numRowsSpinner = new IntSpinner("Rows", 3, 1, 16);
+		private final StringBuffer nameBuffer = new StringBuffer();
 
 		public EventCanvasSettingsPanel() {
 			InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
@@ -6962,11 +6981,28 @@ public class TabbyCat {
 			am.put("ecs_esc", rToA(() -> cardLayout.show(cardPanel, mainInterfaceCardKey)));
 			im.put(k_Up,    "ecs_up");   am.put("ecs_up",   rToA(this::up));
 			im.put(k_Down,  "ecs_down"); am.put("ecs_down", rToA(this::down));
+			im.put(k_Backspace, "ecs_bs");
+			am.put("ecs_bs", rToA(() -> { if (nameBuffer.length() > 0) { nameBuffer.deleteCharAt(nameBuffer.length()-1); repaint(); } }));
+			im.put(k_Enter, "ecs_enter");
+			am.put("ecs_enter", rToA(this::commitName));
 		}
 
 		void prepare(EventCanvasConfig canvas) {
 			targetCanvas = canvas;
 			numRowsSpinner.setValue(canvas.getNumRows());
+			nameBuffer.setLength(0);
+			nameBuffer.append(canvas.getName());
+		}
+
+		void appendToName(char c) { nameBuffer.append(c); repaint(); }
+
+		void commitName() {
+			String newName = nameBuffer.toString().trim();
+			if (!newName.isEmpty() && targetCanvas != null) {
+				targetCanvas.setName(newName);
+			}
+			cardLayout.show(cardPanel, mainInterfaceCardKey);
+			mainInterfacePanel.repaint();
 		}
 
 		void up() {
@@ -6994,11 +7030,14 @@ public class TabbyCat {
 			g.fill(getBounds());
 			int lh = textFontMetrics.getMaxAscent();
 			g.setPaint(Color.WHITE);
-			String title = (targetCanvas != null ? targetCanvas.getName() : "Event Canvas") + " Settings";
-			g.drawString(title, 4, lh);
-			numRowsSpinner.paint(g, 4, lh * 3, true);
+			g.drawString((targetCanvas != null ? targetCanvas.getName() : "Event Canvas") + " Settings", 4, lh);
+			g.setPaint(new Color(80, 80, 80));
+			g.drawString("Name:", 4, lh * 3);
+			g.setPaint(new Color(255, 255, 100));
+			g.drawString(nameBuffer.toString() + "|", 4 + textFontMetrics.stringWidth("Name: "), lh * 3);
+			numRowsSpinner.paint(g, 4, lh * 5, true);
 			g.setPaint(new Color(70, 70, 70));
-			g.drawString("UP/DOWN: change rows   ESC: back", 4, lh * 5);
+			g.drawString("ENTER: confirm name   UP/DOWN: change rows   ESC: back", 4, lh * 7);
 		}
 	}
 
