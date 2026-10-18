@@ -205,6 +205,7 @@ public class TabbyCat {
 	private final ArrayDeque<GridSnapshot> redoStack = new ArrayDeque<>();
 	private static final int MAX_UNDO_DEPTH = 100;
 	InlineEntryPanel activeInlinePanel = null;
+	boolean swallowNextTyped = false;
 
 	final AtomicBoolean isPlaying = new AtomicBoolean(false);
 	final AtomicBoolean playbackDaemonIsStarted = new AtomicBoolean(false);
@@ -635,13 +636,9 @@ public class TabbyCat {
 					}
 				}
 				if (fireNote == null) return;
-				if (noteCell.offsetMs == 0) {
-					fireNote.run();
-				} else {
-					long noteFireNanos = tickFireTimeNanos + (long)noteCell.offsetMs * 1_000_000L;
-					long delayNanos = Math.max(0L, noteFireNanos - System.nanoTime());
-					midiDaemon.schedule(fireNote, delayNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
-				}
+				long noteFireNanos = tickFireTimeNanos + (long)noteCell.offsetMs * 1_000_000L;
+				long delayNanos = Math.max(0L, noteFireNanos - System.nanoTime());
+				midiDaemon.schedule(fireNote, delayNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
 			});
 		});
 	}
@@ -1087,6 +1084,7 @@ public class TabbyCat {
 
 	void enterInlineMode(InlineEntryPanel panel) {
 		activeInlinePanel = panel;
+		swallowNextTyped = true;
 		mainInterfacePanel.repaint();
 	}
 	void exitInlineMode() {
@@ -1823,6 +1821,7 @@ public class TabbyCat {
 				if (activeInlinePanel instanceof TextInputPanel && e.getID() == java.awt.event.KeyEvent.KEY_TYPED) {
 					char c = e.getKeyChar();
 					if (c != java.awt.event.KeyEvent.CHAR_UNDEFINED && !Character.isISOControl(c)) {
+						if (swallowNextTyped) { swallowNextTyped = false; return true; }
 						((TextInputPanel) activeInlinePanel).appendInline(c);
 						repaint();
 						return true;
@@ -2567,20 +2566,20 @@ public class TabbyCat {
 										
 					Map<InstrumentDataKey,NoteCell> copied = new HashMap<>();
 					int minT = Integer.MAX_VALUE;
-					int minR = Integer.MAX_VALUE;
+					int maxR = Integer.MIN_VALUE;
 					for (int t = tMin; t <= tMax; t++) {
 						for (int r = rowMin; r <=rowMax; r++) {
 							InstrumentDataKey dk = new InstrumentDataKey(canvas.getName(),t,r);
 							if (projectData.getInstrumentData().containsKey(dk)) {
 								minT = t<minT?t:minT;
-								minR = r<minR?r:minR;
+								maxR = r>maxR?r:maxR;
 								copied.put(dk,projectData.getInstrumentData().get(dk));
 							}
 						}
 					}
 					Map<InstrumentDataKey,NoteCell> normalized= new HashMap<>();
 					for (InstrumentDataKey dk : copied.keySet()) {
-						normalized.put(new InstrumentDataKey(dk.getInstrumentName(),dk.getTime()-minT,dk.getRow()-minR),
+						normalized.put(new InstrumentDataKey(dk.getInstrumentName(),dk.getTime()-minT,dk.getRow()-maxR),
 								copied.get(dk));
 					}
 					instrumentClipboard.putAll(normalized);
@@ -2930,21 +2929,34 @@ public class TabbyCat {
 				}
 				repaint();
 				break;
-			case LEFT:
+			case LEFT: {
+				int visColsL = getMaxVisibleTime() - projectData.getViewT().get();
+				boolean wasVisibleL = projectData.getCursorT().get() >= projectData.getViewT().get()
+						&& projectData.getCursorT().get() < getMaxVisibleTime();
 				projectData.getCursorT().updateAndGet(i -> Math.max(0, i - 1));
-				if (projectData.getCursorT().get() < projectData.getViewT().get() + scrollTimeMargin
+				if (!wasVisibleL) {
+					projectData.getViewT().set(Math.max(0, projectData.getCursorT().get() - visColsL / 2));
+				} else if (projectData.getCursorT().get() < projectData.getViewT().get() + scrollTimeMargin
 						&& projectData.getViewT().get() > 0) {
 					projectData.getViewT().getAndDecrement();
 				}
 				repaint();
 				break;
-			case RIGHT:
+			}
+			case RIGHT: {
+				int maxVisR = getMaxVisibleTime();
+				int visColsR = maxVisR - projectData.getViewT().get();
+				boolean wasVisibleR = projectData.getCursorT().get() >= projectData.getViewT().get()
+						&& projectData.getCursorT().get() < maxVisR;
 				projectData.getCursorT().incrementAndGet();
-				if (projectData.getCursorT().get() >= getMaxVisibleTime()) {
+				if (!wasVisibleR) {
+					projectData.getViewT().set(Math.max(0, projectData.getCursorT().get() - visColsR / 2));
+				} else if (projectData.getCursorT().get() >= getMaxVisibleTime()) {
 					projectData.getViewT().getAndIncrement();
 				}
 				repaint();
 				break;
+			}
 			case UP:
 				if (isSelectionMode.get()) {
 					if (relativeRow > 0) {
@@ -4244,14 +4256,14 @@ public class TabbyCat {
 					g.fill(new Rectangle2D.Double(0, barY, W, barH));
 					Color[] rbColorsOffset = new Color[7];
 					for (int i = 0; i < 7; i++) rbColorsOffset[i] = Color.getHSBColor((i / 6f + 0.5f) % 1f, 0.5f, (float)rainbowBrightness);
-					java.awt.LinearGradientPaint hintRainbow = new java.awt.LinearGradientPaint(trackStripWidth, 0, (float)W, 0, rbFractions, rbColorsOffset);
+					java.awt.LinearGradientPaint hintRainbow = new java.awt.LinearGradientPaint(0, 0, (float)W, 0, rbFractions, rbColorsOffset);
 					g.setPaint(hintRainbow);
-					g.draw(new Line2D.Double(trackStripWidth, barY, W, barY));
-					g.draw(new Line2D.Double(trackStripWidth, barY + 2, W, barY + 2));
+					g.draw(new Line2D.Double(0, barY, W, barY));
+					g.draw(new Line2D.Double(0, barY + 2, W, barY + 2));
 					g.setPaint(new Color(160, 160, 160));
 					for (int hi = 0; hi < hintLines.size(); hi++) {
 						int textY = barY + sepH + topFontMetrics.getMaxAscent() + hi * (lineH + 1);
-						g.drawString(hintLines.get(hi), trackStripWidth + 4, textY);
+						g.drawString(hintLines.get(hi), 4, textY);
 					}
 				}
 			}

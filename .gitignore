@@ -11,3 +11,4 @@ scores/*
 !scores/.gitkeep
 sf2/creative_sf_cd_ii/
 sf2/*.sf2
+project_audio/
