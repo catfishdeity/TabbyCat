@@ -208,7 +208,7 @@ public class TabbyCat {
 	private static final Color C_SB_SHUFFLE         = new Color(255, 200, 50);
 	private static final Color C_SB_PROGRAM_CHANGE  = new Color(120, 255, 120);
 	private static final Color C_SB_TUNING_CHANGE   = new Color(200, 100, 255);
-	private static final Color C_SB_STICKY_NOTE     = new Color(255, 160, 60);
+	private static final Color C_SB_STICKY_NOTE     = new Color(0xFF, 0xFF, 0x00);
 
 	private Color[] buildRbColors() {
 		Color[] c = new Color[7];
@@ -3510,6 +3510,9 @@ public class TabbyCat {
 				int rx = (int)repeatStartBounds.getMinX();
 				g.fillRect(rx, barTop, 4, barH);               // fat bar LEFT (start repeat)
 				g.drawLine(rx + 6, barTop, rx + 6, barBottom); // thin bar right
+				// dots on right (traditional begin-repeat colon)
+				g.fillOval(rx + 8, barTop + barH / 4 - 1, 2, 2);
+				g.fillOval(rx + 8, barTop + 3 * barH / 4 - 1, 2, 2);
 			}
 			at.translate(repW + 5, 0);
 			// Repeat end: thin bar (left) + fat bar (right) — musical "end repeat" symbol
@@ -3525,8 +3528,11 @@ public class TabbyCat {
 				int barBottom = lastTopBarHeight;
 				int barH      = barBottom - barTop;
 				int rx2 = (int)repeatEndBounds.getMinX();
-				g.drawLine(rx2, barTop, rx2, barBottom);               // thin bar left
-				g.fillRect(rx2 + 2, barTop, 4, barH);                  // fat bar RIGHT (end repeat)
+				// dots on left (traditional end-repeat colon)
+				g.fillOval(rx2, barTop + barH / 4 - 1, 2, 2);
+				g.fillOval(rx2, barTop + 3 * barH / 4 - 1, 2, 2);
+				g.drawLine(rx2 + 3, barTop, rx2 + 3, barBottom);       // thin bar (shifted right)
+				g.fillRect(rx2 + 5, barTop, 4, barH);                  // fat bar RIGHT (end repeat)
 			}
 
 			at.setToIdentity();
@@ -3623,6 +3629,22 @@ public class TabbyCat {
 						int pt0X = (int)((double) pt0 / maxEventT * W);
 						g.setPaint(olivePaintScrollbar);
 						g.fillRect(pt0X, sbY, 4, sbH);
+					}
+					// repeat markers — amber, same color as grid/top-bar repeat bars
+					g.setPaint(new Color(0xBF, 0x57, 0x00));
+					int dot25Y = sbY + 1; // center at sbY + 2.25 → top-left of 2x2
+					int dot75Y = sbY + 6; // center at sbY + 6.75 → top-left of 2x2
+					if (projectData.getRepeatT0().get() >= 0) {
+						int r0X = (int)((double) projectData.getRepeatT0().get() / maxEventT * W);
+						g.fillRect(r0X, sbY, 2, sbH);          // bar
+						g.fillOval(r0X + 3, dot25Y, 2, 2);     // dot upper-right
+						g.fillOval(r0X + 3, dot75Y, 2, 2);     // dot lower-right
+					}
+					if (projectData.getRepeatT1().get() >= 0) {
+						int r1X = (int)((double) projectData.getRepeatT1().get() / maxEventT * W);
+						g.fillOval(r1X - 4, dot25Y, 2, 2);     // dot upper-left
+						g.fillOval(r1X - 4, dot75Y, 2, 2);     // dot lower-left
+						g.fillRect(r1X, sbY, 2, sbH);          // bar
 					}
 				}
 			}
@@ -3852,25 +3874,6 @@ public class TabbyCat {
 					g.fill(new Rectangle2D.Double(pt0X, bounds.getMinY(), cellWidth, bounds.getHeight()));
 				}
 
-				double repeatBarY0 = bounds.getMinY() + 2;
-				double repeatBarY1 = bounds.getMaxY() - 2;
-				// repeatT0: start repeat — thin|thick  |▌  (fat on right)
-				if (projectData.getRepeatT0().get() >= 0) {
-					int r0X = (int)((projectData.getRepeatT0().get()-t0)*cellWidth + trackStripWidth - subTickOffset);
-					g.setStroke(STROKE_1);
-					g.draw(new Line2D.Double(r0X,   repeatBarY0, r0X,   repeatBarY1));
-					g.setStroke(STROKE_3);
-					g.draw(new Line2D.Double(r0X+4, repeatBarY0, r0X+4, repeatBarY1));
-				}
-				// repeatT1: end repeat — thick|thin  ▐|  (fat on left)
-				if (projectData.getRepeatT1().get() >= 0) {
-					int r1X = (int)((projectData.getRepeatT1().get()-t0)*cellWidth + trackStripWidth - subTickOffset);
-					g.setStroke(STROKE_3);
-					g.draw(new Line2D.Double(r1X-4, repeatBarY0, r1X-4, repeatBarY1));
-					g.setStroke(STROKE_1);
-					g.draw(new Line2D.Double(r1X,   repeatBarY0, r1X,   repeatBarY1));
-				}
-				g.setStroke(STROKE_1);
 
 				x = (int)(trackStripWidth - subTickOffset);
 				g.setPaint(Color.white);
@@ -4091,6 +4094,37 @@ public class TabbyCat {
 					g.draw(new Line2D.Double(mx, bounds.getMinY(), mx, bounds.getMaxY()));
 					g.setPaint(Color.white);
 					g.drawString("" + me.getValue(), (int) mx, (int)(bounds.getMaxY() + rowHeight));
+				}
+				// Repeat bars — drawn on top of grid and measure lines
+				{
+					g.setPaint(new Color(0xBF, 0x57, 0x00));
+					double rY0 = bounds.getMinY() + 2;
+					double rY1 = bounds.getMaxY() - 2;
+					double rH  = rY1 - rY0;
+					int dotD = 3;
+					double dot25Y = rY0 + rH * 0.25 - dotD / 2.0;
+					double dot75Y = rY0 + rH * 0.75 - dotD / 2.0;
+					// begin repeat: thin bar | thick bar : (dots on right)
+					if (projectData.getRepeatT0().get() >= 0) {
+						int r0X = (int)((projectData.getRepeatT0().get()-t0)*cellWidth + trackStripWidth - subTickOffset);
+						g.setStroke(STROKE_1);
+						g.draw(new Line2D.Double(r0X,   rY0, r0X,   rY1));
+						g.setStroke(STROKE_3);
+						g.draw(new Line2D.Double(r0X+4, rY0, r0X+4, rY1));
+						g.fillOval(r0X + 8, (int) dot25Y, dotD, dotD);
+						g.fillOval(r0X + 8, (int) dot75Y, dotD, dotD);
+					}
+					// end repeat: : thick bar | thin bar (dots on left)
+					if (projectData.getRepeatT1().get() >= 0) {
+						int r1X = (int)((projectData.getRepeatT1().get()-t0)*cellWidth + trackStripWidth - subTickOffset);
+						g.fillOval(r1X - 11, (int) dot25Y, dotD, dotD);
+						g.fillOval(r1X - 11, (int) dot75Y, dotD, dotD);
+						g.setStroke(STROKE_3);
+						g.draw(new Line2D.Double(r1X-4, rY0, r1X-4, rY1));
+						g.setStroke(STROKE_1);
+						g.draw(new Line2D.Double(r1X,   rY0, r1X,   rY1));
+					}
+					g.setStroke(STROKE_1);
 				}
 
 				if (!isSelectionMode.get() && lassoCanvasNumber >= 0) {
