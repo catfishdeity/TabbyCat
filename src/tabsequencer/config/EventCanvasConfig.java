@@ -21,6 +21,7 @@ public class EventCanvasConfig extends CanvasConfig {
 	@Override
 	public Element toXMLElement(Document doc, String tagName) {
 		Element e = doc.createElement(tagName);
+		e.setAttribute("id", getId());
 		e.setAttribute("name", name);
 		e.setAttribute("numRows", numRows + "");
 		return e;
@@ -31,6 +32,9 @@ public class EventCanvasConfig extends CanvasConfig {
 		String name = e.getAttribute("name");
 		String numRowsAttr = e.getAttribute("numRows");
 		int numRows = numRowsAttr.isEmpty() ? 3 : Integer.parseInt(numRowsAttr);
-		return new EventCanvasConfig(name, numRows);
+		EventCanvasConfig result = new EventCanvasConfig(name, numRows);
+		String idAttr = e.getAttribute("id");
+		result.setId(idAttr.isEmpty() ? name : idAttr);
+		return result;
 	}
 }

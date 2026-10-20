@@ -3,17 +3,22 @@ package tabsequencer;
 import java.util.Objects;
 
 public class InstrumentDataKey {
-	private final String instrumentName;
+	private final String instrumentId;
 	private final int time,row;
-	
-	public InstrumentDataKey(String instrumentName, int time, int row) {
-		this.instrumentName = instrumentName;
+
+	public InstrumentDataKey(String instrumentId, int time, int row) {
+		this.instrumentId = instrumentId;
 		this.time = time;
 		this.row = row;
 	}
 
+	public String getInstrumentId() {
+		return instrumentId;
+	}
+
+	/** @deprecated Use {@link #getInstrumentId()} */
 	public String getInstrumentName() {
-		return instrumentName;
+		return instrumentId;
 	}
 
 	public int getTime() {
@@ -26,7 +31,7 @@ public class InstrumentDataKey {
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(instrumentName, row, time);
+		return Objects.hash(instrumentId, row, time);
 	}
 
 	@Override
@@ -38,14 +43,11 @@ public class InstrumentDataKey {
 		if (getClass() != obj.getClass())
 			return false;
 		InstrumentDataKey other = (InstrumentDataKey) obj;
-		return Objects.equals(instrumentName, other.instrumentName) && row == other.row && time == other.time;
+		return Objects.equals(instrumentId, other.instrumentId) && row == other.row && time == other.time;
 	}
 
 	@Override
 	public String toString() {
-		return "InstrumentDataKey [instrumentName=" + instrumentName + ", time=" + time + ", row=" + row + "]";
+		return "InstrumentDataKey [instrumentId=" + instrumentId + ", time=" + time + ", row=" + row + "]";
 	}
-
-
-	
 }

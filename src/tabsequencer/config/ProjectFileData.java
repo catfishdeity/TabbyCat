@@ -66,6 +66,12 @@ public class ProjectFileData {
 				.findFirst();
 	}
 
+	public Optional<CanvasConfig> getCanvasConfigById(String id) {
+		return canvases.getCanvases().stream()
+				.filter(a -> a.getId().equals(id))
+				.findFirst();
+	}
+
 	public AtomicInteger getInitialTempo() {
 		return initialTempo;
 	}
@@ -161,14 +167,16 @@ public class ProjectFileData {
 		// Canvases (event data for eventCanvas elements is embedded inside)
 		e.appendChild(canvases.toXMLElement(doc, "canvases", eventDataByCanvas));
 
-		// Instrument tab data
+		// Instrument tab data — keyed by canvas id; also write name for human readability
 		Map<String, List<Entry<InstrumentDataKey, NoteCell>>> grouped =
-				instrumentData.entrySet().stream().collect(Collectors.groupingBy(a -> a.getKey().getInstrumentName()));
-		grouped.keySet().forEach(name -> {
+				instrumentData.entrySet().stream().collect(Collectors.groupingBy(a -> a.getKey().getInstrumentId()));
+		grouped.keySet().forEach(id -> {
 			Element instrumentDataElement = doc.createElement("instrumentTabData");
 			e.appendChild(instrumentDataElement);
-			instrumentDataElement.setAttribute("name", name);
-			grouped.get(name).forEach(entry -> {
+			instrumentDataElement.setAttribute("id", id);
+			// also write name for readability (looked up from canvas; falls back to id if canvas not found)
+			instrumentDataElement.setAttribute("name", getCanvasConfigById(id).map(CanvasConfig::getName).orElse(id));
+			grouped.get(id).forEach(entry -> {
 				Element eventElement = doc.createElement("event");
 				instrumentDataElement.appendChild(eventElement);
 				eventElement.setAttribute("t", entry.getKey().getTime() + "");
@@ -207,7 +215,7 @@ public class ProjectFileData {
 				canvases = new CanvasesConfig(list);
 
 				// Load events from the legacy eventTabData
-				Map<Point, ControlEvent> evData = eventDataByCanvas.computeIfAbsent("Events", k -> new HashMap<>());
+				Map<Point, ControlEvent> evData = eventDataByCanvas.computeIfAbsent(legacyCanvas.getId(), k -> new HashMap<>());
 				NodeList eventNodes = eventTabDataNode.getElementsByTagName("event");
 				for (int i = 0; i < eventNodes.getLength(); i++) {
 					Element eventNode = (Element) eventNodes.item(i);
@@ -242,11 +250,12 @@ public class ProjectFileData {
 		ProjectFileData projectData = new ProjectFileData(canvases);
 		projectData.eventDataByCanvas.putAll(eventDataByCanvas);
 
-		// Instrument tab data
+		// Instrument tab data — prefer id attribute; fall back to name for old files
 		NodeList instrumentTabDataNodes = e.getElementsByTagName("instrumentTabData");
 		for (int i = 0; i < instrumentTabDataNodes.getLength(); i++) {
 			Element instrumentTabDataNode = (Element) instrumentTabDataNodes.item(i);
-			String name = instrumentTabDataNode.getAttribute("name");
+			String idAttr = instrumentTabDataNode.getAttribute("id");
+			String name = idAttr.isEmpty() ? instrumentTabDataNode.getAttribute("name") : idAttr;
 			NodeList instrumentEventNodes = instrumentTabDataNode.getElementsByTagName("event");
 			for (int j = 0; j < instrumentEventNodes.getLength(); j++) {
 				Element instrumentEventNode = (Element) instrumentEventNodes.item(j);

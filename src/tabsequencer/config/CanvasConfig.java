@@ -13,7 +13,12 @@ public abstract class CanvasConfig {
 	protected File soundfontFile;
 	protected int bank, program;
 	protected String name;
-	
+	// Unique runtime+serialization key — decoupled from display name to allow duplicate names
+	protected String id = java.util.UUID.randomUUID().toString();
+
+	public final String getId() { return id; }
+	final void setId(String id) { this.id = id; }
+
 	protected CanvasConfig(String name, File soundfontFile, int bank, int program) {
 		this.name = name;
 		this.soundfontFile = soundfontFile;

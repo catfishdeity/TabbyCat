@@ -49,14 +49,14 @@ public class CanvasesConfig {
 				EventCanvasConfig ecc = EventCanvasConfig.fromXMLElement(kid);
 				canvases.add(ecc);
 				if (eventDataByCanvas != null) {
-					loadEventChildren(kid, ecc.getName(), eventDataByCanvas);
+					loadEventChildren(kid, ecc.getId(), eventDataByCanvas);
 				}
 			}
 		}
 		return new CanvasesConfig(canvases);
 	}
 
-	private static void loadEventChildren(Element eventCanvasEl, String canvasName,
+	private static void loadEventChildren(Element eventCanvasEl, String canvasId,
 			Map<String, Map<Point, ControlEvent>> eventDataByCanvas) {
 		NodeList eventNodes = eventCanvasEl.getElementsByTagName("event");
 		for (int i = 0; i < eventNodes.getLength(); i++) {
@@ -64,7 +64,7 @@ public class CanvasesConfig {
 			int t = Integer.parseInt(eventNode.getAttribute("t"));
 			int row = Integer.parseInt(eventNode.getAttribute("r"));
 			Point p = new Point(t, row);
-			Map<Point, ControlEvent> evData = eventDataByCanvas.computeIfAbsent(canvasName, k -> new java.util.HashMap<>());
+			Map<Point, ControlEvent> evData = eventDataByCanvas.computeIfAbsent(canvasId, k -> new java.util.HashMap<>());
 
 			NodeList timeSignatureNodes = eventNode.getElementsByTagName("timeSignature");
 			for (int k = 0; k < timeSignatureNodes.getLength(); k++)
@@ -123,7 +123,7 @@ public class CanvasesConfig {
 			case EVENT:
 				Element evEl = canvas.toXMLElement(doc, "eventCanvas");
 				if (eventDataByCanvas != null) {
-					Map<Point, ControlEvent> evData = eventDataByCanvas.get(canvas.getName());
+					Map<Point, ControlEvent> evData = eventDataByCanvas.get(canvas.getId());
 					if (evData != null) {
 						evData.entrySet().forEach(entry -> {
 							Element eventE = doc.createElement("event");

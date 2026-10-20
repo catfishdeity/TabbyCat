@@ -54,6 +54,8 @@ public class StringCanvasConfig extends CanvasConfig {
 		StringCanvasConfig result = new StringCanvasConfig(edoSteps,name,maxFrets,maxHarmonic,ed2,soundfontFile,bank,program,fretStepSkip,baseFrequency,additionalPitchMap);
 		String mutedAttr = e.getAttribute("muted");
 		if (!mutedAttr.isEmpty()) result.muted = Boolean.parseBoolean(mutedAttr);
+		String idAttr = e.getAttribute("id");
+		result.setId(idAttr.isEmpty() ? name : idAttr);
 		return result;
 	}
 	
@@ -144,6 +146,7 @@ public class StringCanvasConfig extends CanvasConfig {
 		getSoundfontFile().ifPresent(f -> {
 			e.setAttribute("soundfontFile", f.toString());
 		});
+		e.setAttribute("id", getId());
 		e.setAttribute("name", getName());
 		e.setAttribute("bank", getBank()+"");
 		e.setAttribute("program", getProgram()+"");

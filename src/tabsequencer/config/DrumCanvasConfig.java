@@ -57,6 +57,8 @@ public class DrumCanvasConfig extends CanvasConfig {
 		DrumCanvasConfig result = new DrumCanvasConfig(name,soundfontFile,bank,program,rowTypes,tokens);
 		String mutedAttr = e.getAttribute("muted");
 		if (!mutedAttr.isEmpty()) result.muted = Boolean.parseBoolean(mutedAttr);
+		String idAttr = e.getAttribute("id");
+		result.setId(idAttr.isEmpty() ? name : idAttr); // backward compat: old files use name as id
 		return result;
 	}
 
@@ -66,6 +68,7 @@ public class DrumCanvasConfig extends CanvasConfig {
 		getSoundfontFile().ifPresent(f -> {
 			e.setAttribute("soundfontFile", f.toString());
 		});
+		e.setAttribute("id", getId());
 		e.setAttribute("name", getName());
 		e.setAttribute("bank", getBank()+"");
 		e.setAttribute("program", getProgram()+"");
