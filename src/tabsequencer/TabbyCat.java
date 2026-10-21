@@ -2491,11 +2491,10 @@ public class TabbyCat {
 						}
 						modePartialBuffer = null;
 						modePartialKey = null;
-						// Auto-advance cursor
-						projectData.getCursorT().incrementAndGet();
-						if (projectData.getCursorT().get() >= getMaxVisibleTime()) {
-							projectData.getViewT().getAndIncrement();
-						}
+						if (!fileHasBeenModified.get()) { fileHasBeenModified.set(true); updateWindowTitle(); }
+						// Auto-advance to next valued cell (wraps to first if none after current)
+						Pair<Integer,Integer> advPair = getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
+						moveCursorToT(nextValuedT(projectData.getCursorT().get(), advPair.b, canvasConfig.getId(), true));
 					} else {
 						// First hex char — store partial
 						modePartialBuffer = String.valueOf(cu);
@@ -2908,6 +2907,7 @@ public class TabbyCat {
 				int vel = Math.max(0, Math.min(127, curCell.velocity + delta));
 				pushUndo();
 				projectData.getInstrumentData().put(dataKey, curCell.withVelocity(vel));
+				if (!fileHasBeenModified.get()) { fileHasBeenModified.set(true); updateWindowTitle(); }
 				repaint();
 				return;
 			}
@@ -2915,12 +2915,14 @@ public class TabbyCat {
 				int pan = Math.max(0, Math.min(127, curCell.pan + delta));
 				pushUndo();
 				projectData.getInstrumentData().put(dataKey, curCell.withPan(pan));
+				if (!fileHasBeenModified.get()) { fileHasBeenModified.set(true); updateWindowTitle(); }
 				repaint();
 				return;
 			}
 			if (mode == CanvasEditMode.OFFSET) {
 				pushUndo();
 				projectData.getInstrumentData().put(dataKey, curCell.withOffsetMs(curCell.offsetMs + delta));
+				if (!fileHasBeenModified.get()) { fileHasBeenModified.set(true); updateWindowTitle(); }
 				repaint();
 				return;
 			}
@@ -3017,6 +3019,50 @@ public class TabbyCat {
 			repaint();
 		}
 		
+		int nextValuedT(int fromT, int relRow, String canvasId, boolean forward) {
+			int[] ts = projectData.getInstrumentData().keySet().stream()
+				.filter(k -> k.getInstrumentId().equals(canvasId) && k.getRow() == relRow)
+				.mapToInt(InstrumentDataKey::getTime)
+				.sorted()
+				.toArray();
+			if (ts.length == 0) return fromT;
+			if (forward) {
+				for (int t : ts) if (t > fromT) return t;
+				return ts[0]; // wrap to first
+			} else {
+				for (int i = ts.length - 1; i >= 0; i--) if (ts[i] < fromT) return ts[i];
+				return ts[ts.length - 1]; // wrap to last
+			}
+		}
+
+		int nearestValuedT(int fromT, int relRow, String canvasId) {
+			int best = -1;
+			for (InstrumentDataKey k : projectData.getInstrumentData().keySet()) {
+				if (!k.getInstrumentId().equals(canvasId) || k.getRow() != relRow) continue;
+				int t = k.getTime();
+				if (best == -1
+						|| Math.abs(t - fromT) < Math.abs(best - fromT)
+						|| (Math.abs(t - fromT) == Math.abs(best - fromT) && t > best)) {
+					best = t;
+				}
+			}
+			return best; // -1 if row is empty
+		}
+
+		void moveCursorToT(int t) {
+			projectData.getCursorT().set(t);
+			int viewT  = projectData.getViewT().get();
+			int maxVis = getMaxVisibleTime();
+			int visW   = maxVis - viewT;
+			if (t < viewT || t >= maxVis) {
+				projectData.getViewT().set(Math.max(0, t - visW / 2));
+			} else if (t >= maxVis - scrollTimeMargin) {
+				projectData.getViewT().getAndIncrement();
+			} else if (t < viewT + scrollTimeMargin && viewT > 0) {
+				projectData.getViewT().getAndDecrement();
+			}
+		}
+
 		int getMaxRow() {
 			int maxRow = projectData.getCanvases().getCanvases().stream().mapToInt(a->a.getRowCount()).sum();
 			return maxRow;
@@ -3034,12 +3080,31 @@ public class TabbyCat {
 						projectData.getSelectedRow().incrementAndGet();
 					}
 				} else {
-									
 					projectData.getSelectedRow().updateAndGet(i->(i+1)%maxRow);
+				}
+				{
+					Pair<Integer,Integer> newP = getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
+					CanvasConfig newCanvas = projectData.getCanvases().getCanvases().get(newP.a);
+					CanvasEditMode newMode = newCanvas.getEditMode();
+					if (!(newCanvas instanceof EventCanvasConfig) &&
+							(newMode == CanvasEditMode.VELOCITY || newMode == CanvasEditMode.PAN
+							|| newMode == CanvasEditMode.OFFSET)) {
+						int nearest = nearestValuedT(projectData.getCursorT().get(), newP.b, newCanvas.getId());
+						if (nearest != -1) moveCursorToT(nearest);
+					}
 				}
 				repaint();
 				break;
 			case LEFT: {
+				CanvasConfig leftCanvas = projectData.getCanvases().getCanvases().get(canvasNum);
+				CanvasEditMode leftMode = leftCanvas.getEditMode();
+				if (!(leftCanvas instanceof EventCanvasConfig) &&
+						(leftMode == CanvasEditMode.VELOCITY || leftMode == CanvasEditMode.PAN
+						|| leftMode == CanvasEditMode.OFFSET)) {
+					moveCursorToT(nextValuedT(projectData.getCursorT().get(), relativeRow, leftCanvas.getId(), false));
+					repaint();
+					break;
+				}
 				int visColsL = getMaxVisibleTime() - projectData.getViewT().get();
 				boolean wasVisibleL = projectData.getCursorT().get() >= projectData.getViewT().get()
 						&& projectData.getCursorT().get() < getMaxVisibleTime();
@@ -3054,6 +3119,15 @@ public class TabbyCat {
 				break;
 			}
 			case RIGHT: {
+				CanvasConfig rightCanvas = projectData.getCanvases().getCanvases().get(canvasNum);
+				CanvasEditMode rightMode = rightCanvas.getEditMode();
+				if (!(rightCanvas instanceof EventCanvasConfig) &&
+						(rightMode == CanvasEditMode.VELOCITY || rightMode == CanvasEditMode.PAN
+						|| rightMode == CanvasEditMode.OFFSET)) {
+					moveCursorToT(nextValuedT(projectData.getCursorT().get(), relativeRow, rightCanvas.getId(), true));
+					repaint();
+					break;
+				}
 				int maxVisR = getMaxVisibleTime();
 				int visColsR = maxVisR - projectData.getViewT().get();
 				boolean wasVisibleR = projectData.getCursorT().get() >= projectData.getViewT().get()
@@ -3074,9 +3148,20 @@ public class TabbyCat {
 					}
 				} else {
 					if (projectData.getSelectedRow().get() == 0) {
-						projectData.getSelectedRow().set(maxRow-1);					
+						projectData.getSelectedRow().set(maxRow-1);
 					} else {
 						projectData.getSelectedRow().getAndDecrement();
+					}
+				}
+				{
+					Pair<Integer,Integer> newP = getCanvasNumberAndRelativeRow(projectData.getSelectedRow().get());
+					CanvasConfig newCanvas = projectData.getCanvases().getCanvases().get(newP.a);
+					CanvasEditMode newMode = newCanvas.getEditMode();
+					if (!(newCanvas instanceof EventCanvasConfig) &&
+							(newMode == CanvasEditMode.VELOCITY || newMode == CanvasEditMode.PAN
+							|| newMode == CanvasEditMode.OFFSET)) {
+						int nearest = nearestValuedT(projectData.getCursorT().get(), newP.b, newCanvas.getId());
+						if (nearest != -1) moveCursorToT(nearest);
 					}
 				}
 				repaint();

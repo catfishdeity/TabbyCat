@@ -32,9 +32,10 @@
 	</xsd:complexType>
 	
 	<xsd:complexType name="TabData">
-		<xsd:sequence> 
+		<xsd:sequence>
 			<xsd:element name="event" type="InputEvent" minOccurs="0" maxOccurs="unbounded"/>
 		</xsd:sequence>
+		<xsd:attribute name="id" type="xsd:string"/>
 		<xsd:attribute name="name" type="xsd:string"/>
 	</xsd:complexType>
 	
@@ -47,7 +48,10 @@
 	<xsd:complexType name="InputEvent">
 		<xsd:attribute name="v" type="xsd:string" use="required"/>
 		<xsd:attribute name="r" type="xsd:nonNegativeInteger" use="required"/>
-		<xsd:attribute name="t" type="xsd:nonNegativeInteger" use="required"/>		
+		<xsd:attribute name="t" type="xsd:nonNegativeInteger" use="required"/>
+		<xsd:attribute name="vel" type="xsd:string"/>
+		<xsd:attribute name="pan" type="xsd:string"/>
+		<xsd:attribute name="ofs" type="xsd:string"/>
 	</xsd:complexType>
 	
 	

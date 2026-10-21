@@ -14,6 +14,7 @@
 		<xsd:sequence>
 			<xsd:element name="event" type="ControlEvent" minOccurs="0" maxOccurs="unbounded"/>
 		</xsd:sequence>
+		<xsd:attribute name="id" type="xsd:string"/>
 		<xsd:attribute name="name" type="NonEmptyString" use="required"/>
 		<xsd:attribute name="numRows" type="xsd:positiveInteger" default="3"/>
 		<xsd:attribute name="muted" type="xsd:boolean" default="false"/>
@@ -66,9 +67,10 @@
 	</xsd:complexType>
 	<xsd:complexType name="PercussionCanvas">
 		<xsd:sequence>
-			<xsd:element name="row" type="PercRow" minOccurs="1" maxOccurs="unbounded"/>
-			<xsd:element name="token" type="PercRowToken" minOccurs="1" maxOccurs="unbounded"/>
+			<xsd:element name="row" type="PercRow" minOccurs="0" maxOccurs="unbounded"/>
+			<xsd:element name="token" type="PercRowToken" minOccurs="0" maxOccurs="unbounded"/>
 		</xsd:sequence>
+		<xsd:attribute name="id" type="xsd:string"/>
 		<xsd:attribute name="name" type="NonEmptyString" default="unnamed"/>
 		<xsd:attribute name="soundfontFile" type="xsd:string" use="optional"/>
 		<xsd:attribute name="bank" type="xsd:nonNegativeInteger" default="0"/>
@@ -98,6 +100,7 @@
 			<xsd:element name="string" type="PitchedString" minOccurs="1" maxOccurs="unbounded"/>
 			<xsd:element name="additionalPitch" type="AdditionalPitch" minOccurs="0" maxOccurs="unbounded"/>
 		</xsd:sequence>
+		<xsd:attribute name="id" type="xsd:string"/>
 		<xsd:attribute name="name" type="NonEmptyString" default="unnamed"/>
 		<xsd:attribute name="maxFrets" type="xsd:positiveInteger" default="24"/>
 		<xsd:attribute name="maxHarmonic" type="xsd:positiveInteger" default="16"/>
