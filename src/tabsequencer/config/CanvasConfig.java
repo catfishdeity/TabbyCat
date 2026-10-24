@@ -18,6 +18,7 @@ public abstract class CanvasConfig {
 
 	public final String getId() { return id; }
 	final void setId(String id) { this.id = id; }
+	public void regenerateId() { this.id = java.util.UUID.randomUUID().toString(); }
 
 	protected CanvasConfig(String name, File soundfontFile, int bank, int program) {
 		this.name = name;
