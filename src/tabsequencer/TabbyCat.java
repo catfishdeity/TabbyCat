@@ -962,10 +962,35 @@ public class TabbyCat {
 		}
 	}
 
+	void startSleepWakeMonitor() {
+		Thread t = new Thread(() -> {
+			long lastMillis = System.currentTimeMillis();
+			while (true) {
+				try { Thread.sleep(2000); } catch (InterruptedException e) { return; }
+				long now = System.currentTimeMillis();
+				if (now - lastMillis > 5000) {
+					// Wall clock jumped more than expected — system woke from sleep.
+					// CoreAudio has reinitialized; flush synthesizers to reconnect,
+					// then re-warm so the first post-wake note isn't cold-start delayed.
+					flushSynths();
+					warmupSynths();
+					playbackRestartNanos.set(System.nanoTime());
+				}
+				lastMillis = now;
+			}
+		}, "sleep-wake-monitor");
+		t.setDaemon(true);
+		t.start();
+	}
+
 	void warmupSynths() {
 		if (projectData == null) return;
 		List<CanvasConfig> canvases = new java.util.ArrayList<>(projectData.getCanvases().getCanvases());
 		Thread wt = new Thread(() -> {
+			// Fire all warmup notes first so every pipeline starts at the same time,
+			// then sleep to let them actually render audio before sending noteOff.
+			// Immediate noteOn+noteOff gave Gervill no time to produce samples.
+			List<Runnable> noteOffs = new java.util.ArrayList<>();
 			for (CanvasConfig c : canvases) {
 				try {
 					if (c instanceof StringCanvasConfig) {
@@ -974,16 +999,18 @@ public class TabbyCat {
 							Synthesizer synth = getSynth(sc, row);
 							MidiChannel ch = synth.getChannels()[0];
 							ch.noteOn(60, 1);
-							ch.noteOff(60);
+							noteOffs.add(() -> ch.noteOff(60));
 						}
 					} else if (c instanceof DrumCanvasConfig) {
 						Synthesizer synth = getSynth((DrumCanvasConfig) c);
 						MidiChannel ch = synth.getChannels()[9];
 						ch.noteOn(36, 1);
-						ch.noteOff(36);
+						noteOffs.add(() -> ch.noteOff(36));
 					}
 				} catch (Exception ignored) {}
 			}
+			try { Thread.sleep(100); } catch (InterruptedException ignored) {}
+			noteOffs.forEach(Runnable::run);
 		}, "synth-warmup");
 		wt.setDaemon(true);
 		wt.start();
@@ -1378,6 +1405,7 @@ public class TabbyCat {
 			cardLayout.show(cardPanel, mainInterfaceCardKey);
 		}
 
+		startSleepWakeMonitor();
 		frame.setVisible(true);
 		try {
 			byte[] iconBytes = java.util.Base64.getDecoder().decode(
@@ -4416,12 +4444,13 @@ public class TabbyCat {
 					hintLines.add("T: time sig   S: tempo   F: shuffle   N: note   P: program   U: tuning   Q: tuplet");
 				} else if (hintCanvas instanceof DrumCanvasConfig || hintCanvas instanceof StringCanvasConfig) {
 					CanvasEditMode hintMode = hintCanvas.getEditMode();
+					String mmod = IS_MAC ? "\u2318\u21e7" : "Ctrl\u21e7";
 					if (hintMode == CanvasEditMode.VELOCITY) {
-						hintLines.add("[VEL]  0-9 A-F: enter velocity (hex)   Alt\u2191\u2193: nudge   n: note   p: pan   o: offset");
+						hintLines.add("[VEL]  0-9 A-F: enter velocity (hex)   Alt\u2191\u2193: nudge   " + mmod + "N: note   " + mmod + "P: pan   " + mmod + "T: offset");
 					} else if (hintMode == CanvasEditMode.PAN) {
-						hintLines.add("[PAN]  0-9 A-F: enter pan (hex)   Alt\u2191\u2193: nudge   n: note   v: vel   o: offset");
+						hintLines.add("[PAN]  0-9 A-F: enter pan (hex)   Alt\u2191\u2193: nudge   " + mmod + "N: note   " + mmod + "V: vel   " + mmod + "T: offset");
 					} else if (hintMode == CanvasEditMode.OFFSET) {
-						hintLines.add("[OFFSET]  Alt\u2191\u2193: nudge timing offset   \u2190\u2192: skip to valued cells   n: note   v: vel   p: pan");
+						hintLines.add("[OFFSET]  Alt\u2191\u2193: nudge timing offset   \u2190\u2192: skip to valued cells   " + mmod + "N: note   " + mmod + "V: vel   " + mmod + "P: pan");
 					} else if (hintCanvas instanceof DrumCanvasConfig) {
 						DrumCanvasConfig dc = (DrumCanvasConfig) hintCanvas;
 						if (hintRelRow < dc.getRowTypes().size()) {
@@ -4430,7 +4459,7 @@ public class TabbyCat {
 							for (PercToken pt : dc.getTokens()) {
 								if (pt.getPosition() == rowType) sb.append(pt.getToken()).append("  ");
 							}
-							sb.append("  v: vel   p: pan   o: offset");
+							sb.append("  " + mmod + "V: vel   " + mmod + "P: pan   " + mmod + "T: offset");
 							hintLines.add(sb.toString().trim());
 						}
 					} else {
@@ -4440,7 +4469,7 @@ public class TabbyCat {
 						for (String key : sc.getAdditionalPitchMap().keySet()) {
 							if (!key.matches("\\d+")) sb.append("   ").append(key);
 						}
-						sb.append("   v: vel   p: pan   o: offset");
+						sb.append("   " + mmod + "V: vel   " + mmod + "P: pan   " + mmod + "T: offset");
 						hintLines.add(sb.toString());
 					}
 				}
